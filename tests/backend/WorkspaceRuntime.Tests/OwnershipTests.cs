@@ -210,6 +210,19 @@ public class OwnershipTests
         Assert.Contains("may not inhabit a session owned by 'yulia'", result.Reason);
     }
 
+    [Fact]
+    public void The_shared_workspace_owner_is_the_root_user_for_both_a_user_and_its_agent()
+    {
+        var store = new InMemoryRuntimeStore();
+
+        // A user maps to itself; its agent maps to the same user; a stranger slug
+        // passes through unchanged (fail-safe, no cross-user shared mount).
+        Assert.Equal("joche", Ownership.RootUserSlug("joche", store));
+        Assert.Equal("joche", Ownership.RootUserSlug("joche-agent", store));
+        Assert.Equal("yulia", Ownership.RootUserSlug("yulia-agent", store));
+        Assert.NotEqual("joche", Ownership.RootUserSlug("yulia-agent", store));
+    }
+
     private static AgentRuntime Runtime(IRuntimeStore store) =>
         new(store, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(store), TestRepository.Surfaces());
 

@@ -117,6 +117,7 @@ function App() {
   const [listing, setListing] = React.useState<HomeListing | null>(null);
   const [filePreview, setFilePreview] = React.useState<HomeFile | null>(null);
   const [filesError, setFilesError] = React.useState<string | null>(null);
+  const [filesMode, setFilesMode] = React.useState<"home" | "shared">("home");
   const [consoleScreen, setConsoleScreen] = React.useState<string>("");
   const [agentGoal, setAgentGoal] = React.useState("");
   const [agentRunning, setAgentRunning] = React.useState(false);
@@ -242,6 +243,7 @@ function App() {
   // agent gets an agent session).
   React.useEffect(() => {
     if (!selectedDesk) return;
+    setFilesMode("home");
     browseHome(selectedDesk, "");
     setNewSessionProfile(selectedDesk === whoami?.slug ? "human-console" : "agent-console");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -331,14 +333,36 @@ function App() {
     }
   }
 
+  // The per-owner shared workspace (~/shared): you and your agents meet here.
+  async function browseShared(path: string) {
+    setFilePreview(null);
+    try {
+      const query = path ? `?path=${encodeURIComponent(path)}` : "";
+      const next = await api<HomeListing>(`/api/shared/list${query}`);
+      setListing(next);
+      setFilesPath(path);
+      setFilesError(null);
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else {
+        setListing(null);
+        setFilesPath(path);
+        setFilesError("No shared workspace yet — open a session (its ~/shared provisions it).");
+      }
+    }
+  }
+
   async function openHomeEntry(entry: HomeEntry) {
     const childPath = filesPath ? `${filesPath}/${entry.name}` : entry.name;
     if (entry.kind === "directory") {
-      await browseHome(filesOwner, childPath);
+      await (filesMode === "shared" ? browseShared(childPath) : browseHome(filesOwner, childPath));
       return;
     }
     try {
-      setFilePreview(await api<HomeFile>(`/api/home/${encodeURIComponent(filesOwner)}/read?path=${encodeURIComponent(childPath)}`));
+      const url = filesMode === "shared"
+        ? `/api/shared/read?path=${encodeURIComponent(childPath)}`
+        : `/api/home/${encodeURIComponent(filesOwner)}/read?path=${encodeURIComponent(childPath)}`;
+      setFilePreview(await api<HomeFile>(url));
     } catch (error) {
       if (error instanceof UnauthorizedError) signOut();
     }
@@ -616,12 +640,36 @@ function App() {
 
             <div className="deskGrid">
               <div className="panel files" data-automation-id="files">
-                <h2>Home — {filesOwner || selectedDesk}</h2>
+                <h2>{filesMode === "shared" ? "Shared workspace" : `Home — ${filesOwner || selectedDesk}`}</h2>
+                <div className="filesToggle">
+                  <button
+                    className={`segBtn${filesMode === "home" ? " active" : ""}`}
+                    data-automation-id="files-home"
+                    onClick={() => { setFilesMode("home"); browseHome(selectedDesk ?? filesOwner, ""); }}
+                  >
+                    Home
+                  </button>
+                  <button
+                    className={`segBtn${filesMode === "shared" ? " active" : ""}`}
+                    data-automation-id="files-shared"
+                    onClick={() => { setFilesMode("shared"); browseShared(""); }}
+                  >
+                    Shared
+                  </button>
+                </div>
+                {filesMode === "shared" && (
+                  <p className="muted small">You and your agents share this. Drop inputs here; the agent leaves results here. (~/shared)</p>
+                )}
                 <div className="crumbs">
                   {homeCrumbs().map((crumb, index) => (
                     <span key={crumb.path}>
                       {index > 0 && <span className="sep">/</span>}
-                      <button className="crumb" onClick={() => browseHome(filesOwner, crumb.path)}>{crumb.label}</button>
+                      <button
+                        className="crumb"
+                        onClick={() => filesMode === "shared" ? browseShared(crumb.path) : browseHome(filesOwner, crumb.path)}
+                      >
+                        {crumb.label}
+                      </button>
                     </span>
                   ))}
                 </div>

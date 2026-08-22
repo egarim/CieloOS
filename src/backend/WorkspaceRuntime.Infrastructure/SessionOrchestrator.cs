@@ -19,6 +19,12 @@ public sealed class SessionBackendOptions
     public string HomeVolumePrefix { get; init; } = "lunos-home-";
     public string HomePath { get; init; } = "/config";
 
+    // The per-owner shared workspace: one volume per owner-user, mounted at
+    // <home>/shared into that user's sessions AND all their agents' sessions.
+    // This is where the agent leaves work for the user and the user leaves
+    // inputs for the agent — distinct from the private home.
+    public string SharedVolumePrefix { get; init; } = "lunos-shared-";
+
     // The console kind: a lightweight ttyd+tmux terminal over the same home,
     // the default agent session. Far smaller than the desktop image, and
     // tmux gives shadow/become attach semantics for free.
@@ -40,9 +46,16 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
 {
     private readonly SessionBackendOptions options;
 
-    public SessionOrchestrator(SessionBackendOptions options)
+    // Maps a session-owner slug to the owner-USER slug whose shared workspace to
+    // mount (a user maps to itself; an agent to its owner). Null disables the
+    // shared mount (e.g. in tests). Injected because the orchestrator has no
+    // identity store of its own.
+    private readonly Func<string, string?>? resolveSharedOwner;
+
+    public SessionOrchestrator(SessionBackendOptions options, Func<string, string?>? resolveSharedOwner = null)
     {
         this.options = options;
+        this.resolveSharedOwner = resolveSharedOwner;
     }
 
     public string SurfaceId => "session";
@@ -95,7 +108,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         // and is the SAME volume whether viewed as a console or a desktop.
         await RunPodmanAsync(new[] { "volume", "create", homeVolume }, cancellationToken);
 
-        var run = await RunPodmanAsync(new[]
+        var runArguments = new List<string>
         {
             "run", "-d",
             "--name", name,
@@ -103,10 +116,26 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             "--label", $"lunos.owner={owner}",
             "--label", $"lunos.profile={profile}",
             "--label", $"lunos.kind={(isConsole ? "console" : "desktop")}",
-            "-v", $"{homeVolume}:{homePath}",
-            "-p", $"127.0.0.1::{containerPort}",
-            image
-        }, cancellationToken);
+            "-v", $"{homeVolume}:{homePath}"
+        };
+
+        // Mount the owner's shared workspace at <home>/shared, so a user and all
+        // their agents meet in one place (nested under the home mount — podman
+        // orders mounts by destination depth).
+        var sharedOwner = resolveSharedOwner?.Invoke(owner);
+        if (!string.IsNullOrEmpty(sharedOwner))
+        {
+            var sharedVolume = options.SharedVolumePrefix + sharedOwner;
+            await RunPodmanAsync(new[] { "volume", "create", sharedVolume }, cancellationToken);
+            runArguments.Add("-v");
+            runArguments.Add($"{sharedVolume}:{homePath}/shared");
+        }
+
+        runArguments.Add("-p");
+        runArguments.Add($"127.0.0.1::{containerPort}");
+        runArguments.Add(image);
+
+        var run = await RunPodmanAsync(runArguments.ToArray(), cancellationToken);
 
         if (run.ExitCode != 0)
         {

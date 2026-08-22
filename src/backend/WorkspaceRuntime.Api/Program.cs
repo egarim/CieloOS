@@ -70,12 +70,14 @@ builder.Services.AddSingleton<ISurfaceRegistry>(_ => new FileSurfaceRegistry(rep
 builder.Services.AddSingleton<IRuntimeEventStream, ChannelRuntimeEventStream>();
 builder.Services.AddSingleton<IPolicyEngine, ManifestPolicyEngine>();
 builder.Services.AddSingleton<SpreadsheetSandboxExecutor>();
-builder.Services.AddSingleton<SessionOrchestrator>(_ => new SessionOrchestrator(new SessionBackendOptions
-{
-    PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman",
-    Image = builder.Configuration["Sessions:Image"] ?? "docker.io/accetto/ubuntu-vnc-xfce-g3:latest",
-    ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901
-}));
+builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator(
+    new SessionBackendOptions
+    {
+        PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman",
+        Image = builder.Configuration["Sessions:Image"] ?? "docker.io/accetto/ubuntu-vnc-xfce-g3:latest",
+        ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901
+    },
+    owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>())));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
@@ -301,6 +303,25 @@ app.MapGet("/api/home/{owner}/read", async (string owner, string path, HttpConte
         : await home.ReadAsync(owner, path, cancellationToken) is { } file
             ? Results.Ok(file)
             : Results.NotFound(new { error = "File not found or not readable." }));
+
+// The caller's shared workspace (lunos-shared-<user>): the collaboration space a
+// user and their agents share at ~/shared. The owner is resolved FROM the caller,
+// so a caller only ever reaches its own shared space — no cross-user access.
+app.MapGet("/api/shared/list", async (string? path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var owner = Ownership.RootUserSlug(Caller(context).Slug, store);
+    return await home.ListSharedAsync(owner, path ?? "", cancellationToken) is { } listing
+        ? Results.Ok(listing)
+        : Results.NotFound(new { error = "No shared workspace yet — open a session to provision it." });
+});
+
+app.MapGet("/api/shared/read", async (string path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var owner = Ownership.RootUserSlug(Caller(context).Slug, store);
+    return await home.ReadSharedAsync(owner, path, cancellationToken) is { } file
+        ? Results.Ok(file)
+        : Results.NotFound(new { error = "File not found or not readable." });
+});
 
 app.MapGet("/api/surfaces/{surfaceId}/manifest", (string surfaceId, ISurfaceRegistry surfaces) =>
     surfaces.Find(surfaceId) is { } manifest ? Results.Ok(manifest) : Results.NotFound());

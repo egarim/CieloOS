@@ -22,9 +22,15 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         this.options = options;
     }
 
-    public async Task<HomeListing?> ListAsync(string owner, string path, CancellationToken cancellationToken)
+    public Task<HomeListing?> ListAsync(string owner, string path, CancellationToken cancellationToken) =>
+        ListInVolumeAsync(options.HomeVolumePrefix + owner, owner, path, cancellationToken);
+
+    public Task<HomeListing?> ListSharedAsync(string owner, string path, CancellationToken cancellationToken) =>
+        ListInVolumeAsync(options.SharedVolumePrefix + owner, owner, path, cancellationToken);
+
+    private async Task<HomeListing?> ListInVolumeAsync(string volume, string owner, string path, CancellationToken cancellationToken)
     {
-        var mount = await MountpointAsync(owner, cancellationToken);
+        var mount = await MountpointAsync(volume, cancellationToken);
         if (mount is null)
         {
             return null;
@@ -73,9 +79,15 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         return new HomeListing(owner, relative, entries);
     }
 
-    public async Task<HomeFile?> ReadAsync(string owner, string path, CancellationToken cancellationToken)
+    public Task<HomeFile?> ReadAsync(string owner, string path, CancellationToken cancellationToken) =>
+        ReadInVolumeAsync(options.HomeVolumePrefix + owner, owner, path, cancellationToken);
+
+    public Task<HomeFile?> ReadSharedAsync(string owner, string path, CancellationToken cancellationToken) =>
+        ReadInVolumeAsync(options.SharedVolumePrefix + owner, owner, path, cancellationToken);
+
+    private async Task<HomeFile?> ReadInVolumeAsync(string volume, string owner, string path, CancellationToken cancellationToken)
     {
-        var mount = await MountpointAsync(owner, cancellationToken);
+        var mount = await MountpointAsync(volume, cancellationToken);
         if (mount is null)
         {
             return null;
@@ -118,9 +130,8 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         return new HomeFile(owner, relative, content, truncated || size > MaxReadBytes, size);
     }
 
-    private async Task<string?> MountpointAsync(string owner, CancellationToken cancellationToken)
+    private async Task<string?> MountpointAsync(string volume, CancellationToken cancellationToken)
     {
-        var volume = options.HomeVolumePrefix + owner;
         var inspect = await RunPodmanAsync(new[] { "volume", "inspect", volume, "--format", "{{.Mountpoint}}" }, cancellationToken);
         if (inspect.ExitCode != 0)
         {

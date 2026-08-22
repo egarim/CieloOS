@@ -583,6 +583,45 @@ input.agentGoal {
   to { transform: rotate(360deg); }
 }
 
+/* Files: Home / Shared segmented toggle */
+
+.filesToggle {
+  display: inline-flex;
+  gap: 0;
+  margin-bottom: 4px;
+}
+
+button.segBtn {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  min-height: 0;
+  padding: 5px 14px;
+  text-transform: uppercase;
+}
+
+button.segBtn:first-child {
+  border-radius: 6px 0 0 6px;
+}
+
+button.segBtn:last-child {
+  border-left: 0;
+  border-radius: 0 6px 6px 0;
+}
+
+button.segBtn:hover {
+  background: var(--paper);
+}
+
+button.segBtn.active {
+  background: var(--accent-soft);
+  border-color: #c7d2fe;
+  color: var(--accent-strong);
+}
+
 /* Files */
 
 .crumbs {

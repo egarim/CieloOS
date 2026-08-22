@@ -14,6 +14,12 @@ public interface IHomeBrowser
 {
     Task<HomeListing?> ListAsync(string owner, string path, CancellationToken cancellationToken);
     Task<HomeFile?> ReadAsync(string owner, string path, CancellationToken cancellationToken);
+
+    // The per-owner shared workspace (lunos-shared-<user>), mounted into the
+    // user's and their agents' sessions at ~/shared — the collaboration space
+    // distinct from the private home.
+    Task<HomeListing?> ListSharedAsync(string owner, string path, CancellationToken cancellationToken);
+    Task<HomeFile?> ReadSharedAsync(string owner, string path, CancellationToken cancellationToken);
 }
 
 public static class HomePath

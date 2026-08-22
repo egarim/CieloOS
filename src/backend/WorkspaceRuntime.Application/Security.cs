@@ -96,4 +96,27 @@ public static class Ownership
 
         return false;
     }
+
+    // The USER a slug belongs to: a user slug maps to itself; an agent slug maps
+    // to its owning user. This picks the per-owner shared workspace so a user and
+    // all their agents share one `lunos-shared-<user>` space.
+    public static string RootUserSlug(string slug, IRuntimeStore store)
+    {
+        if (store.Users.Any(user => string.Equals(user.Slug, slug, StringComparison.Ordinal)))
+        {
+            return slug;
+        }
+
+        var agent = store.Agents.FirstOrDefault(candidate => string.Equals(candidate.Slug, slug, StringComparison.Ordinal));
+        if (agent is not null)
+        {
+            var owner = store.Users.FirstOrDefault(user => user.Id == agent.OwnerUserId);
+            if (owner is not null)
+            {
+                return owner.Slug;
+            }
+        }
+
+        return slug;
+    }
 }
