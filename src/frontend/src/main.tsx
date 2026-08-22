@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Bot, Check, Cpu, KeyRound, ShieldCheck, User, X } from "lucide-react";
+import { Bot, Check, Cpu, KeyRound, Loader2, ShieldCheck, Terminal, User, X } from "lucide-react";
 import "./styles.css";
 
 type Branding = {
@@ -51,6 +51,9 @@ type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: numb
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number };
 type Whoami = { slug: string; display: string; kind: string; homes: string[] };
+type ConsoleView = { sessionId: string; screen: string; available: boolean; detail?: string | null };
+type LoopStep = { step: number; text: string | null; submit: boolean; done: boolean; note?: string | null; decision: string; reason: string };
+type AgentRunResult = { sessionId: string; goal: string; completed: boolean; stopReason: string; steps: LoopStep[] };
 
 type Desk = { slug: string; label: string; isSelf: boolean };
 
@@ -114,6 +117,10 @@ function App() {
   const [listing, setListing] = React.useState<HomeListing | null>(null);
   const [filePreview, setFilePreview] = React.useState<HomeFile | null>(null);
   const [filesError, setFilesError] = React.useState<string | null>(null);
+  const [consoleScreen, setConsoleScreen] = React.useState<string>("");
+  const [agentGoal, setAgentGoal] = React.useState("");
+  const [agentRunning, setAgentRunning] = React.useState(false);
+  const [agentRun, setAgentRun] = React.useState<AgentRunResult | null>(null);
 
   const signOut = React.useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
@@ -133,6 +140,16 @@ function App() {
         return;
       }
       setSessionsAvailable(false);
+    }
+  }, [signOut]);
+
+  // Read a console session's live screen (the agent's terminal), for the watch view.
+  const observeConsole = React.useCallback(async (id: string) => {
+    try {
+      const view = await api<ConsoleView>(`/api/sessions/${encodeURIComponent(id)}/console`);
+      setConsoleScreen(view.available ? view.screen : view.detail ?? "console unavailable");
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
     }
   }, [signOut]);
 
@@ -229,6 +246,20 @@ function App() {
     setNewSessionProfile(selectedDesk === whoami?.slug ? "human-console" : "agent-console");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDesk]);
+
+  // Poll the selected desk's running console screen so the watch view stays live.
+  React.useEffect(() => {
+    if (!token || !selectedDesk) return;
+    const consoleSession = sessions.find(
+      (session) => session.owner === selectedDesk && session.kind === "console" && session.status === "running");
+    if (!consoleSession) {
+      setConsoleScreen("");
+      return;
+    }
+    observeConsole(consoleSession.id);
+    const timer = setInterval(() => observeConsole(consoleSession.id), 2500);
+    return () => clearInterval(timer);
+  }, [token, selectedDesk, sessions, observeConsole]);
 
   async function signIn() {
     const candidate = tokenDraft.trim();
@@ -338,6 +369,30 @@ function App() {
     window.open(`http://${window.location.hostname}:${session.viewportPort}/`, "_blank", "noopener");
   }
 
+  // Hand the agent a goal; it drives its own console through the policy-checked
+  // bus (each keystroke audited) and returns the step transcript.
+  async function runAgent(id: string) {
+    const goal = agentGoal.trim();
+    if (!goal || agentRunning) return;
+    setAgentRunning(true);
+    setAgentRun(null);
+    try {
+      const result = await api<AgentRunResult>(`/api/sessions/${encodeURIComponent(id)}/agent-run`, {
+        method: "POST",
+        body: JSON.stringify({ goal, maxSteps: 8 })
+      });
+      setAgentRun(result);
+      await observeConsole(id);
+      await refresh();
+      await refreshSessions();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setAgentRun({ sessionId: id, goal, completed: false, stopReason: String(error), steps: [] });
+    } finally {
+      setAgentRunning(false);
+    }
+  }
+
   async function resolve(approval: ApprovalView, action: "approve" | "reject") {
     try {
       const result = await api<CommandResult>(`/api/approvals/${approval.id}/${action}`, {
@@ -396,6 +451,7 @@ function App() {
   });
   const desk = desks.find((candidate) => candidate.slug === selectedDesk) ?? null;
   const deskSessions = sessions.filter((session) => session.owner === selectedDesk);
+  const deskConsole = deskSessions.find((session) => session.kind === "console" && session.status === "running") ?? null;
   const deskAudit = auditEvents
     .filter((event) => event.principal === selectedDesk || event.onBehalfOf === selectedDesk)
     .slice(0, 8);
@@ -680,6 +736,47 @@ function App() {
                 )}
               </div>
             </div>
+
+            {deskConsole && (
+              <div className="panel console" data-automation-id="console">
+                <h2><Terminal size={13} /> Console — give the agent a task</h2>
+                <p className="muted small">
+                  The agent drives its own console toward your goal — each keystroke policy-checked and audited. Watch it below.
+                </p>
+                <div className="inline agentTask">
+                  <input
+                    data-automation-id="agent-goal"
+                    className="agentGoal"
+                    value={agentGoal}
+                    placeholder="e.g. search the web for the top 10 posts about El Salvador and save them as an Excel file"
+                    onChange={(event) => setAgentGoal(event.target.value)}
+                    onKeyDown={(event) => event.key === "Enter" && runAgent(deskConsole.id)}
+                  />
+                  <button
+                    data-automation-id="agent-run"
+                    disabled={agentRunning || !agentGoal.trim()}
+                    onClick={() => runAgent(deskConsole.id)}
+                  >
+                    {agentRunning ? <><Loader2 size={16} className="spin" /> Working…</> : <><Bot size={16} /> Run task</>}
+                  </button>
+                </div>
+                <pre className="terminal" data-automation-id="console-screen">{consoleScreen || "(screen empty)"}</pre>
+                {agentRun && (
+                  <div className="agentRun">
+                    <p className={`decision ${agentRun.completed ? "allow" : "deny"}`}>
+                      {agentRun.completed ? "Completed" : "Stopped"}: {agentRun.stopReason}
+                    </p>
+                    {agentRun.steps.map((entry) => (
+                      <div className="agentStep" key={entry.step}>
+                        <span className="tag">{entry.done ? "done" : entry.decision}</span>
+                        <code>{entry.done ? entry.note ?? "done" : entry.text}</code>
+                        {entry.note && !entry.done && <span className="muted small">{entry.note}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="panel audit" data-automation-id="activity">
               <h2>Activity — {selectedDesk}</h2>

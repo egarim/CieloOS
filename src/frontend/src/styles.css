@@ -522,6 +522,67 @@ button.deskItem.selected {
   gap: 14px;
 }
 
+/* Console: give-the-agent-a-task + live screen */
+
+.agentTask {
+  margin-top: 4px;
+}
+
+input.agentGoal {
+  flex: 1;
+  min-width: 260px;
+  width: auto;
+}
+
+.terminal {
+  background: #0b1220;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  color: #d7e0ee;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 14px 0 0;
+  max-height: 340px;
+  overflow: auto;
+  padding: 12px 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agentRun {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.agentStep {
+  align-items: baseline;
+  border-left: 2px solid var(--hairline);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0 4px 10px;
+}
+
+.agentStep code {
+  background: #f1f5f9;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 1px 6px;
+  word-break: break-word;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* Files */
 
 .crumbs {
