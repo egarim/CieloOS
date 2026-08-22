@@ -499,6 +499,80 @@ app.MapPost("/api/tool-requests", async (SubmitToolRequestDto request, HttpConte
     return result;
 });
 
+// OpenAI-compatible surface for a chat UI (Open WebUI) to talk to the ACTING
+// agent: each message runs the console loop (the agent uses its tools + operates
+// the OS), and the reply is what it writes to ~/shared/outbox.md. Auth is the
+// same bearer token — the chat UI is configured with the caller's token, so the
+// loop runs as that owner through their agent.
+var agentJson = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+app.MapGet("/v1/agent/models", () => Results.Ok(new
+{
+    @object = "list",
+    data = new[] { new { id = "lunos-agent", @object = "model", created = 0, owned_by = "lunos" } }
+}));
+
+app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleAgentBrain brain, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var (userId, agentId) = ActingAgent(caller, null, store);
+    var agent = store.GetAgent(agentId);
+    var userMessage = request.Messages?.LastOrDefault(message => message.Role == "user")?.Content ?? "";
+
+    var session = (await sessions.ListAsync(cancellationToken))
+        .FirstOrDefault(s => string.Equals(s.Owner, agent.Slug, StringComparison.Ordinal) && s.Kind == "console" && s.Status == "running");
+
+    string content;
+    if (session is null)
+    {
+        content = "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
+    }
+    else
+    {
+        var goal =
+            $"Your owner sent you this chat message: \"{userMessage}\". Respond helpfully — if it asks you to do " +
+            "something, use your tools (websearch, python3, the files in ~ and ~/shared). When finished, write your " +
+            "reply by overwriting ~/shared/outbox.md, then you are done.";
+        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+
+        var owner = Ownership.RootUserSlug(caller.Slug, store);
+        var outbox = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
+        var reply = outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content)
+            ? outbox.Content.Trim()
+            : run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
+
+        var actions = string.Join("\n", run.Steps
+            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
+            .Select(step => $"› `{step.Text}`"));
+        content = string.IsNullOrEmpty(actions) ? reply : $"{actions}\n\n{reply}";
+    }
+
+    if (request.Stream == true)
+    {
+        context.Response.Headers.ContentType = "text/event-stream";
+        object Chunk(object delta, string? finish) => new
+        {
+            id = "lunos-agent",
+            @object = "chat.completion.chunk",
+            model = "lunos-agent",
+            choices = new[] { new { index = 0, delta, finish_reason = finish } }
+        };
+        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { role = "assistant", content }, null), agentJson)}\n\n", cancellationToken);
+        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { }, "stop"), agentJson)}\n\n", cancellationToken);
+        await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+        await context.Response.Body.FlushAsync(cancellationToken);
+        return Results.Empty;
+    }
+
+    return Results.Ok(new
+    {
+        id = "lunos-agent",
+        @object = "chat.completion",
+        model = "lunos-agent",
+        choices = new[] { new { index = 0, message = new { role = "assistant", content }, finish_reason = "stop" } }
+    });
+});
+
 app.MapPost("/api/inference/chat", async (LocalChatRequest request, ILocalInferenceRouter router, CancellationToken cancellationToken) =>
     await router.ChatAsync(request, cancellationToken));
 
@@ -605,6 +679,15 @@ public sealed record SurfaceCommandRequest(
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
+
+public sealed record AgentChatMessage(
+    [property: System.Text.Json.Serialization.JsonPropertyName("role")] string? Role,
+    [property: System.Text.Json.Serialization.JsonPropertyName("content")] string? Content);
+
+public sealed record AgentChatRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("model")] string? Model,
+    [property: System.Text.Json.Serialization.JsonPropertyName("messages")] List<AgentChatMessage>? Messages,
+    [property: System.Text.Json.Serialization.JsonPropertyName("stream")] bool? Stream);
 
 public sealed record OpenAiCompatChatRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("model")] string? Model,
