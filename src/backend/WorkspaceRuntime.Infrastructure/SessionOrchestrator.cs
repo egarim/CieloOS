@@ -12,6 +12,12 @@ public sealed class SessionBackendOptions
     public int ViewportPort { get; init; } = 6901;
     public string NamePrefix { get; init; } = "lunos-session-";
     public string SessionLabel { get; init; } = "lunos.session=1";
+
+    // The persistent home: one named volume per owner, mounted into every
+    // session at the container's home path. The home is the durable primitive;
+    // the container is a disposable view of it (docs/ai-native-ui.md D3).
+    public string HomeVolumePrefix { get; init; } = "lunos-home-";
+    public string HomePath { get; init; } = "/config";
 }
 
 // The V0.4 session backend: one podman container per desktop session, driven
@@ -62,6 +68,10 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
     {
         var id = $"{owner}-{Guid.NewGuid():N}"[..Math.Min(owner.Length + 9, 40)];
         var name = options.NamePrefix + id;
+        var homeVolume = options.HomeVolumePrefix + owner;
+
+        // The per-owner home volume is created once and outlives every session.
+        await RunPodmanAsync(new[] { "volume", "create", homeVolume }, cancellationToken);
 
         var run = await RunPodmanAsync(new[]
         {
@@ -70,6 +80,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
             "--label", options.SessionLabel,
             "--label", $"lunos.owner={owner}",
             "--label", $"lunos.profile={profile}",
+            "-v", $"{homeVolume}:{options.HomePath}",
             "-p", $"127.0.0.1::{options.ViewportPort}",
             options.Image
         }, cancellationToken);

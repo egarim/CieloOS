@@ -76,6 +76,10 @@ builder.Services.AddSingleton<SessionOrchestrator>(_ => new SessionOrchestrator(
     ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901
 }));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
+{
+    PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman"
+}));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SpreadsheetSandboxExecutor>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExecutorRouter(provider.GetServices<ISurfaceExecutor>()));
@@ -193,6 +197,19 @@ app.MapGet("/api/surfaces", (ISurfaceRegistry surfaces) =>
 
 app.MapGet("/api/sessions", async (ISessionBackend sessions, CancellationToken cancellationToken) =>
     await sessions.ListAsync(cancellationToken));
+
+// A read-only view of a principal's persistent home volume — the direct answer
+// to "I don't see where the agent's work lives." Reads are policed by auth;
+// finer ownership checks land with multi-user identity.
+app.MapGet("/api/home/{owner}/list", async (string owner, string? path, IHomeBrowser home, CancellationToken cancellationToken) =>
+    await home.ListAsync(owner, path ?? "", cancellationToken) is { } listing
+        ? Results.Ok(listing)
+        : Results.NotFound(new { error = $"No home volume exists yet for '{owner}'." }));
+
+app.MapGet("/api/home/{owner}/read", async (string owner, string path, IHomeBrowser home, CancellationToken cancellationToken) =>
+    await home.ReadAsync(owner, path, cancellationToken) is { } file
+        ? Results.Ok(file)
+        : Results.NotFound(new { error = "File not found or not readable." }));
 
 app.MapGet("/api/surfaces/{surfaceId}/manifest", (string surfaceId, ISurfaceRegistry surfaces) =>
     surfaces.Find(surfaceId) is { } manifest ? Results.Ok(manifest) : Results.NotFound());

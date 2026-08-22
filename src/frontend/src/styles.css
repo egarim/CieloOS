@@ -299,6 +299,96 @@ code {
   margin-top: 12px;
 }
 
+/* Files */
+
+.crumbs {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 12px 0 8px;
+}
+
+.crumbs .sep {
+  color: var(--ink-soft);
+  margin: 0 2px;
+}
+
+button.crumb {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  min-height: 0;
+  padding: 0;
+}
+
+button.crumb:hover {
+  background: none;
+  text-decoration: underline;
+}
+
+.fileTree {
+  border: 1px solid var(--hairline);
+  display: grid;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+button.fileRow {
+  align-items: center;
+  background: var(--panel);
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 10px;
+  grid-template-columns: 16px 1fr auto;
+  justify-items: start;
+  min-height: 0;
+  padding: 7px 12px;
+  text-align: left;
+}
+
+button.fileRow:hover {
+  background: var(--paper);
+}
+
+.fileKind {
+  color: var(--accent);
+}
+
+.fileName {
+  font-feature-settings: "tnum";
+}
+
+.fileSize {
+  color: var(--ink-soft);
+  font-size: 12px;
+  justify-self: end;
+}
+
+.filePreview {
+  margin-top: 12px;
+}
+
+.filePreview pre {
+  background: #fff;
+  border: 1px solid var(--hairline);
+  font-size: 12px;
+  margin: 4px 0 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Desktops */
 
 .sessionList {

@@ -48,6 +48,9 @@ type InferenceStatus = {
 };
 type ChatResponse = { providerId: string; model: string; content: string; forwarded: boolean; error?: string };
 type SessionView = { id: string; owner: string; profile: string; status: string; viewportPort: number };
+type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
+type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
+type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number };
 
 const emptyBranding: Branding = {
   productName: "Workspace Runtime",
@@ -106,6 +109,11 @@ function App() {
   const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
   const [newDesktopOwner, setNewDesktopOwner] = React.useState("avery");
   const [newDesktopProfile, setNewDesktopProfile] = React.useState("human-desktop");
+  const [filesOwner, setFilesOwner] = React.useState("joche");
+  const [filesPath, setFilesPath] = React.useState("");
+  const [listing, setListing] = React.useState<HomeListing | null>(null);
+  const [filePreview, setFilePreview] = React.useState<HomeFile | null>(null);
+  const [filesError, setFilesError] = React.useState<string | null>(null);
 
   const signOut = React.useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
@@ -163,6 +171,7 @@ function App() {
     if (!token) return;
     refresh();
     refreshSessions();
+    browseHome(filesOwner, "");
 
     // Server-sent events over fetch so the Authorization header travels along;
     // any runtime event triggers a coarse refresh (state fetches are ETag-cheap).
@@ -249,6 +258,47 @@ function App() {
       if (error instanceof UnauthorizedError) signOut();
       else setLastResult({ decision: "Deny", reason: String(error) });
     }
+  }
+
+  async function browseHome(owner: string, path: string) {
+    setFilePreview(null);
+    try {
+      const query = path ? `?path=${encodeURIComponent(path)}` : "";
+      const next = await api<HomeListing>(`/api/home/${encodeURIComponent(owner)}/list${query}`);
+      setListing(next);
+      setFilesOwner(owner);
+      setFilesPath(path);
+      setFilesError(null);
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else {
+        setListing(null);
+        setFilesError(`No home volume yet for '${owner}'. Create a session for that owner to provision one.`);
+      }
+    }
+  }
+
+  async function openHomeEntry(entry: HomeEntry) {
+    const childPath = filesPath ? `${filesPath}/${entry.name}` : entry.name;
+    if (entry.kind === "directory") {
+      await browseHome(filesOwner, childPath);
+      return;
+    }
+    try {
+      setFilePreview(await api<HomeFile>(`/api/home/${encodeURIComponent(filesOwner)}/read?path=${encodeURIComponent(childPath)}`));
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+    }
+  }
+
+  function homeCrumbs(): { label: string; path: string }[] {
+    const crumbs = [{ label: "~", path: "" }];
+    let acc = "";
+    for (const part of filesPath.split("/").filter(Boolean)) {
+      acc = acc ? `${acc}/${part}` : part;
+      crumbs.push({ label: part, path: acc });
+    }
+    return crumbs;
   }
 
   function watchDesktop(session: SessionView) {
@@ -418,6 +468,60 @@ function App() {
             </>
           ) : (
             <p className="muted">The session surface is not available on this runtime.</p>
+          )}
+        </div>
+
+        <div className="panel files" data-automation-id="files">
+          <h2>Files — {filesOwner}'s home</h2>
+          <p className="muted small">The agent's persistent home. It outlives sessions; this is where its work lives.</p>
+          <div className="inline">
+            <label>
+              owner
+              <input
+                data-automation-id="files-owner"
+                value={filesOwner}
+                onChange={(event) => setFilesOwner(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && browseHome(filesOwner, "")}
+              />
+            </label>
+            <button data-automation-id="files-browse" onClick={() => browseHome(filesOwner, "")}>
+              <ShieldCheck size={16} /> Browse
+            </button>
+          </div>
+          <div className="crumbs">
+            {homeCrumbs().map((crumb, index) => (
+              <span key={crumb.path}>
+                {index > 0 && <span className="sep">/</span>}
+                <button className="crumb" onClick={() => browseHome(filesOwner, crumb.path)}>{crumb.label}</button>
+              </span>
+            ))}
+          </div>
+          {filesError && <p className="muted small">{filesError}</p>}
+          {listing && (
+            <div className="fileTree">
+              {listing.entries.length === 0 ? (
+                <p className="muted">Empty</p>
+              ) : (
+                listing.entries.map((entry) => (
+                  <button
+                    key={entry.name}
+                    className="fileRow"
+                    data-automation-id={`file-${entry.name}`}
+                    onClick={() => openHomeEntry(entry)}
+                  >
+                    <span className="fileKind">{entry.kind === "directory" ? "▸" : "·"}</span>
+                    <span className="fileName">{entry.name}</span>
+                    <span className="fileSize">{entry.kind === "directory" ? "" : `${entry.size} B`}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+          {filePreview && (
+            <div className="filePreview">
+              <p className="muted small">{filePreview.path}{filePreview.truncated ? " (truncated)" : ""}</p>
+              <pre>{filePreview.content}</pre>
+            </div>
           )}
         </div>
 
