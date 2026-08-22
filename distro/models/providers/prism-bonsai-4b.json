@@ -1,0 +1,48 @@
+{
+  "schema": 1,
+  "providerId": "prism-bonsai-4b",
+  "displayName": "PrismML Bonsai 4B",
+  "vendor": "Prism ML, Inc.",
+  "model": {
+    "upstreamId": "prism-ml/Ternary-Bonsai-4B-gguf",
+    "source": "https://huggingface.co/prism-ml/Ternary-Bonsai-4B-gguf",
+    "family": "Bonsai",
+    "baseModel": "Qwen3-4B",
+    "parameters": "4B",
+    "quantization": "GGUF Q2_0 ternary",
+    "approximateSizeGb": 1.07,
+    "license": "Apache-2.0",
+    "artifact": {
+      "fileName": "Ternary-Bonsai-4B-Q2_0.gguf",
+      "url": "https://huggingface.co/prism-ml/Ternary-Bonsai-4B-gguf/resolve/a3eb42bafe873f9686bc97486c43b72ef7d75ec8/Ternary-Bonsai-4B-Q2_0.gguf",
+      "sha256": "4e0bf8b737b0431552f8c2c97695ab7c0cb214c94bcdeb4f5f267e67ddf28b8b"
+    }
+  },
+  "runtime": {
+    "engine": "llama.cpp",
+    "openAiCompatibleEndpoint": "http://127.0.0.1:8080/v1",
+    "executable": "llama-server",
+    "args": ["-m", "/opt/workspace-runtime/models/prism-bonsai-4b/Ternary-Bonsai-4B-Q2_0.gguf", "-c", "4096", "--host", "127.0.0.1", "--port", "8080"],
+    "healthPath": "/health",
+    "readinessTimeoutSeconds": 60,
+    "networkScope": "local-only",
+    "pullPolicy": "if-missing",
+    "source": {
+      "repository": "https://github.com/PrismML-Eng/llama.cpp.git",
+      "revision": "9ca265a57f85f2117942490f421f64a226dd9847"
+    }
+  },
+  "capabilities": {
+    "toolUse": true,
+    "multiStepReasoning": true,
+    "documentSummary": true,
+    "spreadsheetAnalysis": true,
+    "vision": false
+  },
+  "hardware": {
+    "cpuFallback": true,
+    "gpuOptional": true,
+    "minimumMemoryGb": 8,
+    "recommendedMemoryGb": 16
+  }
+}

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WorkspaceRuntime.Domain\WorkspaceRuntime.Domain.csproj" />
+    <ProjectReference Include="..\WorkspaceRuntime.Application\WorkspaceRuntime.Application.csproj" />
+    <ProjectReference Include="..\WorkspaceRuntime.Infrastructure\WorkspaceRuntime.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

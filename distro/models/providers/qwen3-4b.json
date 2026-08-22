@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "providerId": "qwen3-4b",
+  "displayName": "Qwen3 4B",
+  "vendor": "Qwen",
+  "model": {
+    "upstreamId": "qwen3:4b",
+    "source": "https://ollama.com/library/qwen3:4b",
+    "family": "Qwen3",
+    "baseModel": "Qwen3-4B",
+    "parameters": "4B",
+    "quantization": "Q4_K_M",
+    "approximateSizeGb": 2.5,
+    "license": "Apache-2.0"
+  },
+  "runtime": {
+    "engine": "ollama",
+    "openAiCompatibleEndpoint": "http://127.0.0.1:11434/v1",
+    "executable": "ollama",
+    "args": ["serve"],
+    "healthPath": "/api/tags",
+    "readinessTimeoutSeconds": 60,
+    "networkScope": "local-only",
+    "pullPolicy": "if-missing"
+  },
+  "capabilities": {
+    "toolUse": true,
+    "multiStepReasoning": true,
+    "documentSummary": true,
+    "spreadsheetAnalysis": true,
+    "vision": false
+  },
+  "hardware": {
+    "cpuFallback": true,
+    "gpuOptional": true,
+    "minimumMemoryGb": 8,
+    "recommendedMemoryGb": 16
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "toolName": "dotnet.script",
+  "displayName": "C# Script",
+  "executor": "sandboxed-process",
+  "command": {
+    "executable": "dotnet",
+    "argsTemplate": ["run", "--file", "{script}"]
+  },
+  "arguments": {
+    "script": { "type": "path", "required": true, "scope": "workspace" }
+  },
+  "policy": {
+    "defaultDecision": "RequireApproval",
+    "requiresApprovalWhen": ["always"],
+    "denyWhen": ["unsigned-script-outside-workspace"]
+  }
+}

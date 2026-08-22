@@ -1,0 +1,12 @@
+[Unit]
+Description=Agent Runtime Service
+After=agent-policy.service local-inference.service
+Wants=agent-policy.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/workspace-agent status --json
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

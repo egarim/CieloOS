@@ -1,0 +1,99 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using WorkspaceRuntime.Application;
+using WorkspaceRuntime.Domain;
+using WorkspaceRuntime.Infrastructure;
+
+namespace WorkspaceRuntime.Tests;
+
+public sealed class PersistenceTests : IDisposable
+{
+    private readonly string databasePath = Path.Combine(Path.GetTempPath(), $"workspace-runtime-tests-{Guid.NewGuid():N}.db");
+
+    private EfRuntimeStore CreateStore()
+    {
+        var options = new DbContextOptionsBuilder<RuntimeDbContext>()
+            .UseSqlite($"Data Source={databasePath}")
+            .Options;
+        return new EfRuntimeStore(new PooledDbContextFactory<RuntimeDbContext>(options));
+    }
+
+    [Fact]
+    public void Store_seeds_demo_data_once()
+    {
+        var first = CreateStore();
+        var second = CreateStore();
+
+        Assert.Single(second.Users);
+        Assert.Single(second.Workspaces);
+        Assert.Single(second.Agents);
+        Assert.Equal("12", second.Spreadsheet.Cells["A1"]);
+        Assert.Contains(second.AuditEvents, auditEvent => auditEvent.Action == "runtime.seed");
+        Assert.Single(second.AuditEvents, auditEvent => auditEvent.Action == "runtime.seed");
+        _ = first;
+    }
+
+    [Fact]
+    public async Task Executed_operations_survive_a_restart()
+    {
+        var store = CreateStore();
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(store), TestRepository.Surfaces());
+        var user = store.Users[0];
+        var agent = store.Agents[0];
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            user.Id,
+            agent.Id,
+            "spreadsheet",
+            "set-cell",
+            new Dictionary<string, string> { ["address"] = "C1", ["value"] = "42" }), RuntimePrincipals.Agent, CancellationToken.None);
+        Assert.Equal(PolicyDecision.Allow, result.Decision);
+
+        var reopened = CreateStore();
+        Assert.Equal("42", reopened.Spreadsheet.Cells["C1"]);
+        Assert.Equal(1, reopened.SpreadsheetRevision);
+        Assert.Contains(reopened.AuditEvents, auditEvent => auditEvent.Action == "spreadsheet.set-cell" && auditEvent.Outcome == AuditOutcome.Success);
+    }
+
+    [Fact]
+    public async Task Pending_approval_survives_a_restart_and_can_be_resolved()
+    {
+        var store = CreateStore();
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(store), TestRepository.Surfaces());
+        var user = store.Users[0];
+        var agent = store.Agents[0];
+
+        var pending = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            user.Id,
+            agent.Id,
+            "spreadsheet",
+            "clear",
+            new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
+        Assert.Equal(PolicyDecision.RequireApproval, pending.Decision);
+        Assert.NotNull(pending.Approval);
+
+        var reopened = CreateStore();
+        var reopenedRuntime = new AgentRuntime(reopened, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(reopened), TestRepository.Surfaces());
+
+        Assert.Contains(reopened.Approvals, approval =>
+            approval.Id == pending.Approval!.Id
+            && approval.Status == ApprovalStatus.Pending
+            && approval.RequestHash == pending.Approval.RequestHash);
+
+        var approved = await reopenedRuntime.ResolveApprovalAsync(
+            pending.Approval!.Id, approved: true, pending.Approval.RequestHash, RuntimePrincipals.Human, null, CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Allow, approved.Decision);
+        Assert.Empty(reopened.Spreadsheet.Cells);
+        Assert.Contains(reopened.Approvals, approval => approval.Id == pending.Approval.Id && approval.Status == ApprovalStatus.Approved);
+    }
+
+    public void Dispose()
+    {
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        if (File.Exists(databasePath))
+        {
+            File.Delete(databasePath);
+        }
+    }
+}

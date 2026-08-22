@@ -1,0 +1,12 @@
+bin/
+obj/
+node_modules/
+dist/
+.DS_Store
+*.user
+*.suo
+.vite/
+*.tsbuildinfo
+distro/.vm/
+.data/
+*.iso

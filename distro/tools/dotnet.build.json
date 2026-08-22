@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "toolName": "dotnet.build",
+  "displayName": ".NET Build",
+  "executor": "sandboxed-process",
+  "command": {
+    "executable": "dotnet",
+    "argsTemplate": ["build", "{project}", "--configuration", "{configuration}"]
+  },
+  "arguments": {
+    "project": { "type": "path", "required": true, "scope": "workspace" },
+    "configuration": { "type": "string", "required": false, "default": "Debug", "allowed": ["Debug", "Release"] }
+  },
+  "policy": {
+    "defaultDecision": "Allow",
+    "requiresApprovalWhen": ["network", "outside-workspace-write", "secret-access"]
+  }
+}

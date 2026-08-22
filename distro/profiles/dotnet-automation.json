@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "profileId": "dotnet-automation",
+  "displayName": ".NET Automation",
+  "purpose": "First-class .NET, C# scripting, and PowerShell support for human and agent workflows.",
+  "packages": {
+    "source": "ubuntu-archive-and-verified-upstream-archive",
+    "apt": [
+      "dotnet-sdk-10.0"
+    ],
+    "powershell": {
+      "version": "7.6.4",
+      "architecture": "arm64",
+      "source": "https://github.com/PowerShell/PowerShell/releases/download/v7.6.4/powershell-7.6.4-linux-arm64.tar.gz",
+      "sha256": "d4ef2382fa452f2ccbdb48a01adbbce9ed64954872123970c16be6d086d1224b"
+    }
+  },
+  "toolManifests": [
+    "tools/dotnet.build.json",
+    "tools/dotnet.test.json",
+    "tools/dotnet.script.json",
+    "tools/powershell.run.json"
+  ],
+  "sandboxDefaults": {
+    "network": "deny",
+    "workspaceWrite": true,
+    "homeWrite": false,
+    "timeoutSeconds": 120,
+    "memoryMb": 2048
+  }
+}

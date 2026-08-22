@@ -1,0 +1,157 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RUNTIME_ROOT="${WORKSPACE_RUNTIME_ROOT:-/opt/workspace-runtime}"
+CONFIG_PATH="$RUNTIME_ROOT/distro/config/local-inference.json"
+INSTALL_ROOT="$RUNTIME_ROOT/inference"
+
+fail() {
+  printf '{"error":"%s"}\n' "$1" >&2
+  exit "${2:-1}"
+}
+
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    fail "This command requires root. Run: sudo workspace-model install" 2
+  fi
+}
+
+read_profile() {
+  python3 - "$CONFIG_PATH" "$RUNTIME_ROOT" <<'PY'
+import json
+import pathlib
+import sys
+
+config_path = pathlib.Path(sys.argv[1])
+root = pathlib.Path(sys.argv[2])
+config = json.loads(config_path.read_text())
+registry = json.loads((root / "distro/models/registry.json").read_text())
+provider_id = config.get("activeProviderId") or registry["defaultProviderId"]
+entry = next((item for item in registry["providers"] if item["id"] == provider_id), None)
+if entry is None:
+    raise SystemExit(f"Provider is not registered: {provider_id}")
+profile = json.loads((root / "distro" / entry["manifest"]).read_text())
+artifact = profile["model"].get("artifact") or {}
+source = profile["runtime"].get("source") or {}
+values = [
+    profile["providerId"],
+    profile["runtime"]["engine"],
+    profile["runtime"]["executable"],
+    artifact.get("fileName", ""),
+    artifact.get("url", ""),
+    artifact.get("sha256", ""),
+    source.get("repository", ""),
+    source.get("revision", ""),
+]
+for value in values:
+    if "\n" in value or "\0" in value:
+        raise SystemExit("Provider metadata contains an invalid character")
+    print(value)
+PY
+}
+
+load_profile() {
+  profile_values=()
+  while IFS= read -r value; do
+    profile_values[${#profile_values[@]}]="$value"
+  done < <(read_profile)
+  PROVIDER_ID="${profile_values[0]:-}"
+  ENGINE="${profile_values[1]:-}"
+  EXECUTABLE="${profile_values[2]:-}"
+  MODEL_FILE="${profile_values[3]:-}"
+  MODEL_URL="${profile_values[4]:-}"
+  MODEL_SHA256="${profile_values[5]:-}"
+  RUNTIME_REPOSITORY="${profile_values[6]:-}"
+  RUNTIME_REVISION="${profile_values[7]:-}"
+  MODEL_PATH="$RUNTIME_ROOT/models/$PROVIDER_ID/$MODEL_FILE"
+  RUNTIME_BINARY="$INSTALL_ROOT/bin/$EXECUTABLE"
+}
+
+validate_profile() {
+  [[ "$ENGINE" == "llama.cpp" ]] || fail "The selected provider engine is not supported by this installer: $ENGINE" 3
+  [[ "$MODEL_FILE" =~ ^[A-Za-z0-9._-]+$ ]] || fail "Model filename is invalid." 3
+  [[ "$MODEL_URL" == https://* ]] || fail "Model URL must use HTTPS." 3
+  [[ "$MODEL_SHA256" =~ ^[0-9a-f]{64}$ ]] || fail "Model checksum is invalid." 3
+  [[ "$RUNTIME_REPOSITORY" == https://* ]] || fail "Runtime repository must use HTTPS." 3
+  [[ "$RUNTIME_REVISION" =~ ^[0-9a-f]{40}$ ]] || fail "Runtime revision must be a full Git commit." 3
+}
+
+status() {
+  load_profile
+  local runtime_ready=false
+  local model_ready=false
+  [[ -x "$RUNTIME_BINARY" ]] && runtime_ready=true
+  if [[ -f "$MODEL_PATH" ]] && echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum --check --status; then
+    model_ready=true
+  fi
+
+  printf '{"providerId":"%s","engine":"%s","runtimeReady":%s,"modelReady":%s,"ready":%s}\n' \
+    "$PROVIDER_ID" "$ENGINE" "$runtime_ready" "$model_ready" \
+    "$([[ "$runtime_ready" == true && "$model_ready" == true ]] && echo true || echo false)"
+}
+
+install_provider() {
+  require_root
+  load_profile
+  validate_profile
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y build-essential ca-certificates cmake curl git python3
+
+  temporary_directory="$(mktemp -d)"
+  trap 'rm -rf "$temporary_directory"' EXIT
+
+  if [[ ! -x "$RUNTIME_BINARY" ]]; then
+    echo "Building pinned $ENGINE runtime for $PROVIDER_ID..."
+    git clone --filter=blob:none --no-checkout "$RUNTIME_REPOSITORY" "$temporary_directory/runtime"
+    git -C "$temporary_directory/runtime" fetch --depth 1 origin "$RUNTIME_REVISION"
+    git -C "$temporary_directory/runtime" checkout --detach FETCH_HEAD
+    [[ "$(git -C "$temporary_directory/runtime" rev-parse HEAD)" == "$RUNTIME_REVISION" ]] || fail "Runtime revision verification failed."
+
+    cmake -S "$temporary_directory/runtime" -B "$temporary_directory/runtime/build" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_SHARED_LIBS=OFF \
+      -DGGML_NATIVE=ON \
+      -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_EXAMPLES=OFF \
+      -DLLAMA_BUILD_SERVER=ON
+    cmake --build "$temporary_directory/runtime/build" --config Release --target llama-server --parallel "$(nproc)"
+    install -d "$INSTALL_ROOT/bin"
+    install -m 0755 "$temporary_directory/runtime/build/bin/llama-server" "$RUNTIME_BINARY"
+  fi
+
+  install -d "$(dirname "$MODEL_PATH")"
+  if [[ ! -f "$MODEL_PATH" ]] || ! echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum --check --status; then
+    echo "Downloading and verifying $PROVIDER_ID model weights..."
+    rm -f "$MODEL_PATH.part"
+    curl --fail --location --retry 5 --retry-all-errors --continue-at - \
+      --output "$MODEL_PATH.part" "$MODEL_URL"
+    echo "$MODEL_SHA256  $MODEL_PATH.part" | sha256sum --check
+    mv "$MODEL_PATH.part" "$MODEL_PATH"
+  fi
+
+  chown -R root:root "$INSTALL_ROOT" "$RUNTIME_ROOT/models/$PROVIDER_ID"
+  chmod -R a-w "$INSTALL_ROOT" "$RUNTIME_ROOT/models/$PROVIDER_ID"
+  systemctl daemon-reload
+  systemctl enable local-inference.service
+  systemctl restart local-inference.service
+  echo "Local inference provider $PROVIDER_ID is installed."
+}
+
+run_provider() {
+  load_profile
+  validate_profile
+  [[ -x "$RUNTIME_BINARY" ]] || fail "Inference runtime is not installed. Run: sudo workspace-model install" 4
+  [[ -f "$MODEL_PATH" ]] || fail "Model weights are not installed. Run: sudo workspace-model install" 4
+  echo "$MODEL_SHA256  $MODEL_PATH" | sha256sum --check --status || fail "Model checksum verification failed." 4
+  exec "$RUNTIME_BINARY" -m "$MODEL_PATH" -c 4096 --host 127.0.0.1 --port 8080
+}
+
+case "${1:-status}" in
+  status) status ;;
+  install) install_provider ;;
+  run) run_provider ;;
+  *) fail "Unknown command. Use: workspace-model status|install|run" 2 ;;
+esac

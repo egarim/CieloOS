@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "profileId": "personal-agent-workstation",
+  "identity": {
+    "hostname": "workspace-runtime",
+    "adminUser": "workspace",
+    "locale": "en_US.UTF-8",
+    "keyboardLayout": "us",
+    "timeZone": "Etc/UTC"
+  },
+  "storage": {
+    "layout": "use-entire-disk",
+    "encryption": true,
+    "requireExplicitTarget": true
+  },
+  "remoteAccess": {
+    "ssh": false
+  },
+  "automation": {
+    "dotnet": true,
+    "powershell": true
+  },
+  "inference": {
+    "providerId": "prism-bonsai-4b",
+    "installWeights": true,
+    "allowCloudFallback": false
+  },
+  "approval": {
+    "destructiveActionsRequireHuman": true,
+    "agentMaySelfApprove": false
+  }
+}

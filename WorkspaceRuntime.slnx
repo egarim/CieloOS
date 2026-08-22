@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/backend/">
+    <Project Path="src/backend/WorkspaceRuntime.Agent/WorkspaceRuntime.Agent.csproj" />
+    <Project Path="src/backend/WorkspaceRuntime.Api/WorkspaceRuntime.Api.csproj" />
+    <Project Path="src/backend/WorkspaceRuntime.Application/WorkspaceRuntime.Application.csproj" />
+    <Project Path="src/backend/WorkspaceRuntime.Domain/WorkspaceRuntime.Domain.csproj" />
+    <Project Path="src/backend/WorkspaceRuntime.Infrastructure/WorkspaceRuntime.Infrastructure.csproj" />
+    <Project Path="src/backend/WorkspaceRuntime.Setup/WorkspaceRuntime.Setup.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/backend/">
+    <Project Path="tests/backend/WorkspaceRuntime.Tests/WorkspaceRuntime.Tests.csproj" />
+  </Folder>
+</Solution>

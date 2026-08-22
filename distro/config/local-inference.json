@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "activeProviderId": "prism-bonsai-4b",
+  "registryPath": "/opt/workspace-runtime/models/registry.json",
+  "api": {
+    "compatibility": "openai-chat-completions",
+    "internalBaseUrl": "http://127.0.0.1:5148/v1"
+  },
+  "routing": {
+    "allowCloudFallback": false,
+    "requireApprovalForCloudFallback": true,
+    "requireApprovalForModelDownload": true
+  }
+}

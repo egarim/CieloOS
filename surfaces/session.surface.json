@@ -1,0 +1,75 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "session",
+  "displayName": "Desktop Sessions",
+  "executor": "session-orchestrator",
+  "state": {
+    "document": "surface:session",
+    "revisioned": true,
+    "shape": {
+      "type": "object",
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "owner": { "type": "string" },
+              "profile": { "type": "string" },
+              "status": { "type": "string" },
+              "viewportPort": { "type": "integer" }
+            }
+          }
+        }
+      },
+      "required": ["sessions"]
+    }
+  },
+  "commands": {
+    "create": {
+      "displayName": "Create desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "owner": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$" },
+          "profile": { "type": "string", "enum": ["human-desktop", "agent-desktop"] }
+        },
+        "required": ["owner", "profile"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "A principal may create its own isolated desktop session."
+      }
+    },
+    "destroy": {
+      "displayName": "Destroy desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "RequireApproval",
+        "reason": "Destroying a desktop session discards its running state and requires human approval."
+      }
+    }
+  }
+}

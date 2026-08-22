@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "toolId": "workspace-installer",
+  "transport": "cli-json",
+  "executable": "/usr/local/bin/workspace-installer",
+  "commands": [
+    {
+      "name": "defaults",
+      "mutatesSystem": false,
+      "exposedToAgent": true
+    },
+    {
+      "name": "probe",
+      "mutatesSystem": false,
+      "exposedToAgent": true
+    },
+    {
+      "name": "plan",
+      "mutatesSystem": false,
+      "exposedToAgent": true,
+      "arguments": ["--request", "--probe"]
+    },
+    {
+      "name": "validate",
+      "mutatesSystem": false,
+      "exposedToAgent": true,
+      "arguments": ["--plan", "--probe"]
+    },
+    {
+      "name": "approve",
+      "mutatesSystem": false,
+      "exposedToAgent": false,
+      "arguments": ["--plan", "--probe", "--token", "--approved-by"],
+      "requiresHuman": true,
+      "requiresTrustedCaller": true
+    }
+  ],
+  "constraints": {
+    "stdout": "json-only",
+    "freeFormShell": false,
+    "approvalBinding": "exact-plan-id",
+    "planIdIsNotASecret": true,
+    "executorSeparateFromAgent": true
+  }
+}

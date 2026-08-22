@@ -1,0 +1,85 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "spreadsheet",
+  "displayName": "Spreadsheet",
+  "executor": "spreadsheet-sandbox",
+  "state": {
+    "document": "surface:spreadsheet",
+    "revisioned": true,
+    "shape": {
+      "type": "object",
+      "properties": {
+        "cells": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      },
+      "required": ["cells"]
+    }
+  },
+  "commands": {
+    "set-cell": {
+      "displayName": "Set cell",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "address": { "type": "string", "pattern": "^[A-Za-z]+[0-9]+$" },
+          "value": { "type": "string", "maxLength": 256 }
+        },
+        "required": ["address", "value"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "Agent may write individual spreadsheet cells."
+      }
+    },
+    "sum": {
+      "displayName": "Sum cells",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "has-cells",
+      "input": {
+        "type": "object",
+        "properties": {
+          "source": { "type": "string", "pattern": "^[A-Za-z]+[0-9]+(,[A-Za-z]+[0-9]+)*$" },
+          "target": { "type": "string", "pattern": "^[A-Za-z]+[0-9]+$" }
+        },
+        "required": ["source", "target"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "Agent may calculate sums from spreadsheet cells."
+      }
+    },
+    "clear": {
+      "displayName": "Clear sheet",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "has-cells",
+      "input": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "RequireApproval",
+        "reason": "Clearing spreadsheet data requires human approval."
+      }
+    }
+  }
+}

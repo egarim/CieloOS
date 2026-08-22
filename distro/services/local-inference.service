@@ -1,0 +1,22 @@
+[Unit]
+Description=Local Inference Service
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Environment=LOCAL_INFERENCE_CONFIG=/opt/workspace-runtime/distro/config/local-inference.json
+Environment=WORKSPACE_RUNTIME_ROOT=/opt/workspace-runtime
+ExecStart=/usr/local/sbin/workspace-model run
+Restart=on-failure
+RestartSec=3
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadOnlyPaths=/opt/workspace-runtime/inference /opt/workspace-runtime/models /opt/workspace-runtime/distro
+
+[Install]
+WantedBy=multi-user.target

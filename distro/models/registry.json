@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "defaultProviderId": "prism-bonsai-4b",
+  "providers": [
+    {
+      "id": "prism-bonsai-4b",
+      "displayName": "PrismML Bonsai 4B",
+      "provider": "Prism ML, Inc.",
+      "manifest": "models/providers/prism-bonsai-4b.json",
+      "role": "default-small-agentic"
+    },
+    {
+      "id": "qwen3-4b",
+      "displayName": "Qwen3 4B",
+      "provider": "Qwen",
+      "manifest": "models/providers/qwen3-4b.json",
+      "role": "fallback-small-agentic"
+    }
+  ]
+}

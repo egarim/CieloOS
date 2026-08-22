@@ -1,0 +1,47 @@
+#cloud-config
+autoinstall:
+  version: 1
+  identity:
+    hostname: workspace-runtime
+    username: workspace
+    # Development VM only. The password is "workspace" and must change before release.
+    password: "$6$workspacevm$MgFx5P6TTjeMd.BFPrMXz554oesWqpTmbjR/Cv.tRoj63IUZtkx/x96oh901wHx6REfq.KuYec2j6bBuLuRyt0"
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  ssh:
+    install-server: true
+    allow-pw: true
+  storage:
+    layout:
+      name: direct
+  packages:
+    - curl
+    - git
+    - ca-certificates
+    - console-setup
+    - console-setup-linux
+    - dotnet-sdk-10.0
+    - podman
+    - python3
+    - python3-venv
+    - python3-pip
+    - postgresql
+    - nginx
+  late-commands:
+    - mkdir -p /mnt/workspace-runtime
+    - mount LABEL=WR_CONFIG /mnt/workspace-runtime
+    - mkdir -p /target/opt/workspace-runtime/source
+    - cp -a /mnt/workspace-runtime/. /target/opt/workspace-runtime/source/
+    - curtin in-target --target=/target -- bash -lc 'cd /opt/workspace-runtime/source && bash distro/packages/workspace-runtime/install.sh'
+    - curtin in-target --target=/target -- bash -lc 'cd /opt/workspace-runtime/source && bash distro/packages/dotnet-automation/install.sh'
+    - curtin in-target --target=/target -- systemctl enable postgresql
+    - umount /mnt/workspace-runtime
+  user-data:
+    write_files:
+      - path: /etc/motd
+        permissions: "0644"
+        content: |
+          Lun.Os development system
+          Workspace runtime services are managed under /opt/workspace-runtime.
+  shutdown: reboot
