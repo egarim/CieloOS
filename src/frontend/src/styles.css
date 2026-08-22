@@ -299,6 +299,25 @@ code {
   margin-top: 12px;
 }
 
+button.signout {
+  background: none;
+  border: 1px solid rgba(242, 237, 228, 0.35);
+  border-radius: 999px;
+  color: rgba(242, 237, 228, 0.85);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  margin-left: 10px;
+  min-height: 0;
+  padding: 3px 10px;
+  text-transform: uppercase;
+}
+
+button.signout:hover {
+  background: rgba(242, 237, 228, 0.12);
+}
+
 /* Files */
 
 .crumbs {

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WorkspaceRuntime.Infrastructure;
 
@@ -10,9 +11,11 @@ using WorkspaceRuntime.Infrastructure;
 namespace WorkspaceRuntime.Infrastructure.Migrations
 {
     [DbContext(typeof(RuntimeDbContext))]
-    partial class RuntimeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260822052822_IdentitySlugs")]
+    partial class IdentitySlugs
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");

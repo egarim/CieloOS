@@ -73,14 +73,14 @@ public class PolicyAndRuntimeTests
             agent.Id,
             "spreadsheet",
             "set-cell",
-            new Dictionary<string, string> { ["address"] = "C1", ["value"] = "42" }), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string> { ["address"] = "C1", ["value"] = "42" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, result.Decision);
         Assert.Equal("42", store.Spreadsheet.Cells["C1"]);
         Assert.Contains(store.AuditEvents, auditEvent =>
             auditEvent.Action == "spreadsheet.set-cell"
             && auditEvent.Outcome == AuditOutcome.Success
-            && auditEvent.Principal == RuntimePrincipals.Agent
+            && auditEvent.Principal == store.Agents[0].Slug
             && auditEvent.CorrelationId is not null);
     }
 
@@ -97,7 +97,7 @@ public class PolicyAndRuntimeTests
             agent.Id,
             "spreadsheet",
             "clear",
-            new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         Assert.Equal(PolicyDecision.RequireApproval, pending.Decision);
         Assert.NotNull(pending.Approval);
@@ -105,7 +105,7 @@ public class PolicyAndRuntimeTests
         Assert.NotEmpty(store.Spreadsheet.Cells);
 
         var approved = await runtime.ResolveApprovalAsync(
-            pending.Approval.Id, approved: true, pending.Approval.RequestHash, RuntimePrincipals.Human, null, CancellationToken.None);
+            pending.Approval.Id, approved: true, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), null, CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, approved.Decision);
         Assert.Empty(store.Spreadsheet.Cells);
@@ -125,10 +125,10 @@ public class PolicyAndRuntimeTests
             agent.Id,
             "spreadsheet",
             "clear",
-            new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         await Assert.ThrowsAsync<StaleApprovalException>(() =>
-            runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, "not-the-real-hash", RuntimePrincipals.Human, null, CancellationToken.None));
+            runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, "not-the-real-hash", TestRepository.HumanPrincipal(store), null, CancellationToken.None));
 
         Assert.NotEmpty(store.Spreadsheet.Cells);
         Assert.Contains(store.Approvals, approval => approval.Id == pending.Approval!.Id && approval.Status == ApprovalStatus.Pending);
@@ -147,11 +147,11 @@ public class PolicyAndRuntimeTests
             agent.Id,
             "spreadsheet",
             "clear",
-            new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
-        await runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: false, pending.Approval.RequestHash, RuntimePrincipals.Human, null, CancellationToken.None);
+            new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
+        await runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: false, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), null, CancellationToken.None);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            runtime.ResolveApprovalAsync(pending.Approval.Id, approved: true, pending.Approval.RequestHash, RuntimePrincipals.Human, null, CancellationToken.None));
+            runtime.ResolveApprovalAsync(pending.Approval.Id, approved: true, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), null, CancellationToken.None));
     }
 
     [Fact]
@@ -166,18 +166,18 @@ public class PolicyAndRuntimeTests
         // raw bus path (no surface endpoint), so the gate must live in the runtime.
         var badAddress = await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
-            new Dictionary<string, string> { ["address"] = "TOTALS ROW!!", ["value"] = "1" }), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string> { ["address"] = "TOTALS ROW!!", ["value"] = "1" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
         Assert.Equal(PolicyDecision.Deny, badAddress.Decision);
         Assert.DoesNotContain("TOTALS ROW!!", store.Spreadsheet.Cells.Keys);
 
         var tooLong = await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
-            new Dictionary<string, string> { ["address"] = "C1", ["value"] = new string('x', 300) }), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string> { ["address"] = "C1", ["value"] = new string('x', 300) }), TestRepository.AgentPrincipal(store), CancellationToken.None);
         Assert.Equal(PolicyDecision.Deny, tooLong.Decision);
 
         var unknownKey = await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
-            new Dictionary<string, string> { ["address"] = "C1", ["value"] = "1", ["extra"] = "x" }), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string> { ["address"] = "C1", ["value"] = "1", ["extra"] = "x" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
         Assert.Equal(PolicyDecision.Deny, unknownKey.Decision);
 
         Assert.Equal(3, store.AuditEvents.Count(auditEvent => auditEvent.Outcome == AuditOutcome.Blocked));
@@ -193,7 +193,7 @@ public class PolicyAndRuntimeTests
         var agent = store.Agents[0];
 
         var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
-            user.Id, agent.Id, "spreadsheet", "clear", new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
+            user.Id, agent.Id, "spreadsheet", "clear", new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Deny, result.Decision);
         Assert.Contains("not valid", result.Reason);
@@ -208,15 +208,15 @@ public class PolicyAndRuntimeTests
         var agent = store.Agents[0];
 
         var pending = await runtime.SubmitAsync(new SubmitToolRequestDto(
-            user.Id, agent.Id, "spreadsheet", "clear", new Dictionary<string, string>()), RuntimePrincipals.Agent, CancellationToken.None);
+            user.Id, agent.Id, "spreadsheet", "clear", new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
         var observedRevision = store.SpreadsheetRevision;
 
         await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
-            new Dictionary<string, string> { ["address"] = "Z9", ["value"] = "1" }), RuntimePrincipals.Agent, CancellationToken.None);
+            new Dictionary<string, string> { ["address"] = "Z9", ["value"] = "1" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         await Assert.ThrowsAsync<StaleApprovalException>(() =>
-            runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, pending.Approval.RequestHash, RuntimePrincipals.Human, observedRevision, CancellationToken.None));
+            runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), observedRevision, CancellationToken.None));
 
         Assert.Contains(store.Approvals, approval => approval.Id == pending.Approval!.Id && approval.Status == ApprovalStatus.Pending);
     }
@@ -232,7 +232,7 @@ public class PolicyAndRuntimeTests
         var stale = await Assert.ThrowsAsync<RevisionMismatchException>(() =>
             runtime.SubmitAsync(new SubmitToolRequestDto(
                 user.Id, agent.Id, "spreadsheet", "set-cell",
-                new Dictionary<string, string> { ["address"] = "C1", ["value"] = "1" }), RuntimePrincipals.Agent, expectedRevision: 99, CancellationToken.None));
+                new Dictionary<string, string> { ["address"] = "C1", ["value"] = "1" }), TestRepository.AgentPrincipal(store), expectedRevision: 99, CancellationToken.None));
 
         Assert.Equal(store.SpreadsheetRevision, stale.CurrentRevision);
     }

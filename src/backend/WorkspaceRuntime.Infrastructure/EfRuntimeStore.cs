@@ -25,28 +25,27 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return;
         }
 
-        var user = new PlatformUser(Guid.Parse("10000000-0000-0000-0000-000000000001"), "Avery Stone", "avery@example.test");
-        var workspace = new Workspace(Guid.Parse("20000000-0000-0000-0000-000000000001"), user.Id, "Office demo workspace");
-        var agent = new AgentProfile(
-            Guid.Parse("30000000-0000-0000-0000-000000000001"),
-            user.Id,
-            workspace.Id,
-            "Office Agent",
-            "local-inference",
-            new HashSet<string> { "spreadsheet", "session" });
-
-        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email });
-        context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
-        context.Agents.Add(new AgentRow
+        PlatformUser? firstUser = null;
+        AgentProfile? firstAgent = null;
+        foreach (var (user, workspace, agent) in RuntimeSeed.People())
         {
-            Id = agent.Id,
-            OwnerUserId = agent.OwnerUserId,
-            WorkspaceId = agent.WorkspaceId,
-            Name = agent.Name,
-            InferenceProvider = agent.InferenceProvider,
-            GrantedToolsJson = JsonSerializer.Serialize(agent.GrantedTools)
-        });
-        context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "runtime.seed", AuditOutcome.Success, "Seeded demo workspace.")));
+            firstUser ??= user;
+            firstAgent ??= agent;
+            context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug });
+            context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
+            context.Agents.Add(new AgentRow
+            {
+                Id = agent.Id,
+                OwnerUserId = agent.OwnerUserId,
+                WorkspaceId = agent.WorkspaceId,
+                Name = agent.Name,
+                InferenceProvider = agent.InferenceProvider,
+                GrantedToolsJson = JsonSerializer.Serialize(agent.GrantedTools),
+                Slug = agent.Slug
+            });
+        }
+
+        context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, firstUser!.Id, firstAgent!.Id, "runtime.seed", AuditOutcome.Success, "Seeded demo users.")));
         context.Spreadsheets.Add(new SpreadsheetRow
         {
             Id = 1,
@@ -65,7 +64,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         get
         {
             using var context = contextFactory.CreateDbContext();
-            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email)).ToList();
+            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug)).ToList();
         }
     }
 
@@ -128,7 +127,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
     {
         using var context = contextFactory.CreateDbContext();
         var row = context.Users.AsNoTracking().Single(user => user.Id == id);
-        return new PlatformUser(row.Id, row.DisplayName, row.Email);
+        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug);
     }
 
     public AgentProfile GetAgent(Guid id)
@@ -213,13 +212,17 @@ public sealed class EfRuntimeStore : IRuntimeStore
         return new ToolRequest(stored.Id, stored.UserId, stored.AgentId, stored.ToolName, stored.Operation, stored.Arguments, stored.CreatedAt);
     }
 
+    public RuntimePrincipal? FindPrincipalBySlug(string slug) =>
+        PrincipalResolver.BySlug(Users, Agents, slug);
+
     private static AgentProfile ToAgent(AgentRow row) => new(
         row.Id,
         row.OwnerUserId,
         row.WorkspaceId,
         row.Name,
         row.InferenceProvider,
-        JsonSerializer.Deserialize<HashSet<string>>(row.GrantedToolsJson) ?? new HashSet<string>());
+        JsonSerializer.Deserialize<HashSet<string>>(row.GrantedToolsJson) ?? new HashSet<string>(),
+        row.Slug);
 
     private static ApprovalRecord ToApproval(ApprovalRow row) => new(
         row.Id,

@@ -64,7 +64,8 @@ if (string.IsNullOrWhiteSpace(secretsPath))
     secretsPath = Path.Combine(repositoryRoot, ".data", "secrets");
 }
 
-builder.Services.AddSingleton<ITokenAuthenticator>(_ => new FileTokenStore(secretsPath));
+builder.Services.AddSingleton<ITokenAuthenticator>(provider =>
+    new IdentityTokenAuthenticator(secretsPath, provider.GetRequiredService<IRuntimeStore>()));
 builder.Services.AddSingleton<ISurfaceRegistry>(_ => new FileSurfaceRegistry(repositoryRoot));
 builder.Services.AddSingleton<IRuntimeEventStream, ChannelRuntimeEventStream>();
 builder.Services.AddSingleton<IPolicyEngine, ManifestPolicyEngine>();
@@ -97,13 +98,13 @@ builder.Services.AddSingleton<ILocalInferenceRegistry>(_ =>
 
 var app = builder.Build();
 
-// Eager bootstrap: mint tokens, load surface manifests (fail fast on a
-// malformed contract), and run database migrations at startup rather than on
-// the first request — a fresh install must have its token files before anyone
-// can present one.
+// Eager bootstrap: run migrations and seed identities FIRST, then mint their
+// tokens, then load surface manifests (fail fast on a malformed contract) —
+// a fresh install must have its token files before anyone can present one,
+// and the token authenticator resolves slugs against the seeded identities.
+_ = app.Services.GetRequiredService<IRuntimeStore>().Users;
 _ = app.Services.GetRequiredService<ITokenAuthenticator>();
 _ = app.Services.GetRequiredService<ISurfaceRegistry>();
-_ = app.Services.GetRequiredService<IRuntimeStore>().Users;
 
 app.UseCors();
 
@@ -127,10 +128,10 @@ app.Use(async (context, next) =>
             return;
         }
 
-        if (level == AccessLevel.HumanOnly && principal != RuntimePrincipals.Human)
+        if (level == AccessLevel.HumanOnly && principal.Kind != PrincipalKind.Human)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new { error = "This operation requires the human principal." });
+            await context.Response.WriteAsJsonAsync(new { error = "This operation requires a human principal." });
             return;
         }
 
@@ -198,18 +199,34 @@ app.MapGet("/api/surfaces", (ISurfaceRegistry surfaces) =>
 app.MapGet("/api/sessions", async (ISessionBackend sessions, CancellationToken cancellationToken) =>
     await sessions.ListAsync(cancellationToken));
 
-// A read-only view of a principal's persistent home volume — the direct answer
-// to "I don't see where the agent's work lives." Reads are policed by auth;
-// finer ownership checks land with multi-user identity.
-app.MapGet("/api/home/{owner}/list", async (string owner, string? path, IHomeBrowser home, CancellationToken cancellationToken) =>
-    await home.ListAsync(owner, path ?? "", cancellationToken) is { } listing
-        ? Results.Ok(listing)
-        : Results.NotFound(new { error = $"No home volume exists yet for '{owner}'." }));
+app.MapGet("/api/whoami", (HttpContext context) =>
+{
+    var caller = Caller(context);
+    var ownedHomes = caller.Kind == PrincipalKind.Human
+        ? new[] { caller.Slug }.Concat(
+            context.RequestServices.GetRequiredService<IRuntimeStore>().Agents
+                .Where(agent => agent.OwnerUserId == caller.Subject)
+                .Select(agent => agent.Slug))
+        : new[] { caller.Slug };
+    return Results.Ok(new { caller.Slug, caller.Display, kind = caller.Kind.ToString(), homes = ownedHomes });
+});
 
-app.MapGet("/api/home/{owner}/read", async (string owner, string path, IHomeBrowser home, CancellationToken cancellationToken) =>
-    await home.ReadAsync(owner, path, cancellationToken) is { } file
-        ? Results.Ok(file)
-        : Results.NotFound(new { error = "File not found or not readable." }));
+// A read-only view of a principal's persistent home volume — the direct answer
+// to "I don't see where the agent's work lives." A caller may browse only its
+// own home and the homes of agents it owns (design law 2: reads pass policy).
+app.MapGet("/api/home/{owner}/list", async (string owner, string? path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+    !Ownership.CanAccessHome(Caller(context), owner, store)
+        ? Results.Json(new { error = $"'{Caller(context).Slug}' may not browse '{owner}'." }, statusCode: StatusCodes.Status403Forbidden)
+        : await home.ListAsync(owner, path ?? "", cancellationToken) is { } listing
+            ? Results.Ok(listing)
+            : Results.NotFound(new { error = $"No home volume exists yet for '{owner}'." }));
+
+app.MapGet("/api/home/{owner}/read", async (string owner, string path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+    !Ownership.CanAccessHome(Caller(context), owner, store)
+        ? Results.Json(new { error = $"'{Caller(context).Slug}' may not browse '{owner}'." }, statusCode: StatusCodes.Status403Forbidden)
+        : await home.ReadAsync(owner, path, cancellationToken) is { } file
+            ? Results.Ok(file)
+            : Results.NotFound(new { error = "File not found or not readable." }));
 
 app.MapGet("/api/surfaces/{surfaceId}/manifest", (string surfaceId, ISurfaceRegistry surfaces) =>
     surfaces.Find(surfaceId) is { } manifest ? Results.Ok(manifest) : Results.NotFound());
@@ -239,10 +256,10 @@ app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext 
         return Results.NotFound();
     }
 
-    var principal = context.Items["principal"] as string;
+    var principal = Caller(context);
     var commands = manifest.Commands
         .Where(pair => SurfaceConditions.IsValidNow(pair.Value.ValidWhen, store))
-        .Where(pair => principal != RuntimePrincipals.Agent || pair.Value.ExposedToAgent)
+        .Where(pair => principal.Kind != PrincipalKind.Agent || pair.Value.ExposedToAgent)
         .Take(8)
         .Select(pair => new
         {
@@ -282,10 +299,17 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
     // Principal and input gates are enforced inside AgentRuntime.SubmitAsync —
     // the single choke point every entry path shares. This endpoint only
     // shapes the transport: dry runs, idempotency, and revision preconditions.
-    var principal = context.Items["principal"] as string ?? RuntimePrincipals.Human;
+    var principal = Caller(context);
     var arguments = ToArguments(request.Input);
-    var userId = request.UserId ?? store.Users[0].Id;
-    var agentId = request.AgentId ?? store.Agents[0].Id;
+    var (userId, agentId) = ActingAgent(principal, request.AgentId, store);
+
+    // A session over a home the caller cannot reach is denied before it starts.
+    if (surfaceId == "session" && commandName == "create"
+        && arguments.TryGetValue("owner", out var homeOwner)
+        && !Ownership.CanAccessHome(principal, homeOwner, store))
+    {
+        return Results.Json(new { error = $"'{principal.Slug}' may not open a session over '{homeOwner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
 
     if (request.DryRun == true)
     {
@@ -304,7 +328,7 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
     // returns its original result instead of a spurious conflict.
     var cacheKey = string.IsNullOrWhiteSpace(request.IdempotencyKey)
         ? null
-        : $"{principal}:{request.IdempotencyKey}:{RequestHasher.Compute(surfaceId, commandName, arguments)}";
+        : $"{principal.Slug}:{request.IdempotencyKey}:{RequestHasher.Compute(surfaceId, commandName, arguments)}";
     if (cacheKey is not null && idempotencyCache.TryGetValue(cacheKey, out var cached))
     {
         return Results.Ok(cached);
@@ -363,8 +387,12 @@ app.MapGet("/api/events", async (HttpContext context, IRuntimeEventStream events
 
 app.MapPost("/api/tool-requests", async (SubmitToolRequestDto request, HttpContext context, AgentRuntime runtime, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
 {
-    var principal = context.Items["principal"] as string ?? RuntimePrincipals.Human;
-    var result = await runtime.SubmitAsync(request, principal, cancellationToken);
+    // The acting user/agent come from the authenticated identity, not the
+    // request body — a caller cannot submit as someone else.
+    var principal = Caller(context);
+    var (userId, agentId) = ActingAgent(principal, request.AgentId, store);
+    var bound = request with { UserId = userId, AgentId = agentId };
+    var result = await runtime.SubmitAsync(bound, principal, cancellationToken);
     events.Publish(new RuntimeEvent(
         result.Decision == PolicyDecision.RequireApproval ? "approval-pending" : "state-changed",
         store.SpreadsheetRevision,
@@ -400,7 +428,7 @@ static async Task<IResult> ResolveAsync(
     IRuntimeEventStream events,
     CancellationToken cancellationToken)
 {
-    var principal = context.Items["principal"] as string ?? RuntimePrincipals.Human;
+    var principal = Caller(context);
     try
     {
         var result = await runtime.ResolveApprovalAsync(approvalId, approved, request.RequestHash ?? "", principal, request.ObservedRevision, cancellationToken);
@@ -415,6 +443,27 @@ static async Task<IResult> ResolveAsync(
     {
         return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status409Conflict);
     }
+}
+
+static RuntimePrincipal Caller(HttpContext context) =>
+    (RuntimePrincipal)context.Items["principal"]!;
+
+// The user/agent a request acts as, derived from the authenticated identity:
+// an agent acts as itself; a human acts through an agent it owns (the one it
+// named, if valid, else its first).
+static (Guid userId, Guid agentId) ActingAgent(RuntimePrincipal principal, Guid? requestedAgentId, IRuntimeStore store)
+{
+    if (principal.Kind == PrincipalKind.Agent)
+    {
+        var self = store.GetAgent(principal.Subject);
+        return (self.OwnerUserId, self.Id);
+    }
+
+    var owned = store.Agents.Where(agent => agent.OwnerUserId == principal.Subject).ToList();
+    var chosen = requestedAgentId is { } requested && owned.Any(agent => agent.Id == requested)
+        ? requested
+        : owned.Count > 0 ? owned[0].Id : Guid.Empty;
+    return (principal.Subject, chosen);
 }
 
 static Dictionary<string, string> ToArguments(Dictionary<string, JsonElement>? input)

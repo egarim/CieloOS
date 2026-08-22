@@ -21,7 +21,10 @@ public enum AuditOutcome
     PendingApproval
 }
 
-public sealed record PlatformUser(Guid Id, string DisplayName, string Email);
+// Slug is the stable lowercase identity key (^[a-z0-9-]{1,32}$): the home
+// volume name, the audit attribution, and the bearer-token subject all key off
+// it. A human's slug is their own; an agent's slug is its identity.
+public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug);
 
 public sealed record Workspace(Guid Id, Guid OwnerUserId, string Name);
 
@@ -31,7 +34,18 @@ public sealed record AgentProfile(
     Guid WorkspaceId,
     string Name,
     string InferenceProvider,
-    IReadOnlySet<string> GrantedTools);
+    IReadOnlySet<string> GrantedTools,
+    string Slug);
+
+// A resolved caller identity: a human user or an agent, with the slug that
+// keys its home, tokens, and audit attribution.
+public enum PrincipalKind
+{
+    Human,
+    Agent
+}
+
+public sealed record RuntimePrincipal(PrincipalKind Kind, Guid Subject, string Slug, string Display);
 
 public sealed record ToolRequest(
     Guid Id,

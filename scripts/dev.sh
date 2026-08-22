@@ -21,12 +21,13 @@ fi
 dotnet run --project src/backend/WorkspaceRuntime.Api --urls "http://127.0.0.1:${BACKEND_PORT}" &
 BACKEND_PID=$!
 
-HUMAN_TOKEN_FILE=".data/secrets/human.token"
+HUMAN_TOKEN_FILE=".data/secrets/joche.token"
 (
   for _ in $(seq 1 60); do
     if [[ -f "${HUMAN_TOKEN_FILE}" ]]; then
       echo ""
-      echo "==> Human session token (paste into the panel): $(cat "${HUMAN_TOKEN_FILE}")"
+      echo "==> Session token for joche (paste into the panel): $(cat "${HUMAN_TOKEN_FILE}")"
+      echo "    (yulia's token is .data/secrets/yulia.token)"
       echo ""
       exit 0
     fi

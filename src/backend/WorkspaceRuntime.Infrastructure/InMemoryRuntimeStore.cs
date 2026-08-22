@@ -21,20 +21,14 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public InMemoryRuntimeStore()
     {
-        var user = new PlatformUser(Guid.Parse("10000000-0000-0000-0000-000000000001"), "Avery Stone", "avery@example.test");
-        var workspace = new Workspace(Guid.Parse("20000000-0000-0000-0000-000000000001"), user.Id, "Office demo workspace");
-        var agent = new AgentProfile(
-            Guid.Parse("30000000-0000-0000-0000-000000000001"),
-            user.Id,
-            workspace.Id,
-            "Office Agent",
-            "local-inference",
-            new HashSet<string> { "spreadsheet", "session" });
+        foreach (var (user, workspace, agent) in RuntimeSeed.People())
+        {
+            users.Add(user);
+            workspaces.Add(workspace);
+            agents.Add(agent);
+        }
 
-        users.Add(user);
-        workspaces.Add(workspace);
-        agents.Add(agent);
-        auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "runtime.seed", AuditOutcome.Success, "Seeded demo workspace."));
+        auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, users[0].Id, agents[0].Id, "runtime.seed", AuditOutcome.Success, "Seeded demo users."));
     }
 
     public IReadOnlyList<PlatformUser> Users => users;
@@ -74,4 +68,7 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public ToolRequest? FindPendingRequest(Guid approvalId) =>
         pendingRequests.TryGetValue(approvalId, out var request) ? request : null;
+
+    public RuntimePrincipal? FindPrincipalBySlug(string slug) =>
+        PrincipalResolver.BySlug(Users, Agents, slug);
 }

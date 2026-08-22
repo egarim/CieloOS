@@ -1,4 +1,5 @@
 using WorkspaceRuntime.Application;
+using WorkspaceRuntime.Domain;
 using WorkspaceRuntime.Infrastructure;
 
 namespace WorkspaceRuntime.Tests;
@@ -24,54 +25,76 @@ public class AccessPolicyTests
     }
 
     [Fact]
-    public void Tokens_authenticate_to_distinct_principals_and_garbage_is_rejected()
+    public void Tokens_resolve_to_the_right_identity_and_kind()
     {
-        var secretsDir = Path.Combine(Path.GetTempPath(), $"workspace-runtime-secrets-{Guid.NewGuid():N}");
-        try
+        Run(secretsDir =>
         {
-            var store = new FileTokenStore(secretsDir);
-            var humanToken = File.ReadAllText(Path.Combine(secretsDir, "human.token")).Trim();
-            var agentToken = File.ReadAllText(Path.Combine(secretsDir, "agent.token")).Trim();
+            var store = new InMemoryRuntimeStore();
+            var auth = new IdentityTokenAuthenticator(secretsDir, store);
 
-            Assert.Equal(RuntimePrincipals.Human, store.Authenticate(humanToken));
-            Assert.Equal(RuntimePrincipals.Agent, store.Authenticate(agentToken));
-            Assert.Null(store.Authenticate("not-a-token"));
-            Assert.Null(store.Authenticate(""));
-            Assert.NotEqual(humanToken, agentToken);
-        }
-        finally
-        {
-            Directory.Delete(secretsDir, recursive: true);
-        }
+            var joche = auth.Authenticate(File.ReadAllText(Path.Combine(secretsDir, "joche.token")).Trim());
+            Assert.NotNull(joche);
+            Assert.Equal("joche", joche!.Slug);
+            Assert.Equal(PrincipalKind.Human, joche.Kind);
+
+            var jocheAgent = auth.Authenticate(File.ReadAllText(Path.Combine(secretsDir, "joche-agent.token")).Trim());
+            Assert.NotNull(jocheAgent);
+            Assert.Equal("joche-agent", jocheAgent!.Slug);
+            Assert.Equal(PrincipalKind.Agent, jocheAgent.Kind);
+        });
     }
 
     [Fact]
-    public void Empty_token_file_fails_fast_instead_of_authenticating_blank_bearers()
+    public void Garbage_and_forged_tokens_are_rejected()
     {
-        var secretsDir = Path.Combine(Path.GetTempPath(), $"workspace-runtime-secrets-{Guid.NewGuid():N}");
-        try
+        Run(secretsDir =>
         {
-            Directory.CreateDirectory(secretsDir);
-            File.WriteAllText(Path.Combine(secretsDir, "human.token"), "\n");
-            Assert.Throws<InvalidOperationException>(() => new FileTokenStore(secretsDir));
-        }
-        finally
-        {
-            Directory.Delete(secretsDir, recursive: true);
-        }
+            var store = new InMemoryRuntimeStore();
+            var auth = new IdentityTokenAuthenticator(secretsDir, store);
+
+            Assert.Null(auth.Authenticate("not-a-token"));
+            Assert.Null(auth.Authenticate(""));
+            // Right shape, wrong signature.
+            Assert.Null(auth.Authenticate("joche:deadbeef"));
+            // A validly-signed token for a slug that is not a known identity.
+            Assert.Null(auth.Authenticate(auth.Mint("ghost")));
+        });
     }
 
     [Fact]
-    public void Tokens_survive_a_restart_of_the_store()
+    public void A_token_cannot_be_replayed_for_a_different_slug()
+    {
+        Run(secretsDir =>
+        {
+            var store = new InMemoryRuntimeStore();
+            var auth = new IdentityTokenAuthenticator(secretsDir, store);
+
+            // Take joche's signature and paste it after yulia's slug — rejected.
+            var jocheToken = auth.Mint("joche");
+            var signature = jocheToken.Split(':', 2)[1];
+            Assert.Null(auth.Authenticate($"yulia:{signature}"));
+        });
+    }
+
+    [Fact]
+    public void Signing_key_survives_a_restart_so_tokens_stay_valid()
+    {
+        Run(secretsDir =>
+        {
+            _ = new IdentityTokenAuthenticator(secretsDir, new InMemoryRuntimeStore());
+            var token = File.ReadAllText(Path.Combine(secretsDir, "joche.token")).Trim();
+
+            var reopened = new IdentityTokenAuthenticator(secretsDir, new InMemoryRuntimeStore());
+            Assert.Equal("joche", reopened.Authenticate(token)!.Slug);
+        });
+    }
+
+    private static void Run(Action<string> body)
     {
         var secretsDir = Path.Combine(Path.GetTempPath(), $"workspace-runtime-secrets-{Guid.NewGuid():N}");
         try
         {
-            _ = new FileTokenStore(secretsDir);
-            var humanToken = File.ReadAllText(Path.Combine(secretsDir, "human.token")).Trim();
-
-            var reopened = new FileTokenStore(secretsDir);
-            Assert.Equal(RuntimePrincipals.Human, reopened.Authenticate(humanToken));
+            body(secretsDir);
         }
         finally
         {

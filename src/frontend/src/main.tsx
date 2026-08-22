@@ -51,6 +51,7 @@ type SessionView = { id: string; owner: string; profile: string; status: string;
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number };
+type Whoami = { slug: string; display: string; kind: string; homes: string[] };
 
 const emptyBranding: Branding = {
   productName: "Workspace Runtime",
@@ -109,6 +110,7 @@ function App() {
   const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
   const [newDesktopOwner, setNewDesktopOwner] = React.useState("joche");
   const [newDesktopProfile, setNewDesktopProfile] = React.useState("agent-console");
+  const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [filesOwner, setFilesOwner] = React.useState("joche");
   const [filesPath, setFilesPath] = React.useState("");
   const [listing, setListing] = React.useState<HomeListing | null>(null);
@@ -157,7 +159,8 @@ function App() {
       load<AuditEvent[]>("/api/audit-events", setAuditEvents),
       load<SurfaceState>("/api/surfaces/spreadsheet/state", setSurface),
       load<SurfaceCommands>("/api/surfaces/spreadsheet/commands", (value) => setCommands(value.commands)),
-      load<InferenceStatus>("/api/inference/status", setInferenceStatus)
+      load<InferenceStatus>("/api/inference/status", setInferenceStatus),
+      load<Whoami>("/api/whoami", setWhoami)
     ]);
 
     if (unauthorized) signOut();
@@ -209,6 +212,15 @@ function App() {
       controller.abort();
     };
   }, [token, refresh]);
+
+  // Once we know who is signed in, default the file browser to their own home.
+  React.useEffect(() => {
+    if (whoami) {
+      setFilesOwner(whoami.slug);
+      browseHome(whoami.slug, "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whoami?.slug]);
 
   async function signIn() {
     const candidate = tokenDraft.trim();
@@ -346,8 +358,8 @@ function App() {
         <section className="login panel" data-automation-id="login">
           <h2>Session</h2>
           <p className="muted">
-            Paste the human session token. Local development prints it when the runtime starts; inside a VM read{" "}
-            <code>/var/lib/workspace-runtime/secrets/human.token</code>.
+            Paste a session token. Local development prints joche's when the runtime starts; each identity has its own at{" "}
+            <code>.data/secrets/&lt;slug&gt;.token</code> (joche, yulia, …).
           </p>
           <div className="inline">
             <label>
@@ -382,23 +394,24 @@ function App() {
           <h1>{branding.productName}</h1>
           <p>{branding.companyName}</p>
         </div>
-        <span className="status" data-automation-id="revision">
-          <ShieldCheck size={18} /> rev {surface?.revision ?? 0}
+        <span className="status" data-automation-id="whoami">
+          <ShieldCheck size={18} /> {whoami ? `${whoami.display} · ${whoami.kind.toLowerCase()}` : "…"}
+          <button className="signout" data-automation-id="signout" onClick={signOut}>sign out</button>
         </span>
       </header>
 
       <section className="grid">
         <div className="panel">
-          <h2>Runtime</h2>
+          <h2>Signed in</h2>
           <dl>
-            <dt>User</dt>
-            <dd>{selectedUser?.displayName ?? "Loading"}</dd>
-            <dt>Workspace</dt>
-            <dd>{workspaces[0]?.name ?? "Loading"}</dd>
-            <dt>Agent</dt>
-            <dd>{selectedAgent?.name ?? branding.agentName}</dd>
-            <dt>Inference</dt>
-            <dd>{selectedAgent?.inferenceProvider ?? "Loading"}</dd>
+            <dt>Identity</dt>
+            <dd>{whoami?.display ?? "Loading"}</dd>
+            <dt>Slug</dt>
+            <dd>{whoami?.slug ?? "Loading"}</dd>
+            <dt>Homes</dt>
+            <dd>{whoami?.homes.join(", ") ?? "Loading"}</dd>
+            <dt>Revision</dt>
+            <dd>{surface?.revision ?? 0}</dd>
           </dl>
         </div>
 

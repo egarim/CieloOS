@@ -7,6 +7,7 @@ public sealed class UserRow
     public Guid Id { get; set; }
     public string DisplayName { get; set; } = "";
     public string Email { get; set; } = "";
+    public string Slug { get; set; } = "";
 }
 
 public sealed class WorkspaceRow
@@ -24,6 +25,7 @@ public sealed class AgentRow
     public string Name { get; set; } = "";
     public string InferenceProvider { get; set; } = "";
     public string GrantedToolsJson { get; set; } = "[]";
+    public string Slug { get; set; } = "";
 }
 
 public sealed class ApprovalRow

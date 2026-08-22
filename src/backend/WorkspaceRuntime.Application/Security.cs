@@ -1,5 +1,10 @@
+using WorkspaceRuntime.Domain;
+
 namespace WorkspaceRuntime.Application;
 
+// Backwards-compatible slug constants used by tests and by pre-identity call
+// sites. With multi-user identity the audit principal is a real slug (e.g.
+// "joche"); these remain valid slugs for the single-identity paths.
 public static class RuntimePrincipals
 {
     public const string Human = "human";
@@ -42,8 +47,53 @@ public static class AccessPolicy
     }
 }
 
+public static class PrincipalResolver
+{
+    public static RuntimePrincipal? BySlug(IReadOnlyList<PlatformUser> users, IReadOnlyList<AgentProfile> agents, string slug)
+    {
+        var user = users.FirstOrDefault(candidate => string.Equals(candidate.Slug, slug, StringComparison.Ordinal));
+        if (user is not null)
+        {
+            return new RuntimePrincipal(PrincipalKind.Human, user.Id, user.Slug, user.DisplayName);
+        }
+
+        var agent = agents.FirstOrDefault(candidate => string.Equals(candidate.Slug, slug, StringComparison.Ordinal));
+        if (agent is not null)
+        {
+            return new RuntimePrincipal(PrincipalKind.Agent, agent.Id, agent.Slug, agent.Name);
+        }
+
+        return null;
+    }
+}
+
 public interface ITokenAuthenticator
 {
-    // Returns the principal name for a presented bearer token, or null.
-    string? Authenticate(string bearerToken);
+    // Resolves a presented bearer token to a caller identity, or null. The
+    // token cryptographically binds to a slug; the slug is then looked up
+    // among the known users and agents.
+    RuntimePrincipal? Authenticate(string bearerToken);
+}
+
+// Ownership: a human may act as, and inhabit, only the agents it owns; an
+// agent is only ever itself. This is the boundary that makes "joche's agents"
+// distinct from "yulia's agents".
+public static class Ownership
+{
+    public static bool CanAccessHome(RuntimePrincipal principal, string homeSlug, IRuntimeStore store)
+    {
+        if (string.Equals(principal.Slug, homeSlug, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        // A human may reach the homes of agents it owns.
+        if (principal.Kind == PrincipalKind.Human)
+        {
+            var target = store.Agents.FirstOrDefault(agent => string.Equals(agent.Slug, homeSlug, StringComparison.Ordinal));
+            return target is not null && target.OwnerUserId == principal.Subject;
+        }
+
+        return false;
+    }
 }
