@@ -93,6 +93,96 @@ public class OwnershipTests
         Assert.Contains(store.AuditEvents, auditEvent => auditEvent.Action == "spreadsheet.set-cell" && auditEvent.Principal == "joche");
     }
 
+    [Fact]
+    public async Task A_human_may_not_open_a_session_over_another_users_home_on_the_raw_bus()
+    {
+        // Regression: the ownership gate must live at the choke point, so the
+        // raw tool-request path enforces it too — not only the HTTP handler.
+        var store = new InMemoryRuntimeStore();
+        var runtime = Runtime(store);
+        var joche = Human(store, "joche");
+        var jocheAgent = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgent.Id, "session", "create",
+            new Dictionary<string, string> { ["owner"] = "yulia", ["profile"] = "agent-console" }), joche, CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Deny, result.Decision);
+        Assert.Contains("may not open a session over 'yulia'", result.Reason);
+    }
+
+    [Fact]
+    public async Task A_human_may_open_a_session_over_its_own_agents_home()
+    {
+        var store = new InMemoryRuntimeStore();
+        // No real podman here; the executor is irrelevant because the ownership
+        // check runs before execution. Use a no-op session backend.
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new NoopExecutor(), TestRepository.Surfaces());
+        var joche = Human(store, "joche");
+        var jocheAgent = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgent.Id, "session", "create",
+            new Dictionary<string, string> { ["owner"] = "joche-agent", ["profile"] = "agent-console" }), joche, CancellationToken.None);
+
+        Assert.NotEqual(PolicyDecision.Deny, result.Decision);
+    }
+
+    [Fact]
+    public async Task A_user_may_not_destroy_a_session_owned_by_another()
+    {
+        var store = new InMemoryRuntimeStore();
+        var joche = Human(store, "joche");
+        var jocheAgent = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+        var yuliasSession = new DesktopSession("yulia-abc", "yulia", "agent-console", "running", 40000, "console");
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new NoopExecutor(), TestRepository.Surfaces(),
+            new FakeSessions(new[] { yuliasSession }));
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgent.Id, "session", "destroy",
+            new Dictionary<string, string> { ["id"] = "yulia-abc" }), joche, CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Deny, result.Decision);
+        Assert.Contains("may not destroy a session owned by 'yulia'", result.Reason);
+    }
+
+    [Fact]
+    public async Task A_human_may_not_resolve_another_users_approval()
+    {
+        var store = new InMemoryRuntimeStore();
+        var runtime = Runtime(store);
+        var jocheAgent = Agent(store, "joche-agent");
+        var yulia = Human(store, "yulia");
+        var joche = Human(store, "joche");
+        var jocheAgentProfile = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+
+        // joche's agent submits an approval-gated action; the approval is owned by joche.
+        var pending = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgentProfile.Id, "spreadsheet", "clear", new Dictionary<string, string>()), jocheAgent, CancellationToken.None);
+        Assert.Equal(PolicyDecision.RequireApproval, pending.Decision);
+
+        // yulia may not resolve it.
+        await Assert.ThrowsAsync<ApprovalOwnershipException>(() =>
+            runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, pending.Approval.RequestHash, yulia, null, CancellationToken.None));
+
+        // joche (the owner) may.
+        var approved = await runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, pending.Approval.RequestHash, joche, null, CancellationToken.None);
+        Assert.Equal(PolicyDecision.Allow, approved.Decision);
+    }
+
     private static AgentRuntime Runtime(IRuntimeStore store) =>
         new(store, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(store), TestRepository.Surfaces());
+
+    private sealed class NoopExecutor : ISandboxedToolExecutor
+    {
+        public Task<ToolExecutionResult> ExecuteAsync(ToolRequest request, CancellationToken cancellationToken) =>
+            Task.FromResult(new ToolExecutionResult(true, "noop", null));
+    }
+
+    private sealed class FakeSessions : ISessionBackend
+    {
+        private readonly IReadOnlyList<DesktopSession> list;
+        public FakeSessions(IReadOnlyList<DesktopSession> list) => this.list = list;
+        public Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken) => Task.FromResult(list);
+    }
 }

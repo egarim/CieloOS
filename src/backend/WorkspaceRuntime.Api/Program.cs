@@ -435,6 +435,10 @@ static async Task<IResult> ResolveAsync(
         events.Publish(new RuntimeEvent("approval-resolved", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
         return Results.Ok(result);
     }
+    catch (ApprovalOwnershipException exception)
+    {
+        return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status403Forbidden);
+    }
     catch (StaleApprovalException exception)
     {
         return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status409Conflict);

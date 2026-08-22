@@ -57,17 +57,19 @@ public sealed class AgentRuntime
     private readonly IPolicyEngine policyEngine;
     private readonly ISandboxedToolExecutor executor;
     private readonly ISurfaceRegistry surfaces;
+    private readonly ISessionBackend? sessions;
 
     // Serializes every mutating operation in this single-process runtime, so
     // revision checks, approval resolution, and execution are atomic together.
     private readonly SemaphoreSlim mutationGate = new(1, 1);
 
-    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces)
+    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces, ISessionBackend? sessions = null)
     {
         this.store = store;
         this.policyEngine = policyEngine;
         this.executor = executor;
         this.surfaces = surfaces;
+        this.sessions = sessions;
     }
 
     public Task<ToolRequestResultDto> SubmitAsync(SubmitToolRequestDto dto, RuntimePrincipal principal, CancellationToken cancellationToken) =>
@@ -115,6 +117,31 @@ public sealed class AgentRuntime
             if (!SurfaceConditions.IsValidNow(command.ValidWhen, store))
             {
                 return Denied(request, user.Id, agent.Id, actor, $"Command '{dto.Operation}' is not valid in the current surface state.");
+            }
+        }
+
+        // Home/session ownership is enforced here, at the shared choke point, so
+        // every entry path (surface command route, raw tool-request, any future
+        // adapter) is covered — never only in one HTTP handler.
+        if (dto.ToolName == "session")
+        {
+            if (dto.Operation == "create"
+                && dto.Arguments.TryGetValue("owner", out var homeOwner)
+                && !Ownership.CanAccessHome(principal, homeOwner, store))
+            {
+                return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not open a session over '{homeOwner}'.");
+            }
+
+            if (dto.Operation == "destroy"
+                && dto.Arguments.TryGetValue("id", out var sessionId)
+                && sessions is not null)
+            {
+                var target = (await sessions.ListAsync(cancellationToken))
+                    .FirstOrDefault(session => string.Equals(session.Id, sessionId, StringComparison.Ordinal));
+                if (target is not null && !Ownership.CanAccessHome(principal, target.Owner, store))
+                {
+                    return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not destroy a session owned by '{target.Owner}'.");
+                }
             }
         }
 
@@ -169,6 +196,15 @@ public sealed class AgentRuntime
         try
         {
             var approval = store.GetApproval(approvalId);
+
+            // Only the human who owns the request may resolve it. approval.UserId
+            // is the owning human (set from the acting identity at submit time),
+            // so one user cannot approve another user's agent's pending action.
+            if (principal.Kind != PrincipalKind.Human || principal.Subject != approval.UserId)
+            {
+                throw new ApprovalOwnershipException("This approval belongs to another user.");
+            }
+
             if (approval.Status != ApprovalStatus.Pending)
             {
                 throw new InvalidOperationException("The approval has already been resolved.");
@@ -225,6 +261,13 @@ public sealed class AgentRuntime
 public sealed class StaleApprovalException : InvalidOperationException
 {
     public StaleApprovalException(string message) : base(message)
+    {
+    }
+}
+
+public sealed class ApprovalOwnershipException : InvalidOperationException
+{
+    public ApprovalOwnershipException(string message) : base(message)
     {
     }
 }
