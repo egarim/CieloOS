@@ -1,36 +1,51 @@
-# Lun.Os V0.1
+# Lun.Os
 
-Lun.Os is the current product brand for a rename-safe workspace runtime prototype. The stable technical implementation uses neutral `WorkspaceRuntime` identifiers so the commercial name can change later without invasive refactoring.
+Lun.Os is the product brand for a rename-safe workspace runtime prototype. The
+implementation uses neutral `WorkspaceRuntime` identifiers so the commercial name
+can change later without invasive refactoring; branding is loaded from
+`config/branding.json`.
 
-Lun.Os is an operating system built to be operated by AI — not by making its UI automatable, but by making automation unnecessary: it is designed so that humans and agents emit the same typed, policy-checked commands onto one bus, with the visible UI as a projection of that contract. Software joins Lun.Os by speaking the contract (tools and surfaces), not as opaque GUI applications. See `docs/ai-native-ui.md` for the design laws, decisions, and roadmap.
+Lun.Os is an **operating system built to be operated by AI** — not by making a
+GUI automatable, but by making automation unnecessary: humans and agents emit the
+**same typed, policy-checked commands onto one bus**, and the visible UI is a
+projection of that contract. Software joins Lun.Os by speaking the contract
+(tools and surfaces), not as opaque GUI apps. Every action — a human click, an
+agent's API call, a keystroke into a console — passes one policy engine
+(`Allow` / `Deny` / `RequireApproval`) and lands on one audit trail.
 
-## What is included
+Thesis: **typed where possible, pixels where necessary, policy everywhere.** See
+[`docs/ai-native-ui.md`](docs/ai-native-ui.md) for the design laws, decisions,
+and roadmap.
 
-- ASP.NET Core backend API
-- React + TypeScript + Vite frontend
-- Ubuntu-based distro profile under `distro/`
-- replaceable local-model provider profiles under `distro/models/providers/`
-- .NET/PowerShell automation profile under `distro/profiles/`
-- .NET 10 SDK and checksum-pinned PowerShell 7.6.4 ARM64 setup payload
-- Rename-safe branding loaded from `config/branding.json`
-- Multi-user-aware demo model
-- Agent runtime with a pluggable inference provider interface
-- Interactive `workspace-agent` CLI for provider-neutral local chat
-- Verified `workspace-model` installer for the selected local provider
-- Policy decisions: `Allow`, `Deny`, `RequireApproval`
-- Structured spreadsheet tool requests
-- Sandboxed executor abstraction
-- Approval flow
-- Audit log
-- SQLite persistence by default, PostgreSQL via configuration (see `docs/local-dev.md`)
-- Human/agent principal split with file-backed bearer tokens; approvals are human-only
-- Surface contracts (`surfaces/*.surface.json`, schema 2): revisioned state, typed commands, dry-run previews, progressive disclosure
-- Hash-bound approvals with effect-diff preview cards
-- `workspace-agent observe` / `do` verbs driving the same command bus as the panel
-- Constrained-decoding pass-through (`response_format`) to the local llama.cpp provider
-- Deterministic agent-guided installer CLI
-- Non-persistent VM trial mode
-- Backend and frontend tests
+## What works today
+
+- **Identity & ownership.** Real distinct identities (joche, yulia), each
+  **owning** an agent. Per-identity file-backed bearer tokens; the acting
+  user/agent is derived from the token, not the request body. An agent may only
+  act as itself; a human only through agents it owns; approvals are human-only.
+- **Surfaces** (schema-2 manifests under `surfaces/`): `spreadsheet`, `session`,
+  and `console`. `ManifestPolicyEngine` is the single policy source; commands
+  carry `RequireApproval` where they mutate; approvals are **hash-bound** with
+  dry-run **effect-diff previews**. Revisioned state + ETag + SSE (`/api/events`).
+- **Sessions.** One rootless **podman** container per session over a **per-owner
+  persistent home volume** (the home is the primitive; a session is a view of
+  it). Two kinds: a **console** (ttyd + tmux) and a **desktop** (webtop XFCE).
+  **Inhabiting** — an owner can *shadow* or *become* an owned agent's session,
+  recorded with **dual-actor** audit (`joche → joche-agent`).
+- **The agent-desk panel.** A left rail of your desks (you + the agents you own),
+  each anchored on its home: files, sessions, activity, and pending approvals.
+  A **"give the agent a task"** console with a live screen view.
+- **Agent-driven console loop.** An agent operates its **own** console —
+  observe the screen (`tmux capture-pane`), decide, type (`tmux send-keys`) —
+  where every keystroke is a policy-checked, audited `console.type`. The brain is
+  **pluggable** (`IConsoleAgentBrain`): a cloud model (DeepSeek, OpenAI-compatible)
+  today, local models planned. The console sandbox has real tools (`curl`, `jq`,
+  `w3m`, `python3` + `openpyxl`) and a `websearch` command backed by a
+  self-hosted **SearXNG** service, so it does real web work (e.g. *"search the
+  top 10 posts about El Salvador and make an Excel file"*) with real data.
+- **Persistence & audit.** SQLite by default, PostgreSQL via configuration (see
+  [`docs/local-dev.md`](docs/local-dev.md)); a full audit log with dual-actor
+  attribution.
 
 ## Run locally
 
@@ -40,79 +55,31 @@ From the repository root:
 ./scripts/dev.sh
 ```
 
-Then open:
-
 - Backend API: http://127.0.0.1:5148/api/branding
-- Frontend: http://127.0.0.1:5173
+- Frontend panel: http://127.0.0.1:5173
 
-Run verification:
+`dev.sh` prints joche's session token; each identity has its own at
+`.data/secrets/<slug>.token`. Run the tests with `./scripts/test.sh`.
 
-```bash
-./scripts/test.sh
-```
+## Where it's going
 
-## Run the installer on Apple Silicon
+- **Hands and eyes** ([`docs/hands-and-eyes.md`](docs/hands-and-eyes.md)) —
+  step 1 (console tools + private search) ships today; step 2 is a **local-only
+  desktop-control agent** (AT-SPI-first perception + a vision-model fallback,
+  perception→text→decision, a `/dev/uinput` injection daemon, Ollama models) so
+  the agent uses a real desktop like a person.
+- **Live image** ([`docs/live-image.md`](docs/live-image.md)) — a bootable,
+  multi-arch (x86-64 / Raspberry Pi / Apple-Silicon-in-UTM) Lun.Os to run on real
+  hardware.
+- The production session backend moves from podman to Incus system containers;
+  the command shape and policy path are unchanged (only the executor moves).
 
-The V0.1 VM workflow uses QEMU with Apple's hardware acceleration. It opens a normal ARM64 VM window so the operating-system setup is visible.
+## Distro (early)
 
-The VM opens full-screen with zoom-to-fit enabled. Leave full-screen from QEMU's View menu to use a window; resizing the window scales the guest display. The Linux console uses a larger font for readability.
-
-Prepare the installer, VM disk, autoinstall answers, and runtime payload:
-
-```bash
-./distro/scripts/vm-prepare.sh
-```
-
-Open the installer:
-
-```bash
-./distro/scripts/vm-run.sh --install
-```
-
-After setup completes and QEMU closes, boot from the installed disk:
-
-```bash
-./distro/scripts/vm-run.sh --installed
-```
-
-Try the prepared system without keeping any changes:
-
-```bash
-./distro/scripts/vm-run.sh --try
-```
-
-Try mode uses a temporary QEMU snapshot. The reference disk remains unchanged when the VM shuts down.
-
-The development account and password are both `workspace`. SSH is available on host port `2222`, and the runtime API is forwarded to host port `5148`. This password is only for the disposable development image and must be replaced before release.
-
-Generated VM media and disks live under `distro/.vm/` and are intentionally ignored by Git. The installer media includes the verified PowerShell archive, so PowerShell setup does not depend on GitHub during first boot.
-
-## Run the local agent
-
-Inside an installed VM, check provider readiness:
-
-```bash
-workspace-agent status
-```
-
-On a fresh Core installation, install the selected provider runtime and model weights once:
-
-```bash
-sudo workspace-model install
-```
-
-Then start an interactive session:
-
-```bash
-workspace-agent
-```
-
-One-shot prompts are also supported with `workspace-agent ask "your question"`. The agent talks only to the stable local runtime API; changing provider profiles does not change the user command.
-
-## Distro direction
-
-The actual Linux distribution work starts in `distro/`. V0.1 uses an Ubuntu autoinstall profile and neutral system services such as `agent-runtime.service`, `agent-policy.service`, `agent-executor.service`, and `local-inference.service`.
-
-Agent-guided setup uses the neutral `workspace-installer` CLI. The agent may probe hardware, apply conservative defaults, create a hashed plan, and validate it. Approval is a separate operation reserved for the trusted onboarding UI or authenticated human console. The agent never receives a free-form installer shell. See `docs/agent-guided-installation.md`.
-
-Bonsai is the default local model profile. The current Core installer does not bundle its weights; `sudo workspace-model install` builds the checksum-pinned Prism runtime and downloads the checksum-pinned 1.07 GB model. The development VM has been verified with a real local Bonsai response. An AI-ready image will prebuild the runtime and bundle the weights for first-boot use.
+The Linux distribution work lives under `distro/` (an Ubuntu profile, session
+image `distro/images/console/`, the SearXNG service `distro/services/searxng/`,
+and neutral system services). Agent-guided setup uses the `workspace-installer`
+CLI; the agent never receives a free-form installer shell — approval is a
+separate operation reserved for the trusted onboarding surface (see
+[`docs/agent-guided-installation.md`](docs/agent-guided-installation.md)). This
+layer is early and still aspirational relative to the runtime above.
