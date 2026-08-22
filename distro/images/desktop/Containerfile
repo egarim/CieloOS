@@ -1,0 +1,18 @@
+# The Lun.Os desktop session image: the webtop XFCE desktop (Selkies on :3000)
+# plus ONLYOFFICE Desktop Editors, which open and edit .xlsx / .pptx / .docx with
+# high Microsoft-format fidelity — so a user (or an inhabiting human) can open the
+# spreadsheets and documents the agent produces.
+FROM lscr.io/linuxserver/webtop:ubuntu-xfce
+
+# ONLYOFFICE ships a per-arch .deb. arm64 by default (our dev VM); for an x86
+# build pass --build-arg ONLYOFFICE_DEB=<...onlyoffice-desktopeditors_amd64.deb>.
+ARG ONLYOFFICE_DEB=https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_arm64.deb
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Check-Date/Valid-Until are relaxed because trial VMs can have a skewed clock.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL -o /tmp/onlyoffice.deb "$ONLYOFFICE_DEB" \
+    && (dpkg -i /tmp/onlyoffice.deb || apt-get install -y -f --no-install-recommends) \
+    && rm -f /tmp/onlyoffice.deb \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
