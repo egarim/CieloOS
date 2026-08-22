@@ -6,6 +6,12 @@
       "runtimeExecutable": "./scripts/dev.sh",
       "runtimeArgs": [],
       "port": 5173
+    },
+    {
+      "name": "lunos-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "src/frontend", "run", "dev"],
+      "port": 5173
     }
   ]
 }
