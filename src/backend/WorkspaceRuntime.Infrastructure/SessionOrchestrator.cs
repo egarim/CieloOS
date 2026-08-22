@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
@@ -140,6 +141,21 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         if (run.ExitCode != 0)
         {
             return new ToolExecutionResult(false, $"Failed to start {profile} session: {run.Stderr.Trim()}", null);
+        }
+
+        if (!isConsole)
+        {
+            // Give the desktop a "Message Agent" shortcut (menu + desktop icon)
+            // that drops a note in ~/shared/inbox.md. Best-effort: never fail the
+            // session over the launcher.
+            try
+            {
+                await ProvisionMessageLauncherAsync(name, cancellationToken);
+            }
+            catch
+            {
+                // ignored
+            }
         }
 
         var port = await ReadViewportPortAsync(name, containerPort, cancellationToken);
@@ -367,6 +383,50 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         return (process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    // A tiny terminal prompt that appends the typed message to ~/shared/inbox.md;
+    // the runtime's inbox watcher picks it up and the agent replies in outbox.md.
+    private const string MessageLauncherScript = """
+#!/bin/bash
+mkdir -p "$HOME/shared" 2>/dev/null
+echo "Message your agent — it will reply in ~/shared/outbox.md"
+read -rp "> " MSG
+if [ -n "$MSG" ]; then
+  printf '%s\t%s\n' "$(date -Iseconds)" "$MSG" >> "$HOME/shared/inbox.md"
+  echo
+  echo "Sent. Watch ~/shared/outbox.md for the reply."
+else
+  echo "Nothing sent."
+fi
+sleep 3
+""";
+
+    private const string MessageLauncherDesktop = """
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Message Agent
+Comment=Send a message to your agent
+Exec=xfce4-terminal --title=Message-Agent --geometry=78x12 -x bash /config/.local/bin/lunos-message
+Icon=mail-message-new
+Terminal=false
+Categories=Utility;
+""";
+
+    // Writes the launcher into the desktop's home (base64 to sidestep all shell
+    // quoting) as the container user, so it shows in the Applications menu and on
+    // the Desktop.
+    private async Task ProvisionMessageLauncherAsync(string name, CancellationToken cancellationToken)
+    {
+        var script = Convert.ToBase64String(Encoding.UTF8.GetBytes(MessageLauncherScript.ReplaceLineEndings("\n")));
+        var launcher = Convert.ToBase64String(Encoding.UTF8.GetBytes(MessageLauncherDesktop.ReplaceLineEndings("\n")));
+        var command =
+            "mkdir -p \"$HOME/.local/bin\" \"$HOME/.local/share/applications\" \"$HOME/Desktop\" \"$HOME/shared\"; " +
+            $"echo {script} | base64 -d > \"$HOME/.local/bin/lunos-message\"; chmod +x \"$HOME/.local/bin/lunos-message\"; " +
+            $"echo {launcher} | base64 -d > \"$HOME/.local/share/applications/lunos-message.desktop\"; " +
+            $"echo {launcher} | base64 -d > \"$HOME/Desktop/Message-Agent.desktop\"; chmod +x \"$HOME/Desktop/Message-Agent.desktop\"";
+        await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c", command }, cancellationToken);
     }
 
     private static string Required(ToolRequest request, string key) =>

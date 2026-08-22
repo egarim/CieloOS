@@ -114,6 +114,10 @@ else
 {
     builder.Services.AddSingleton<IConsoleAgentBrain, RecipeConsoleBrain>();
 }
+
+// Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
+// launcher) and dispatches new messages to their agent, reply in outbox.md.
+builder.Services.AddHostedService<WorkspaceRuntime.Api.SharedInboxWatcher>();
 builder.Services.AddHttpClient<ILocalInferenceRouter, LocalInferenceRouter>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
