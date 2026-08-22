@@ -44,3 +44,20 @@ public interface ISessionBackend
 {
     Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken);
 }
+
+// What an agent (or a watching human) sees on a console session's screen, and
+// the result of acting on it. Screen is the current terminal contents.
+public sealed record ConsoleView(string SessionId, string Screen, bool Available, string? Detail = null);
+
+public sealed record ConsoleActionResult(bool Ok, string Screen, string Detail);
+
+// The agent's eyes and hands on its own console session: observe the terminal,
+// and type into it. Backed by tmux capture-pane / send-keys over the session
+// container, so a human inhabiting the same tmux sees the agent act live. Every
+// state-changing use rides the policy-checked bus (surface "console"); observe
+// is a gated read, like the home browser.
+public interface IConsoleBackend
+{
+    Task<ConsoleView> CaptureAsync(string sessionId, CancellationToken cancellationToken);
+    Task<ConsoleActionResult> TypeAsync(string sessionId, string text, bool submit, CancellationToken cancellationToken);
+}

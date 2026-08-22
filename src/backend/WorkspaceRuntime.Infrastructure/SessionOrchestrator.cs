@@ -25,13 +25,18 @@ public sealed class SessionBackendOptions
     public string ConsoleImage { get; init; } = "localhost/lunos-console:latest";
     public int ConsolePort { get; init; } = 7681;
     public string ConsoleHomePath { get; init; } = "/root";
+
+    // The persistent tmux session inside a console container. The image starts
+    // it detached at boot and ttyd attaches to the same name, so the agent
+    // (via podman exec) and any human (via ttyd) share one live screen.
+    public string ConsoleTmuxSession { get; init; } = "main";
 }
 
 // The V0.4 session backend: one podman container per desktop session, driven
 // through the same policy-checked bus as every other command. The production
 // target (docs/ai-native-ui.md D3) swaps podman for Incus system containers;
 // the command shape and policy path are identical, so only this executor moves.
-public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
+public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend
 {
     private readonly SessionBackendOptions options;
 
@@ -182,6 +187,66 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         }
 
         return sessions;
+    }
+
+    // Observe: read the console's current screen. tmux capture-pane returns the
+    // visible pane text — exactly what a human at ttyd would see.
+    public async Task<ConsoleView> CaptureAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == sessionId);
+        if (session is null)
+        {
+            return new ConsoleView(sessionId, "", false, "Session not found.");
+        }
+        if (!string.Equals(session.Kind, "console", StringComparison.Ordinal))
+        {
+            return new ConsoleView(sessionId, "", false, "Only console sessions expose a readable screen.");
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var capture = await RunPodmanAsync(new[] { "exec", name, "tmux", "capture-pane", "-p", "-t", options.ConsoleTmuxSession }, cancellationToken);
+        return capture.ExitCode == 0
+            ? new ConsoleView(sessionId, capture.Stdout.TrimEnd('\n'), true, null)
+            : new ConsoleView(sessionId, "", false, $"Could not read console: {capture.Stderr.Trim()}");
+    }
+
+    // Act: type into the console. `-l` sends the text literally (shell
+    // metacharacters are typed, not read by tmux as key names); the text crosses
+    // to podman as a single argv entry with no host shell, so there is no
+    // host-side injection. Blast radius is the agent's own container + home.
+    public async Task<ConsoleActionResult> TypeAsync(string sessionId, string text, bool submit, CancellationToken cancellationToken)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == sessionId);
+        if (session is null)
+        {
+            return new ConsoleActionResult(false, "", "Session not found.");
+        }
+        if (!string.Equals(session.Kind, "console", StringComparison.Ordinal))
+        {
+            return new ConsoleActionResult(false, "", "Only console sessions accept input.");
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var typed = await RunPodmanAsync(new[] { "exec", name, "tmux", "send-keys", "-t", options.ConsoleTmuxSession, "-l", text }, cancellationToken);
+        if (typed.ExitCode != 0)
+        {
+            return new ConsoleActionResult(false, "", $"Could not type: {typed.Stderr.Trim()}");
+        }
+
+        if (submit)
+        {
+            var enter = await RunPodmanAsync(new[] { "exec", name, "tmux", "send-keys", "-t", options.ConsoleTmuxSession, "Enter" }, cancellationToken);
+            if (enter.ExitCode != 0)
+            {
+                return new ConsoleActionResult(false, "", $"Could not submit: {enter.Stderr.Trim()}");
+            }
+        }
+
+        // Let the shell render, then read the screen back so the caller sees the
+        // effect of what it just typed (observe-after-act).
+        await Task.Delay(300, cancellationToken);
+        var view = await CaptureAsync(sessionId, cancellationToken);
+        return new ConsoleActionResult(true, view.Screen, submit ? "Typed and submitted." : "Typed.");
     }
 
     private static string LabelOrDefault(JsonElement labels, string key, string fallback) =>

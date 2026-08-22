@@ -77,12 +77,14 @@ builder.Services.AddSingleton<SessionOrchestrator>(_ => new SessionOrchestrator(
     ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901
 }));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
 {
     PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman"
 }));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SpreadsheetSandboxExecutor>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
 builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExecutorRouter(provider.GetServices<ISurfaceExecutor>()));
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
@@ -198,6 +200,24 @@ app.MapGet("/api/surfaces", (ISurfaceRegistry surfaces) =>
 
 app.MapGet("/api/sessions", async (ISessionBackend sessions, CancellationToken cancellationToken) =>
     await sessions.ListAsync(cancellationToken));
+
+// Observe a console session's screen — the agent's (and the watching human's)
+// read side. Gated on the session owner, like the home browser: a caller may
+// only see a session it or its owned agents run (design law 2: reads pass policy).
+app.MapGet("/api/sessions/{id}/console", async (string id, HttpContext context, IConsoleBackend console, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    return Results.Ok(await console.CaptureAsync(id, cancellationToken));
+});
 
 app.MapGet("/api/whoami", (HttpContext context) =>
 {

@@ -22,7 +22,7 @@ internal static class RuntimeSeed
             workspace.Id,
             $"{displayName}'s Agent",
             "local-inference",
-            new HashSet<string> { "spreadsheet", "session" },
+            new HashSet<string> { "spreadsheet", "session", "console" },
             $"{slug}-agent");
         return (user, workspace, agent);
     }

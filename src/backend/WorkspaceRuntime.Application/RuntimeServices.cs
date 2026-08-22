@@ -151,6 +151,21 @@ public sealed class AgentRuntime
             }
         }
 
+        // Console I/O targets a live session; gate it on that session's owner at
+        // the same choke point, so an agent can only observe/act on its own
+        // console and a human only on a session it or its agents own.
+        if (dto.ToolName == "console"
+            && dto.Arguments.TryGetValue("id", out var consoleTarget)
+            && sessions is not null)
+        {
+            var target = (await sessions.ListAsync(cancellationToken))
+                .FirstOrDefault(session => string.Equals(session.Id, consoleTarget, StringComparison.Ordinal));
+            if (target is not null && !Ownership.CanAccessHome(principal, target.Owner, store))
+            {
+                return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not operate the console of a session owned by '{target.Owner}'.");
+            }
+        }
+
         var evaluation = policyEngine.Evaluate(user, agent, request);
 
         await mutationGate.WaitAsync(cancellationToken);
