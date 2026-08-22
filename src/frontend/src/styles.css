@@ -522,6 +522,48 @@ button.deskItem.selected {
   gap: 14px;
 }
 
+/* Chat: message the agent */
+
+.chatLog {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.chatMsg {
+  display: grid;
+  gap: 3px;
+}
+
+.chatMsg .chatWho {
+  color: var(--ink-soft);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.chatMsg.you {
+  justify-items: end;
+}
+
+.chatBubble {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  font-size: 14px;
+  max-width: 82%;
+  padding: 8px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chatMsg.you .chatBubble {
+  background: var(--accent-soft);
+  border-color: #c7d2fe;
+}
+
 /* Console: give-the-agent-a-task + live screen */
 
 .agentTask {

@@ -122,6 +122,9 @@ function App() {
   const [agentGoal, setAgentGoal] = React.useState("");
   const [agentRunning, setAgentRunning] = React.useState(false);
   const [agentRun, setAgentRun] = React.useState<AgentRunResult | null>(null);
+  const [chatLog, setChatLog] = React.useState<{ role: "you" | "agent"; text: string }[]>([]);
+  const [chatDraft, setChatDraft] = React.useState("");
+  const [chatBusy, setChatBusy] = React.useState(false);
 
   const signOut = React.useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
@@ -414,6 +417,41 @@ function App() {
       else setAgentRun({ sessionId: id, goal, completed: false, stopReason: String(error), steps: [] });
     } finally {
       setAgentRunning(false);
+    }
+  }
+
+  // Message the agent: it reads your message, may use its tools to act, and
+  // replies through the shared workspace (~/shared/outbox.md) — the same
+  // governed loop, framed as a conversation over the shared space.
+  async function sendMessage(sessionId: string) {
+    const text = chatDraft.trim();
+    if (!text || chatBusy) return;
+    setChatLog((previous) => [...previous, { role: "you", text }]);
+    setChatDraft("");
+    setChatBusy(true);
+    try {
+      const goal = `Your owner sent you a message: "${text}". Respond helpfully — if it asks you to do something, use your tools (websearch, python3, and the files in ~ and ~/shared). When finished, write a short reply to your owner by overwriting ~/shared/outbox.md with your reply, then you are done.`;
+      const run = await api<AgentRunResult>(`/api/sessions/${encodeURIComponent(sessionId)}/agent-run`, {
+        method: "POST",
+        body: JSON.stringify({ goal, maxSteps: 8 })
+      });
+      let reply = "";
+      try {
+        reply = (await api<HomeFile>("/api/shared/read?path=outbox.md")).content.trim();
+      } catch {
+        // no outbox written; fall back to the agent's last reasoning note.
+      }
+      if (!reply) {
+        reply = [...run.steps].reverse().find((step) => step.note)?.note ?? run.stopReason;
+      }
+      setChatLog((previous) => [...previous, { role: "agent", text: reply }]);
+      await observeConsole(sessionId);
+      await refresh();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setChatLog((previous) => [...previous, { role: "agent", text: `(error: ${String(error)})` }]);
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -784,6 +822,45 @@ function App() {
                 )}
               </div>
             </div>
+
+            {deskConsole && desk && !desk.isSelf && (
+              <div className="panel chat" data-automation-id="chat">
+                <h2><Bot size={13} /> Message {desk.label}</h2>
+                <p className="muted small">Talk to your agent. It can use its tools to act, and replies through your shared workspace (<code>~/shared/outbox.md</code>).</p>
+                <div className="chatLog" data-automation-id="chat-log">
+                  {chatLog.length === 0 ? (
+                    <p className="muted small">No messages yet — say hi, or ask it to do something.</p>
+                  ) : (
+                    chatLog.map((message, index) => (
+                      <div className={`chatMsg ${message.role}`} key={index}>
+                        <span className="chatWho">{message.role === "you" ? "you" : desk.label}</span>
+                        <div className="chatBubble">{message.text}</div>
+                      </div>
+                    ))
+                  )}
+                  {chatBusy && (
+                    <div className="chatMsg agent">
+                      <span className="chatWho">{desk.label}</span>
+                      <div className="chatBubble"><Loader2 size={13} className="spin" /> thinking…</div>
+                    </div>
+                  )}
+                </div>
+                <div className="inline agentTask">
+                  <input
+                    className="agentGoal"
+                    data-automation-id="chat-input"
+                    value={chatDraft}
+                    placeholder={`Message ${desk.label}…`}
+                    disabled={chatBusy}
+                    onChange={(event) => setChatDraft(event.target.value)}
+                    onKeyDown={(event) => event.key === "Enter" && sendMessage(deskConsole.id)}
+                  />
+                  <button data-automation-id="chat-send" disabled={chatBusy || !chatDraft.trim()} onClick={() => sendMessage(deskConsole.id)}>
+                    {chatBusy ? <><Loader2 size={16} className="spin" /> …</> : <><Check size={16} /> Send</>}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {deskConsole && (
               <div className="panel console" data-automation-id="console">
