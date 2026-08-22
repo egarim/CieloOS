@@ -93,27 +93,62 @@ builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequi
 builder.Services.AddSingleton<AgentRuntime>();
 builder.Services.AddSingleton<ConsoleAgentLoop>();
 
-// The console loop's brain. If a DeepSeek (OpenAI-compatible) key is configured,
-// the agent is driven by the model; otherwise a deterministic recipe brain
-// stands in so the loop still works end-to-end with no key. The key is read
-// from config/env and never logged.
+// The console loop's brain(s). Each configured model provider (OpenAI-compatible)
+// becomes a named brain; an agent's InferenceProvider selects which one drives it,
+// so DeepSeek and Azure OpenAI (gpt-4.1-mini) can run side by side on one runtime.
+// With no key configured, a deterministic recipe brain stands in so the loop still
+// works end-to-end. Keys are read from config/env and never logged.
+var brainProviders = new Dictionary<string, ModelBrainOptions>(StringComparer.OrdinalIgnoreCase);
+
 var deepseekKey = builder.Configuration["Inference:Deepseek:ApiKey"]
     ?? Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
 if (!string.IsNullOrWhiteSpace(deepseekKey))
 {
-    builder.Services.AddSingleton(new ModelBrainOptions
+    brainProviders["deepseek"] = new ModelBrainOptions
     {
         BaseUrl = builder.Configuration["Inference:Deepseek:BaseUrl"] ?? "https://api.deepseek.com",
         Model = builder.Configuration["Inference:Deepseek:Model"] ?? "deepseek-chat",
         ApiKey = deepseekKey
-    });
-    builder.Services.AddHttpClient<IConsoleAgentBrain, ModelConsoleBrain>(client =>
-        client.Timeout = TimeSpan.FromSeconds(60));
+    };
 }
-else
+
+var azureKey = builder.Configuration["Inference:Azure:ApiKey"]
+    ?? Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
+if (!string.IsNullOrWhiteSpace(azureKey))
 {
-    builder.Services.AddSingleton<IConsoleAgentBrain, RecipeConsoleBrain>();
+    // Azure OpenAI's OpenAI-compatible /openai/v1 endpoint speaks the same chat API
+    // (Bearer auth, model = deployment name in the body), so the same
+    // ModelConsoleBrain drives it with no code change — only config differs.
+    var azureProvider = builder.Configuration["Inference:Azure:Provider"] ?? "gpt-4.1-mini";
+    brainProviders[azureProvider] = new ModelBrainOptions
+    {
+        BaseUrl = builder.Configuration["Inference:Azure:BaseUrl"]
+            ?? "https://sivar-aoai-eus.openai.azure.com/openai/v1",
+        Model = builder.Configuration["Inference:Azure:Model"] ?? "gpt-4.1-mini",
+        ApiKey = azureKey
+    };
 }
+
+var defaultBrainProvider = brainProviders.ContainsKey("deepseek")
+    ? "deepseek"
+    : brainProviders.Keys.FirstOrDefault() ?? "";
+
+builder.Services.AddSingleton<IConsoleBrainRegistry>(sp =>
+{
+    var brains = new Dictionary<string, IConsoleAgentBrain>(StringComparer.OrdinalIgnoreCase);
+    foreach (var (name, options) in brainProviders)
+    {
+        brains[name] = new ModelConsoleBrain(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, options);
+    }
+    return new ConsoleBrainRegistry(
+        brains,
+        new RecipeConsoleBrain(),
+        defaultBrainProvider,
+        sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>());
+});
+// A default single brain for any injection site that does not select per-agent.
+builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
+    sp.GetRequiredService<IConsoleBrainRegistry>().Resolve(null).Brain);
 
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
@@ -136,6 +171,11 @@ var app = builder.Build();
 _ = app.Services.GetRequiredService<IRuntimeStore>().Users;
 _ = app.Services.GetRequiredService<ITokenAuthenticator>();
 _ = app.Services.GetRequiredService<ISurfaceRegistry>();
+
+var brainRegistry = app.Services.GetRequiredService<IConsoleBrainRegistry>();
+app.Logger.LogInformation(
+    "Console brains registered: [{Providers}]; default '{Default}'.",
+    string.Join(", ", brainRegistry.ProviderNames), defaultBrainProvider);
 
 app.UseCors();
 
@@ -260,7 +300,7 @@ app.MapGet("/api/sessions/{id}/console", async (string id, HttpContext context, 
 // brain (model or recipe) for the next action, and submits each keystroke batch
 // as a policy-checked, audited `console.type`. Gated on the session owner, like
 // observe; the per-keystroke ownership/policy checks still apply inside the loop.
-app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleAgentBrain brain, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -274,6 +314,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
+    var brain = brains.Resolve(store.GetAgent(agentId).InferenceProvider).Brain;
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, brain, cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
@@ -512,11 +553,12 @@ app.MapGet("/v1/agent/models", () => Results.Ok(new
     data = new[] { new { id = "lunos-agent", @object = "model", created = 0, owned_by = "lunos" } }
 }));
 
-app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleAgentBrain brain, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var (userId, agentId) = ActingAgent(caller, null, store);
     var agent = store.GetAgent(agentId);
+    var brain = brains.Resolve(agent.InferenceProvider).Brain;
     var userMessage = request.Messages?.LastOrDefault(message => message.Role == "user")?.Content ?? "";
 
     var session = (await sessions.ListAsync(cancellationToken))

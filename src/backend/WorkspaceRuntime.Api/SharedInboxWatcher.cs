@@ -1,5 +1,6 @@
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
+using WorkspaceRuntime.Infrastructure;
 
 namespace WorkspaceRuntime.Api;
 
@@ -17,7 +18,7 @@ public sealed class SharedInboxWatcher : BackgroundService
     private readonly ISessionBackend sessions;
     private readonly IHomeBrowser home;
     private readonly ConsoleAgentLoop loop;
-    private readonly IConsoleAgentBrain brain;
+    private readonly IConsoleBrainRegistry brains;
     private readonly ILogger<SharedInboxWatcher> logger;
 
     // Per-user count of inbox lines already handled — baselined at startup so we
@@ -27,13 +28,13 @@ public sealed class SharedInboxWatcher : BackgroundService
 
     public SharedInboxWatcher(
         IRuntimeStore store, ISessionBackend sessions, IHomeBrowser home,
-        ConsoleAgentLoop loop, IConsoleAgentBrain brain, ILogger<SharedInboxWatcher> logger)
+        ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ILogger<SharedInboxWatcher> logger)
     {
         this.store = store;
         this.sessions = sessions;
         this.home = home;
         this.loop = loop;
-        this.brain = brain;
+        this.brains = brains;
         this.logger = logger;
     }
 
@@ -132,6 +133,7 @@ public sealed class SharedInboxWatcher : BackgroundService
             "finished, write a short reply to your owner by overwriting ~/shared/outbox.md, then you are done.";
 
         logger.LogInformation("Dispatching inbox message from {User} to {Agent}.", user.Slug, agent.Slug);
+        var brain = brains.Resolve(agent.InferenceProvider).Brain;
         await loop.RunAsync(session.Id, goal, 8, principal, user.Id, agent.Id, brain, cancellationToken);
     }
 }
