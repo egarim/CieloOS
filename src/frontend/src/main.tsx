@@ -47,6 +47,7 @@ type InferenceStatus = {
   };
 };
 type ChatResponse = { providerId: string; model: string; content: string; forwarded: boolean; error?: string };
+type SessionView = { id: string; owner: string; profile: string; status: string; viewportPort: number };
 
 const emptyBranding: Branding = {
   productName: "Workspace Runtime",
@@ -101,41 +102,57 @@ function App() {
   const [prompt, setPrompt] = React.useState("Plan a safe spreadsheet summary workflow.");
   const [chatResponse, setChatResponse] = React.useState<ChatResponse | null>(null);
   const [lastResult, setLastResult] = React.useState<{ decision: string; reason: string } | null>(null);
+  const [sessions, setSessions] = React.useState<SessionView[]>([]);
+  const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
+  const [newDesktopOwner, setNewDesktopOwner] = React.useState("avery");
+  const [newDesktopProfile, setNewDesktopProfile] = React.useState("human-desktop");
 
   const signOut = React.useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
     setToken(null);
   }, []);
 
-  const refresh = React.useCallback(async () => {
+  // Session listing is fetched separately: it shells out to the container
+  // backend and can be slower than the in-memory surface reads, and a backend
+  // without the session surface should not break the rest of the panel.
+  const refreshSessions = React.useCallback(async () => {
     try {
-      const [nextBranding, nextUsers, nextWorkspaces, nextAgents, nextApprovals, nextAuditEvents, nextSurface, nextCommands, nextInferenceStatus] = await Promise.all([
-        api<Branding>("/api/branding"),
-        api<PlatformUser[]>("/api/users"),
-        api<Workspace[]>("/api/workspaces"),
-        api<AgentProfile[]>("/api/agents"),
-        api<ApprovalView[]>("/api/approvals"),
-        api<AuditEvent[]>("/api/audit-events"),
-        api<SurfaceState>("/api/surfaces/spreadsheet/state"),
-        api<SurfaceCommands>("/api/surfaces/spreadsheet/commands"),
-        api<InferenceStatus>("/api/inference/status")
-      ]);
-      setBranding(nextBranding);
-      setUsers(nextUsers);
-      setWorkspaces(nextWorkspaces);
-      setAgents(nextAgents);
-      setApprovals(nextApprovals);
-      setAuditEvents(nextAuditEvents);
-      setSurface(nextSurface);
-      setCommands(nextCommands.commands);
-      setInferenceStatus(nextInferenceStatus);
+      setSessions(await api<SessionView[]>("/api/sessions"));
+      setSessionsAvailable(true);
     } catch (error) {
       if (error instanceof UnauthorizedError) {
         signOut();
         return;
       }
-      throw error;
+      setSessionsAvailable(false);
     }
+  }, [signOut]);
+
+  const refresh = React.useCallback(async () => {
+    // Each endpoint is applied independently: one failing (e.g. inference
+    // status when no local model is configured) must not blank the whole panel.
+    let unauthorized = false;
+    const load = async <T,>(path: string, apply: (value: T) => void) => {
+      try {
+        apply(await api<T>(path));
+      } catch (error) {
+        if (error instanceof UnauthorizedError) unauthorized = true;
+      }
+    };
+
+    await Promise.all([
+      load<Branding>("/api/branding", setBranding),
+      load<PlatformUser[]>("/api/users", setUsers),
+      load<Workspace[]>("/api/workspaces", setWorkspaces),
+      load<AgentProfile[]>("/api/agents", setAgents),
+      load<ApprovalView[]>("/api/approvals", setApprovals),
+      load<AuditEvent[]>("/api/audit-events", setAuditEvents),
+      load<SurfaceState>("/api/surfaces/spreadsheet/state", setSurface),
+      load<SurfaceCommands>("/api/surfaces/spreadsheet/commands", (value) => setCommands(value.commands)),
+      load<InferenceStatus>("/api/inference/status", setInferenceStatus)
+    ]);
+
+    if (unauthorized) signOut();
   }, [signOut]);
 
   React.useEffect(() => {
@@ -145,6 +162,7 @@ function App() {
   React.useEffect(() => {
     if (!token) return;
     refresh();
+    refreshSessions();
 
     // Server-sent events over fetch so the Authorization header travels along;
     // any runtime event triggers a coarse refresh (state fetches are ETag-cheap).
@@ -154,7 +172,7 @@ function App() {
       while (!closed) {
         try {
           const response = await fetch("/api/events", {
-            headers: { Authorization: `Bearer ${readToken()}` },
+            headers: { Authorization: `Bearer ${readToken() ?? ""}` },
             signal: controller.signal
           });
           if (response.status === 401 || !response.body) return;
@@ -165,6 +183,7 @@ function App() {
             if (done) break;
             if (decoder.decode(value).includes("data:")) {
               await refresh();
+              await refreshSessions();
             }
           }
         } catch {
@@ -213,6 +232,30 @@ function App() {
       if (error instanceof UnauthorizedError) signOut();
       else setLastResult({ decision: "Deny", reason: String(error) });
     }
+  }
+
+  // Desktop lifecycle rides the same command bus as everything else: create is
+  // Allow, destroy is RequireApproval, so it surfaces in the approvals feed.
+  async function sessionCommand(name: "create" | "destroy", input: Record<string, string>) {
+    try {
+      const result = await api<CommandResult>(`/api/surfaces/session/commands/${name}`, {
+        method: "POST",
+        body: JSON.stringify({ input })
+      });
+      setLastResult({ decision: result.decision, reason: result.reason });
+      await refresh();
+      await refreshSessions();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setLastResult({ decision: "Deny", reason: String(error) });
+    }
+  }
+
+  function watchDesktop(session: SessionView) {
+    // Dev topology: the viewport is forwarded to the same host the panel runs
+    // on. The production path is a runtime-proxied /api/sessions/{id}/view so a
+    // session is reachable only through the authenticated runtime (V0.5).
+    window.open(`http://${window.location.hostname}:${session.viewportPort}/`, "_blank", "noopener");
   }
 
   async function resolve(approval: ApprovalView, action: "approve" | "reject") {
@@ -307,6 +350,75 @@ function App() {
             <dt>Inference</dt>
             <dd>{selectedAgent?.inferenceProvider ?? "Loading"}</dd>
           </dl>
+        </div>
+
+        <div className="panel desktops" data-automation-id="desktops">
+          <h2>Desktops</h2>
+          <p className="muted small">Isolated desktop sessions. Create is allowed; destroy requires approval.</p>
+          {sessionsAvailable ? (
+            <>
+              <div className="inline">
+                <label>
+                  owner
+                  <input
+                    data-automation-id="desktop-owner"
+                    value={newDesktopOwner}
+                    onChange={(event) => setNewDesktopOwner(event.target.value)}
+                  />
+                </label>
+                <label>
+                  profile
+                  <select
+                    data-automation-id="desktop-profile"
+                    value={newDesktopProfile}
+                    onChange={(event) => setNewDesktopProfile(event.target.value)}
+                  >
+                    <option value="human-desktop">human-desktop</option>
+                    <option value="agent-desktop">agent-desktop</option>
+                  </select>
+                </label>
+                <button
+                  data-automation-id="desktop-create"
+                  onClick={() => sessionCommand("create", { owner: newDesktopOwner, profile: newDesktopProfile })}
+                >
+                  <Check size={16} /> New desktop
+                </button>
+              </div>
+              <div className="sessionList">
+                {sessions.length === 0 ? (
+                  <p className="muted">No desktops running</p>
+                ) : (
+                  sessions.map((session) => (
+                    <div className="sessionCard" key={session.id} data-automation-id={`desktop-${session.id}`}>
+                      <div className="sessionMeta">
+                        <strong>{session.id}</strong>
+                        <span className="tag">{session.profile}</span>
+                        <span className={session.status === "running" ? "allow" : "muted"}>{session.status}</span>
+                      </div>
+                      <div className="actions">
+                        <button
+                          data-automation-id={`watch-${session.id}`}
+                          disabled={session.status !== "running" || !session.viewportPort}
+                          onClick={() => watchDesktop(session)}
+                        >
+                          <ShieldCheck size={16} /> Watch
+                        </button>
+                        <button
+                          className="danger"
+                          data-automation-id={`destroy-${session.id}`}
+                          onClick={() => sessionCommand("destroy", { id: session.id })}
+                        >
+                          <X size={16} /> Destroy
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="muted">The session surface is not available on this runtime.</p>
+          )}
         </div>
 
         <div className="panel">

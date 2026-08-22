@@ -151,12 +151,18 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   background: #fff;
   border: 1px solid var(--hairline);
   border-radius: 2px;
   font: inherit;
   transition: border-color 120ms ease;
+}
+
+select {
+  height: 40px;
+  padding: 0 8px;
 }
 
 input {
@@ -291,6 +297,52 @@ code {
 
 .commandRow {
   margin-top: 12px;
+}
+
+/* Desktops */
+
+.sessionList {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.sessionCard {
+  align-items: center;
+  border: 1px solid var(--hairline);
+  border-left: 2px solid var(--accent);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 14px;
+}
+
+.sessionMeta {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sessionMeta strong {
+  font-feature-settings: "tnum";
+  font-variant-numeric: tabular-nums;
+}
+
+.tag {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  color: var(--ink-soft);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  padding: 2px 8px;
+  text-transform: uppercase;
+}
+
+.sessionMeta .allow {
+  color: var(--allow);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* Approval diff preview */
