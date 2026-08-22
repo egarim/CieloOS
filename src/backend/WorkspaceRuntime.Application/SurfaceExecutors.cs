@@ -30,13 +30,15 @@ public sealed class SurfaceExecutorRouter : ISandboxedToolExecutor, IDryRunToolE
             : Task.FromResult(new EffectPreview(false, $"No preview is available for surface '{request.ToolName}'.", Array.Empty<CellChange>()));
 }
 
-// A running desktop session, as reported by the session backend.
+// A running session, as reported by the session backend. Kind is "console"
+// or "desktop" — two views of the same per-owner home.
 public sealed record DesktopSession(
     string Id,
     string Owner,
     string Profile,
     string Status,
-    int ViewportPort);
+    int ViewportPort,
+    string Kind = "desktop");
 
 public interface ISessionBackend
 {

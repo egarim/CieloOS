@@ -29,7 +29,7 @@
   },
   "commands": {
     "create": {
-      "displayName": "Create desktop",
+      "displayName": "Create session",
       "exposedToAgent": true,
       "requiresHuman": false,
       "mutatesState": true,
@@ -40,7 +40,7 @@
         "type": "object",
         "properties": {
           "owner": { "type": "string", "pattern": "^[a-z0-9-]{1,32}$" },
-          "profile": { "type": "string", "enum": ["human-desktop", "agent-desktop"] }
+          "profile": { "type": "string", "enum": ["agent-console", "human-console", "agent-desktop", "human-desktop"] }
         },
         "required": ["owner", "profile"],
         "additionalProperties": false

@@ -18,6 +18,13 @@ public sealed class SessionBackendOptions
     // the container is a disposable view of it (docs/ai-native-ui.md D3).
     public string HomeVolumePrefix { get; init; } = "lunos-home-";
     public string HomePath { get; init; } = "/config";
+
+    // The console kind: a lightweight ttyd+tmux terminal over the same home,
+    // the default agent session. Far smaller than the desktop image, and
+    // tmux gives shadow/become attach semantics for free.
+    public string ConsoleImage { get; init; } = "localhost/lunos-console:latest";
+    public int ConsolePort { get; init; } = 7681;
+    public string ConsoleHomePath { get; init; } = "/root";
 }
 
 // The V0.4 session backend: one podman container per desktop session, driven
@@ -57,8 +64,8 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
     {
         var summary = request.Operation switch
         {
-            "create" => $"Would create an isolated {request.Arguments.GetValueOrDefault("profile")} desktop for '{request.Arguments.GetValueOrDefault("owner")}' from image {options.Image}.",
-            "destroy" => $"Would destroy desktop session '{request.Arguments.GetValueOrDefault("id")}' and discard its running state.",
+            "create" => $"Would create an isolated {request.Arguments.GetValueOrDefault("profile")} session for '{request.Arguments.GetValueOrDefault("owner")}', over that owner's persistent home.",
+            "destroy" => $"Would destroy session '{request.Arguments.GetValueOrDefault("id")}' and discard its running state (the home volume persists).",
             _ => "Unknown session operation."
         };
         return Task.FromResult(new EffectPreview(true, summary, Array.Empty<CellChange>()));
@@ -70,7 +77,13 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         var name = options.NamePrefix + id;
         var homeVolume = options.HomeVolumePrefix + owner;
 
-        // The per-owner home volume is created once and outlives every session.
+        var isConsole = profile.Contains("console", StringComparison.Ordinal);
+        var image = isConsole ? options.ConsoleImage : options.Image;
+        var containerPort = isConsole ? options.ConsolePort : options.ViewportPort;
+        var homePath = isConsole ? options.ConsoleHomePath : options.HomePath;
+
+        // The per-owner home volume is created once and outlives every session,
+        // and is the SAME volume whether viewed as a console or a desktop.
         await RunPodmanAsync(new[] { "volume", "create", homeVolume }, cancellationToken);
 
         var run = await RunPodmanAsync(new[]
@@ -80,19 +93,21 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
             "--label", options.SessionLabel,
             "--label", $"lunos.owner={owner}",
             "--label", $"lunos.profile={profile}",
-            "-v", $"{homeVolume}:{options.HomePath}",
-            "-p", $"127.0.0.1::{options.ViewportPort}",
-            options.Image
+            "--label", $"lunos.kind={(isConsole ? "console" : "desktop")}",
+            "-v", $"{homeVolume}:{homePath}",
+            "-p", $"127.0.0.1::{containerPort}",
+            image
         }, cancellationToken);
 
         if (run.ExitCode != 0)
         {
-            return new ToolExecutionResult(false, $"Failed to start desktop container: {run.Stderr.Trim()}", null);
+            return new ToolExecutionResult(false, $"Failed to start {profile} session: {run.Stderr.Trim()}", null);
         }
 
-        var port = await ReadViewportPortAsync(name, cancellationToken);
+        var port = await ReadViewportPortAsync(name, containerPort, cancellationToken);
         var portText = port is null ? "pending" : port.Value.ToString();
-        return new ToolExecutionResult(true, $"Started {profile} desktop '{id}' (viewport 127.0.0.1:{portText}).", null);
+        var kind = isConsole ? "console" : "desktop";
+        return new ToolExecutionResult(true, $"Started {profile} {kind} '{id}' (viewport 127.0.0.1:{portText}).", null);
     }
 
     private async Task<ToolExecutionResult> DestroyAsync(string id, CancellationToken cancellationToken)
@@ -100,7 +115,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         var name = options.NamePrefix + id;
         var remove = await RunPodmanAsync(new[] { "rm", "-f", name }, cancellationToken);
         return remove.ExitCode == 0
-            ? new ToolExecutionResult(true, $"Destroyed desktop session '{id}'.", null)
+            ? new ToolExecutionResult(true, $"Destroyed session '{id}'.", null)
             : new ToolExecutionResult(false, $"Failed to destroy session '{id}': {remove.Stderr.Trim()}", null);
     }
 
@@ -137,7 +152,8 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
                 LabelOrDefault(labels, "lunos.owner", "unknown"),
                 LabelOrDefault(labels, "lunos.profile", "unknown"),
                 status,
-                port));
+                port,
+                LabelOrDefault(labels, "lunos.kind", "desktop")));
         }
 
         return sessions;
@@ -164,9 +180,9 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         return 0;
     }
 
-    private async Task<int?> ReadViewportPortAsync(string name, CancellationToken cancellationToken)
+    private async Task<int?> ReadViewportPortAsync(string name, int containerPort, CancellationToken cancellationToken)
     {
-        var result = await RunPodmanAsync(new[] { "port", name, options.ViewportPort.ToString() }, cancellationToken);
+        var result = await RunPodmanAsync(new[] { "port", name, containerPort.ToString() }, cancellationToken);
         if (result.ExitCode != 0)
         {
             return null;

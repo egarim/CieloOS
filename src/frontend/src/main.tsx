@@ -47,7 +47,7 @@ type InferenceStatus = {
   };
 };
 type ChatResponse = { providerId: string; model: string; content: string; forwarded: boolean; error?: string };
-type SessionView = { id: string; owner: string; profile: string; status: string; viewportPort: number };
+type SessionView = { id: string; owner: string; profile: string; status: string; viewportPort: number; kind: string };
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number };
@@ -107,8 +107,8 @@ function App() {
   const [lastResult, setLastResult] = React.useState<{ decision: string; reason: string } | null>(null);
   const [sessions, setSessions] = React.useState<SessionView[]>([]);
   const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
-  const [newDesktopOwner, setNewDesktopOwner] = React.useState("avery");
-  const [newDesktopProfile, setNewDesktopProfile] = React.useState("human-desktop");
+  const [newDesktopOwner, setNewDesktopOwner] = React.useState("joche");
+  const [newDesktopProfile, setNewDesktopProfile] = React.useState("agent-console");
   const [filesOwner, setFilesOwner] = React.useState("joche");
   const [filesPath, setFilesPath] = React.useState("");
   const [listing, setListing] = React.useState<HomeListing | null>(null);
@@ -403,8 +403,8 @@ function App() {
         </div>
 
         <div className="panel desktops" data-automation-id="desktops">
-          <h2>Desktops</h2>
-          <p className="muted small">Isolated desktop sessions. Create is allowed; destroy requires approval.</p>
+          <h2>Sessions</h2>
+          <p className="muted small">A console or desktop over the owner's home. Create is allowed; destroy requires approval.</p>
           {sessionsAvailable ? (
             <>
               <div className="inline">
@@ -423,26 +423,28 @@ function App() {
                     value={newDesktopProfile}
                     onChange={(event) => setNewDesktopProfile(event.target.value)}
                   >
-                    <option value="human-desktop">human-desktop</option>
+                    <option value="agent-console">agent-console</option>
+                    <option value="human-console">human-console</option>
                     <option value="agent-desktop">agent-desktop</option>
+                    <option value="human-desktop">human-desktop</option>
                   </select>
                 </label>
                 <button
                   data-automation-id="desktop-create"
                   onClick={() => sessionCommand("create", { owner: newDesktopOwner, profile: newDesktopProfile })}
                 >
-                  <Check size={16} /> New desktop
+                  <Check size={16} /> New session
                 </button>
               </div>
               <div className="sessionList">
                 {sessions.length === 0 ? (
-                  <p className="muted">No desktops running</p>
+                  <p className="muted">No sessions running</p>
                 ) : (
                   sessions.map((session) => (
                     <div className="sessionCard" key={session.id} data-automation-id={`desktop-${session.id}`}>
                       <div className="sessionMeta">
                         <strong>{session.id}</strong>
-                        <span className="tag">{session.profile}</span>
+                        <span className="tag">{session.kind}</span>
                         <span className={session.status === "running" ? "allow" : "muted"}>{session.status}</span>
                       </div>
                       <div className="actions">
@@ -451,7 +453,7 @@ function App() {
                           disabled={session.status !== "running" || !session.viewportPort}
                           onClick={() => watchDesktop(session)}
                         >
-                          <ShieldCheck size={16} /> Watch
+                          <ShieldCheck size={16} /> {session.kind === "console" ? "Open" : "Watch"}
                         </button>
                         <button
                           className="danger"
