@@ -135,3 +135,10 @@ Requirement 1 (multiple isolated desktops) and requirement 2 (agent desktop auto
 - **V0.8 — Two-tier resolution.** In-session surface bridge so contract-speaking apps inside a session still get the fast path; the local grounder-VLM experiment and its desktop eval.
 
 Bare metal (real KVM, `--vm` isolation, higher density) is the milestone that turns the dev-scale demo into the multi-tenant claim — not something the M2 dev VM is asked to prove.
+
+## Backlog — owner-requested, not yet scheduled *(2026-08-22)*
+
+- **Agent ↔ owner shared workspace.** Each agent and its owner need a shared drop/exchange folder — the agent puts finished work there for the human, the human puts inputs/instructions there for the agent — distinct from the agent's private home. This is the concrete form of D3's "collaborate through shared volumes": a policy-gated volume bind-mounted into both the owner's and the agent's homes at a stable path (e.g. `~/shared` or `~/exchange/<agent>`), default-none elsewhere, audited. Pairs naturally with the console/file-browser work already shipped — the shared folder shows up in the same file browser.
+- **Live USB to test the OS on real hardware.** A bootable USB image of the Lun.Os distro so it can be tried on real (bare-metal ARM64/x86) hardware, not just the M2 QEMU VM. This is the practical on-ramp to the bare-metal milestone (real KVM, `--vm` isolation) and would exercise the autoinstall/distro work end-to-end. Also fold in: bake the `lunos-console` (ttyd+tmux) and desktop images into the distro so console/desktop sessions work on first boot instead of being built ad-hoc.
+
+These are noted for when the owner decides the time is right; neither is on the immediate V0.4.5 → V0.6 path.
