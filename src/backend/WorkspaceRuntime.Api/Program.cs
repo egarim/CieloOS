@@ -89,6 +89,29 @@ builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExec
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<AgentRuntime>();
+builder.Services.AddSingleton<ConsoleAgentLoop>();
+
+// The console loop's brain. If a DeepSeek (OpenAI-compatible) key is configured,
+// the agent is driven by the model; otherwise a deterministic recipe brain
+// stands in so the loop still works end-to-end with no key. The key is read
+// from config/env and never logged.
+var deepseekKey = builder.Configuration["Inference:Deepseek:ApiKey"]
+    ?? Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
+if (!string.IsNullOrWhiteSpace(deepseekKey))
+{
+    builder.Services.AddSingleton(new ModelBrainOptions
+    {
+        BaseUrl = builder.Configuration["Inference:Deepseek:BaseUrl"] ?? "https://api.deepseek.com",
+        Model = builder.Configuration["Inference:Deepseek:Model"] ?? "deepseek-chat",
+        ApiKey = deepseekKey
+    });
+    builder.Services.AddHttpClient<IConsoleAgentBrain, ModelConsoleBrain>(client =>
+        client.Timeout = TimeSpan.FromSeconds(60));
+}
+else
+{
+    builder.Services.AddSingleton<IConsoleAgentBrain, RecipeConsoleBrain>();
+}
 builder.Services.AddHttpClient<ILocalInferenceRouter, LocalInferenceRouter>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
@@ -225,6 +248,29 @@ app.MapGet("/api/sessions/{id}/console", async (string id, HttpContext context, 
         return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
     }
     return Results.Ok(await console.CaptureAsync(id, cancellationToken));
+});
+
+// Drive a console session toward a goal: the loop observes the screen, asks the
+// brain (model or recipe) for the next action, and submits each keystroke batch
+// as a policy-checked, audited `console.type`. Gated on the session owner, like
+// observe; the per-keystroke ownership/policy checks still apply inside the loop.
+app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleAgentBrain brain, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not drive a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
+    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, brain, cancellationToken);
+    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    return Results.Ok(result);
 });
 
 app.MapGet("/api/whoami", (HttpContext context) =>
@@ -532,6 +578,8 @@ public sealed record SurfaceCommandRequest(
     Guid? AgentId);
 
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
+
+public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
 
 public sealed record OpenAiCompatChatRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("model")] string? Model,

@@ -1,0 +1,130 @@
+using WorkspaceRuntime.Domain;
+
+namespace WorkspaceRuntime.Application;
+
+// The next thing the agent wants to do at the console: either it's done, or it
+// types some text (optionally pressing Enter). A brain decides this from the
+// goal and the current screen.
+public sealed record ConsoleAgentAction(bool Done, string? Text, bool Submit, string? Note);
+
+// One recorded turn of the loop: what the screen showed, what the brain chose,
+// and how the policy bus decided on the resulting keystrokes.
+public sealed record ConsoleLoopStep(
+    int Step,
+    string ScreenBefore,
+    string? Text,
+    bool Submit,
+    bool Done,
+    string? Note,
+    string Decision,
+    string Reason);
+
+public sealed record ConsoleLoopResult(
+    string SessionId,
+    string Goal,
+    bool Completed,
+    string StopReason,
+    IReadOnlyList<ConsoleLoopStep> Steps);
+
+// The pluggable brain. A deterministic recipe stands in for it today; a
+// model-backed brain (cloud or local) drops in behind the same seam without the
+// loop, the policy bus, or the audit trail changing.
+public interface IConsoleAgentBrain
+{
+    Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken);
+}
+
+// A deterministic stand-in for a model: it leaves a durable note in the agent's
+// own home, reads it back, then reports done. Enough to exercise the whole loop
+// — observe, decide, act-through-the-bus, audit — with no external model.
+public sealed class RecipeConsoleBrain : IConsoleAgentBrain
+{
+    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+    {
+        var safeGoal = Sanitize(goal);
+        return Task.FromResult(step switch
+        {
+            1 => new ConsoleAgentAction(false, $"echo \"lun.os agent handled: {safeGoal}\" > ~/AGENT_LOG.md", true, "record the task in my home"),
+            2 => new ConsoleAgentAction(false, "cat ~/AGENT_LOG.md", true, "verify it landed"),
+            _ => new ConsoleAgentAction(true, null, false, "task recorded")
+        });
+    }
+
+    // The text is typed into the agent's own shell; strip characters that would
+    // break the demo command (this is not a security boundary — isolation is).
+    private static string Sanitize(string value) =>
+        value.Replace("\"", "").Replace("$", "").Replace("`", "").Replace("\n", " ").Trim();
+}
+
+// Drives a console session toward a goal: observe the screen, ask the brain for
+// the next action, and submit each keystroke batch as a `console.type` through
+// AgentRuntime — so ownership, policy, and audit apply to every step exactly as
+// they would to a human. Read-side observation is a plain capture; the write
+// side always goes through the bus.
+public sealed class ConsoleAgentLoop
+{
+    private const int MaxStepCeiling = 20;
+
+    private readonly AgentRuntime runtime;
+    private readonly IConsoleBackend console;
+
+    public ConsoleAgentLoop(AgentRuntime runtime, IConsoleBackend console)
+    {
+        this.runtime = runtime;
+        this.console = console;
+    }
+
+    public async Task<ConsoleLoopResult> RunAsync(
+        string sessionId,
+        string goal,
+        int maxSteps,
+        RuntimePrincipal principal,
+        Guid userId,
+        Guid agentId,
+        IConsoleAgentBrain brain,
+        CancellationToken cancellationToken)
+    {
+        var steps = new List<ConsoleLoopStep>();
+        var history = new List<string>();
+        var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
+
+        for (var step = 1; step <= cap; step++)
+        {
+            var view = await console.CaptureAsync(sessionId, cancellationToken);
+            if (!view.Available)
+            {
+                return new ConsoleLoopResult(sessionId, goal, false, $"Console unavailable: {view.Detail}", steps);
+            }
+
+            var action = await brain.DecideAsync(goal, view.Screen, history, step, cancellationToken);
+            if (action.Done)
+            {
+                steps.Add(new ConsoleLoopStep(step, view.Screen, null, false, true, action.Note, "Done", "Agent reported the goal complete."));
+                return new ConsoleLoopResult(sessionId, goal, true, "Agent reported the goal complete.", steps);
+            }
+
+            var text = action.Text ?? "";
+            var result = await runtime.SubmitAsync(
+                new SubmitToolRequestDto(userId, agentId, "console", "type", new Dictionary<string, string>
+                {
+                    ["id"] = sessionId,
+                    ["text"] = text,
+                    ["submit"] = action.Submit ? "true" : "false"
+                }),
+                principal,
+                cancellationToken);
+
+            steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, result.Decision.ToString(), result.Reason));
+            history.Add($"typed: {text}");
+
+            // A denied keystroke stops the loop — the agent cannot push past the
+            // policy that just refused it.
+            if (result.Decision != PolicyDecision.Allow)
+            {
+                return new ConsoleLoopResult(sessionId, goal, false, $"Blocked at step {step}: {result.Reason}", steps);
+            }
+        }
+
+        return new ConsoleLoopResult(sessionId, goal, false, $"Reached the step limit ({cap}) before finishing.", steps);
+    }
+}
