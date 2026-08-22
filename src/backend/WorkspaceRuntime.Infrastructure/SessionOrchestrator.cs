@@ -55,6 +55,9 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
             case "destroy":
                 return await DestroyAsync(Required(request, "id"), cancellationToken);
 
+            case "inhabit":
+                return await InhabitAsync(Required(request, "id"), Required(request, "mode"), cancellationToken);
+
             default:
                 return new ToolExecutionResult(false, $"Session executor rejected unknown operation '{request.Operation}'.", null);
         }
@@ -66,6 +69,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         {
             "create" => $"Would create an isolated {request.Arguments.GetValueOrDefault("profile")} session for '{request.Arguments.GetValueOrDefault("owner")}', over that owner's persistent home.",
             "destroy" => $"Would destroy session '{request.Arguments.GetValueOrDefault("id")}' and discard its running state (the home volume persists).",
+            "inhabit" => $"Would take a seat at session '{request.Arguments.GetValueOrDefault("id")}' as '{request.Arguments.GetValueOrDefault("mode")}', recorded on behalf of its agent.",
             _ => "Unknown session operation."
         };
         return Task.FromResult(new EffectPreview(true, summary, Array.Empty<CellChange>()));
@@ -108,6 +112,27 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend
         var portText = port is null ? "pending" : port.Value.ToString();
         var kind = isConsole ? "console" : "desktop";
         return new ToolExecutionResult(true, $"Started {profile} {kind} '{id}' (viewport 127.0.0.1:{portText}).", null);
+    }
+
+    // Inhabiting does not change the container; it is the governed, audited act
+    // of a human taking a seat at an owned agent's session. It resolves the
+    // live viewport so the human can open it. (Keystroke-level read-only for
+    // "shadow" and agent-suspend for "become" arrive with the session gateway,
+    // docs/ai-native-ui.md V0.6; today this is the accountable grant.)
+    private async Task<ToolExecutionResult> InhabitAsync(string id, string mode, CancellationToken cancellationToken)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == id);
+        if (session is null)
+        {
+            return new ToolExecutionResult(false, $"Session '{id}' was not found.", null);
+        }
+
+        if (session.Status != "running")
+        {
+            return new ToolExecutionResult(false, $"Session '{id}' is not running ({session.Status}).", null);
+        }
+
+        return new ToolExecutionResult(true, $"Inhabiting {session.Kind} '{id}' ({mode}) at viewport 127.0.0.1:{session.ViewportPort}.", null);
     }
 
     private async Task<ToolExecutionResult> DestroyAsync(string id, CancellationToken cancellationToken)

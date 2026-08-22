@@ -243,7 +243,8 @@ public sealed class EfRuntimeStore : IRuntimeStore
         Enum.Parse<AuditOutcome>(row.Outcome),
         row.Detail,
         row.CorrelationId,
-        row.Principal);
+        row.Principal,
+        row.OnBehalfOf);
 
     private static AuditEventRow ToRow(AuditEvent auditEvent) => new()
     {
@@ -255,7 +256,8 @@ public sealed class EfRuntimeStore : IRuntimeStore
         Outcome = auditEvent.Outcome.ToString(),
         Detail = auditEvent.Detail,
         CorrelationId = auditEvent.CorrelationId,
-        Principal = auditEvent.Principal
+        Principal = auditEvent.Principal,
+        OnBehalfOf = auditEvent.OnBehalfOf
     };
 
     private sealed record StoredToolRequest(

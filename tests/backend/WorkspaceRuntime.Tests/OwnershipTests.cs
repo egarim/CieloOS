@@ -170,6 +170,46 @@ public class OwnershipTests
         Assert.Equal(PolicyDecision.Allow, approved.Decision);
     }
 
+    [Fact]
+    public async Task A_human_inhabiting_its_own_agent_is_allowed_and_audited_with_dual_actor()
+    {
+        var store = new InMemoryRuntimeStore();
+        var joche = Human(store, "joche");
+        var jocheAgentProfile = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+        var jocheSession = new DesktopSession("joche-agent-abc", "joche-agent", "agent-console", "running", 40000, "console");
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new NoopExecutor(), TestRepository.Surfaces(),
+            new FakeSessions(new[] { jocheSession }));
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgentProfile.Id, "session", "inhabit",
+            new Dictionary<string, string> { ["id"] = "joche-agent-abc", ["mode"] = "become" }), joche, CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Allow, result.Decision);
+        // Dual-actor: the human acted, on behalf of the agent.
+        Assert.Contains(store.AuditEvents, auditEvent =>
+            auditEvent.Action == "session.inhabit"
+            && auditEvent.Principal == "joche"
+            && auditEvent.OnBehalfOf == "joche-agent");
+    }
+
+    [Fact]
+    public async Task A_human_may_not_inhabit_another_users_session()
+    {
+        var store = new InMemoryRuntimeStore();
+        var joche = Human(store, "joche");
+        var jocheAgentProfile = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+        var yuliaSession = new DesktopSession("yulia-abc", "yulia", "agent-console", "running", 40000, "console");
+        var runtime = new AgentRuntime(store, TestRepository.PolicyEngine(), new NoopExecutor(), TestRepository.Surfaces(),
+            new FakeSessions(new[] { yuliaSession }));
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Subject, jocheAgentProfile.Id, "session", "inhabit",
+            new Dictionary<string, string> { ["id"] = "yulia-abc", ["mode"] = "shadow" }), joche, CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Deny, result.Decision);
+        Assert.Contains("may not inhabit a session owned by 'yulia'", result.Reason);
+    }
+
     private static AgentRuntime Runtime(IRuntimeStore store) =>
         new(store, TestRepository.PolicyEngine(), new SpreadsheetSandboxExecutor(store), TestRepository.Surfaces());
 

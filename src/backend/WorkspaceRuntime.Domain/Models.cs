@@ -71,6 +71,9 @@ public sealed record ApprovalRecord(
     DateTimeOffset? ResolvedAt,
     string RequestHash = "");
 
+// Principal is the actor that drove this event; OnBehalfOf is the identity
+// whose grants/seat were used, when different (dual-actor: "joche, on behalf of
+// joche-agent"). For an agent acting as itself, OnBehalfOf is null.
 public sealed record AuditEvent(
     Guid Id,
     DateTimeOffset OccurredAt,
@@ -80,7 +83,8 @@ public sealed record AuditEvent(
     AuditOutcome Outcome,
     string Detail,
     Guid? CorrelationId = null,
-    string? Principal = null);
+    string? Principal = null,
+    string? OnBehalfOf = null);
 
 public sealed record SpreadsheetCell(string Address, string Value);
 

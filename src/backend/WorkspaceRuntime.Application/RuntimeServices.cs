@@ -80,6 +80,9 @@ public sealed class AgentRuntime
         var actor = principal.Slug;
         var user = store.GetUser(dto.UserId);
         var agent = store.GetAgent(dto.AgentId);
+        // When a human acts, it acts through (and on behalf of) its agent —
+        // the dual-actor pair. An agent acting as itself has no second actor.
+        var onBehalfOf = principal.Kind == PrincipalKind.Human ? agent.Slug : null;
         var request = new ToolRequest(Guid.NewGuid(), dto.UserId, dto.AgentId, dto.ToolName, dto.Operation, dto.Arguments, DateTimeOffset.UtcNow);
 
         // An agent principal may only act as itself; a human may act as an
@@ -132,7 +135,10 @@ public sealed class AgentRuntime
                 return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not open a session over '{homeOwner}'.");
             }
 
-            if (dto.Operation == "destroy"
+            // Per-session ops (destroy, inhabit) are gated on the target
+            // session's owner, resolved by id — the same choke point, so every
+            // route is covered.
+            if ((dto.Operation == "destroy" || dto.Operation == "inhabit")
                 && dto.Arguments.TryGetValue("id", out var sessionId)
                 && sessions is not null)
             {
@@ -140,7 +146,7 @@ public sealed class AgentRuntime
                     .FirstOrDefault(session => string.Equals(session.Id, sessionId, StringComparison.Ordinal));
                 if (target is not null && !Ownership.CanAccessHome(principal, target.Owner, store))
                 {
-                    return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not destroy a session owned by '{target.Owner}'.");
+                    return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not {dto.Operation} a session owned by '{target.Owner}'.");
                 }
             }
         }
@@ -168,7 +174,7 @@ public sealed class AgentRuntime
                         return Denied(request, user.Id, agent.Id, actor, $"Executor rejected the request: {exception.Message}");
                     }
 
-                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, evaluation.Reason, request.Id, actor));
+                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, evaluation.Reason, request.Id, actor, onBehalfOf));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, result, null, store.AuditEvents);
 
                 case PolicyDecision.RequireApproval:
@@ -176,7 +182,7 @@ public sealed class AgentRuntime
                     var approval = new ApprovalRecord(Guid.NewGuid(), request.Id, user.Id, ApprovalStatus.Pending, evaluation.Reason, DateTimeOffset.UtcNow, null, requestHash);
                     store.UpsertApproval(approval);
                     store.SavePendingRequest(approval.Id, request);
-                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.PendingApproval, evaluation.Reason, request.Id, actor));
+                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.PendingApproval, evaluation.Reason, request.Id, actor, onBehalfOf));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, null, approval, store.AuditEvents);
 
                 default:
@@ -229,11 +235,13 @@ public sealed class AgentRuntime
                 throw new InvalidOperationException("The pending request for this approval is missing; it can only be rejected.");
             }
 
+            var onBehalfOf = request is not null ? store.GetAgent(request.AgentId).Slug : null;
+
             if (!approved)
             {
                 var rejected = approval with { Status = ApprovalStatus.Rejected, ResolvedAt = DateTimeOffset.UtcNow };
                 store.UpsertApproval(rejected);
-                store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request?.AgentId, request is null ? "approval.reject" : $"{request.ToolName}.{request.Operation}", AuditOutcome.Blocked, "Human rejected approval request.", request?.Id ?? approval.ToolRequestId, actor));
+                store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request?.AgentId, request is null ? "approval.reject" : $"{request.ToolName}.{request.Operation}", AuditOutcome.Blocked, "Human rejected approval request.", request?.Id ?? approval.ToolRequestId, actor, onBehalfOf));
                 return new ToolRequestResultDto(PolicyDecision.Deny, "Human rejected approval request.", null, rejected, store.AuditEvents);
             }
 
@@ -242,7 +250,7 @@ public sealed class AgentRuntime
             var result = await executor.ExecuteAsync(request!, cancellationToken);
             var resolved = approval with { Status = ApprovalStatus.Approved, ResolvedAt = DateTimeOffset.UtcNow };
             store.UpsertApproval(resolved);
-            store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request!.AgentId, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, "Human approved request.", request.Id, actor));
+            store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request!.AgentId, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, "Human approved request.", request.Id, actor, onBehalfOf));
             return new ToolRequestResultDto(PolicyDecision.Allow, "Human approved request.", result, resolved, store.AuditEvents);
         }
         finally

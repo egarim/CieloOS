@@ -25,7 +25,7 @@ type ApprovalView = {
   pendingRequest?: { toolName: string; operation: string; arguments: Record<string, string> } | null;
   preview?: EffectPreview | null;
 };
-type AuditEvent = { id: string; occurredAt: string; action: string; outcome: string; detail: string; principal?: string | null };
+type AuditEvent = { id: string; occurredAt: string; action: string; outcome: string; detail: string; principal?: string | null; onBehalfOf?: string | null };
 type SurfaceCommand = {
   name: string;
   displayName: string;
@@ -257,7 +257,7 @@ function App() {
 
   // Desktop lifecycle rides the same command bus as everything else: create is
   // Allow, destroy is RequireApproval, so it surfaces in the approvals feed.
-  async function sessionCommand(name: "create" | "destroy", input: Record<string, string>) {
+  async function sessionCommand(name: "create" | "destroy" | "inhabit", input: Record<string, string>) {
     try {
       const result = await api<CommandResult>(`/api/surfaces/session/commands/${name}`, {
         method: "POST",
@@ -311,6 +311,14 @@ function App() {
       crumbs.push({ label: part, path: acc });
     }
     return crumbs;
+  }
+
+  // Inhabiting is the governed way to take a seat at an owned agent's session:
+  // it records a dual-actor audit entry (you, on behalf of the agent) before
+  // opening the viewport.
+  async function inhabit(session: SessionView, mode: "shadow" | "become") {
+    await sessionCommand("inhabit", { id: session.id, mode });
+    watchDesktop(session);
   }
 
   function watchDesktop(session: SessionView) {
@@ -458,16 +466,35 @@ function App() {
                       <div className="sessionMeta">
                         <strong>{session.id}</strong>
                         <span className="tag">{session.kind}</span>
+                        <span className="tag">{session.owner}</span>
                         <span className={session.status === "running" ? "allow" : "muted"}>{session.status}</span>
                       </div>
                       <div className="actions">
-                        <button
-                          data-automation-id={`watch-${session.id}`}
-                          disabled={session.status !== "running" || !session.viewportPort}
-                          onClick={() => watchDesktop(session)}
-                        >
-                          <ShieldCheck size={16} /> {session.kind === "console" ? "Open" : "Watch"}
-                        </button>
+                        {whoami?.homes.includes(session.owner) ? (
+                          <>
+                            <button
+                              data-automation-id={`shadow-${session.id}`}
+                              disabled={session.status !== "running" || !session.viewportPort}
+                              onClick={() => inhabit(session, "shadow")}
+                            >
+                              <ShieldCheck size={16} /> Shadow
+                            </button>
+                            <button
+                              data-automation-id={`become-${session.id}`}
+                              disabled={session.status !== "running" || !session.viewportPort}
+                              onClick={() => inhabit(session, "become")}
+                            >
+                              <KeyRound size={16} /> Become
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            disabled={session.status !== "running" || !session.viewportPort}
+                            onClick={() => watchDesktop(session)}
+                          >
+                            <ShieldCheck size={16} /> Watch
+                          </button>
+                        )}
                         <button
                           className="danger"
                           data-automation-id={`destroy-${session.id}`}
@@ -651,7 +678,7 @@ function App() {
             <span className={event.outcome === "Success" ? "allow" : event.outcome === "Blocked" ? "deny" : "hold"}>
               {event.outcome}
             </span>
-            <span className="principal">{event.principal ?? ""}</span>
+            <span className="principal">{event.principal ?? ""}{event.onBehalfOf ? ` → ${event.onBehalfOf}` : ""}</span>
             <p>{event.detail}</p>
           </article>
         ))}

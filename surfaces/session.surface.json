@@ -50,6 +50,28 @@
         "reason": "A principal may create its own isolated desktop session."
       }
     },
+    "inhabit": {
+      "displayName": "Inhabit session",
+      "exposedToAgent": false,
+      "requiresHuman": true,
+      "mutatesState": false,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "mode": { "type": "string", "enum": ["shadow", "become"] }
+        },
+        "required": ["id", "mode"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "An owner may inhabit its agent's session; the action is recorded with dual-actor attribution."
+      }
+    },
     "destroy": {
       "displayName": "Destroy desktop",
       "exposedToAgent": true,
