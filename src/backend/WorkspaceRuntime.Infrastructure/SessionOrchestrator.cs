@@ -242,18 +242,37 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             }
         }
 
-        // Let the shell render, then read the screen back so the caller sees the
-        // effect of what it just typed (observe-after-act). The keystrokes did
-        // land; if the readback itself fails, say so rather than returning a
-        // silent empty screen.
-        await Task.Delay(300, cancellationToken);
-        var view = await CaptureAsync(sessionId, cancellationToken);
-        var detail = submit ? "Typed and submitted." : "Typed.";
-        if (!view.Available)
+        // Observe-after-act, WAITING FOR THE COMMAND TO FINISH rather than
+        // guessing a fixed delay: poll until the shell is the foreground process
+        // again (the prompt returned) and stays that way, bounded by a max wait.
+        // A fixed short delay races slow commands (a web search, an install, a
+        // build) and captures a blank or half-rendered screen.
+        var screen = string.Empty;
+        var readbackFailed = string.Empty;
+        var idleStreak = 0;
+        var sawBusy = false;
+        for (var i = 0; i < 90; i++)
         {
-            detail += $" (screen readback unavailable: {view.Detail})";
+            await Task.Delay(200, cancellationToken);
+            var poll = await RunPodmanAsync(new[] { "exec", name, "bash", "-c",
+                $"tmux display-message -p -t {options.ConsoleTmuxSession} '#{{pane_current_command}}'; echo '<<<L>>>'; tmux capture-pane -p -t {options.ConsoleTmuxSession}" }, cancellationToken);
+            if (poll.ExitCode != 0) { readbackFailed = poll.Stderr.Trim(); break; }
+
+            var split = poll.Stdout.Split("<<<L>>>", 2);
+            var foreground = split[0].Trim();
+            if (split.Length > 1) { screen = split[1].Trim('\n'); }
+
+            var idle = foreground is "bash" or "-bash" or "sh" or "zsh";
+            if (idle) { idleStreak++; } else { idleStreak = 0; sawBusy = true; }
+            if (idleStreak >= 2 && (sawBusy || i >= 4)) { break; }
         }
-        return new ConsoleActionResult(true, view.Screen, detail);
+
+        var detail = submit ? "Typed and submitted." : "Typed.";
+        if (!string.IsNullOrEmpty(readbackFailed))
+        {
+            detail += $" (screen readback unavailable: {readbackFailed})";
+        }
+        return new ConsoleActionResult(true, screen, detail);
     }
 
     private static string LabelOrDefault(JsonElement labels, string key, string fallback) =>

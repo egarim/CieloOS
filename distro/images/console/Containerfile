@@ -6,14 +6,19 @@ FROM docker.io/library/ubuntu:24.04
 
 # Check-Date / Valid-Until are relaxed because trial VMs can boot with a skewed
 # clock, which otherwise makes apt reject the archive metadata.
+# Base shell tools + the "hands" for real work: an HTTP client (curl), JSON
+# (jq), a text browser (w3m), and Python with openpyxl/requests so the agent can
+# search the web (via the OS's SearXNG service) and build .csv/.xlsx files.
 RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends \
         ttyd tmux bash ca-certificates procps nano less git \
+        curl jq w3m python3 python3-openpyxl python3-requests \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /root
 COPY entrypoint.sh /usr/local/bin/lunos-console-entrypoint
-RUN chmod +x /usr/local/bin/lunos-console-entrypoint
+COPY websearch /usr/local/bin/websearch
+RUN chmod +x /usr/local/bin/lunos-console-entrypoint /usr/local/bin/websearch
 
 EXPOSE 7681
 ENTRYPOINT ["/usr/local/bin/lunos-console-entrypoint"]

@@ -29,7 +29,9 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         "If the goal is already achieved, set done=true and leave text empty. Otherwise put the " +
         "exact shell command to type in \"text\", with submit=true to press Enter. Keep commands " +
         "safe and scoped to the home directory; never run destructive or networked commands unless " +
-        "the goal explicitly requires it. \"note\" is a one-line explanation of your reasoning.";
+        "the goal explicitly requires it. Prefer ONE single-line command per step (use python3 -c " +
+        "'...' for short scripts); avoid multi-line heredocs. \"note\" is a one-line explanation of " +
+        "your reasoning.";
 
     private readonly HttpClient http;
     private readonly ModelBrainOptions options;
@@ -56,7 +58,7 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
                 new { role = "user", content = user }
             },
             temperature = 0.1,
-            max_tokens = 400,
+            max_tokens = 2000,
             response_format = new { type = "json_object" }
         };
 

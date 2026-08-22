@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# websearch "QUERY" [COUNT] — private web search via the OS's SearXNG service.
+# Prints one result per line as TSV: rank<TAB>title<TAB>url<TAB>snippet
+# (spreadsheet-friendly). Point SEARXNG_URL elsewhere to override the endpoint.
+set -euo pipefail
+if [ "$#" -lt 1 ]; then
+  echo "usage: websearch \"query\" [count]" >&2
+  exit 2
+fi
+query="$1"
+count="${2:-10}"
+url="${SEARXNG_URL:-http://host.containers.internal:8888}"
+
+curl -sS -m 30 --get "$url/search" \
+  --data-urlencode "q=${query}" \
+  --data-urlencode "format=json" \
+| python3 -c '
+import sys, json
+count = int(sys.argv[1])
+data = json.load(sys.stdin)
+results = data.get("results", [])[:count]
+if not results:
+    print("(no results)", file=sys.stderr)
+for i, r in enumerate(results, 1):
+    title = (r.get("title") or "").replace("\t", " ").replace("\n", " ").strip()
+    link = (r.get("url") or "").strip()
+    snippet = (r.get("content") or "").replace("\t", " ").replace("\n", " ").strip()
+    print(f"{i}\t{title}\t{link}\t{snippet}")
+' "$count"
