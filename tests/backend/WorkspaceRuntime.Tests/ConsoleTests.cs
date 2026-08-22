@@ -102,6 +102,24 @@ public class ConsoleTests
         Assert.Equal(PolicyDecision.Deny, result.Decision);
     }
 
+    [Fact]
+    public async Task Typing_into_an_unknown_session_fails_closed()
+    {
+        var store = new InMemoryRuntimeStore();
+        var jocheAgent = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
+        var joche = store.Users.Single(candidate => candidate.Slug == "joche");
+        // No sessions exist; the console gate must deny rather than fall through.
+        var runtime = Runtime(store);
+
+        var result = await runtime.SubmitAsync(new SubmitToolRequestDto(
+            joche.Id, jocheAgent.Id, "console", "type",
+            new Dictionary<string, string> { ["id"] = "ghost-session", ["text"] = "ls" }),
+            Agent(store, "joche-agent"), CancellationToken.None);
+
+        Assert.Equal(PolicyDecision.Deny, result.Decision);
+        Assert.Contains("was not found", result.Reason);
+    }
+
     private sealed class NoopExecutor : ISandboxedToolExecutor
     {
         public Task<ToolExecutionResult> ExecuteAsync(ToolRequest request, CancellationToken cancellationToken) =>

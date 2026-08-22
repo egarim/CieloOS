@@ -25,6 +25,12 @@ public sealed class ConsoleSurfaceExecutor : ISurfaceExecutor
             case "type":
                 var id = Required(request, "id");
                 var text = request.Arguments.GetValueOrDefault("text", "");
+                // Bound the payload: a huge blob stresses argv limits, tmux, and
+                // the readback. Reject rather than truncate so the caller knows.
+                if (text.Length > 4096)
+                {
+                    return new ToolExecutionResult(false, "Console input exceeds the 4096-character limit.", null);
+                }
                 // Press Enter by default; a caller can hold the line open with
                 // submit=false to build a command up in pieces before running it.
                 var submit = !request.Arguments.TryGetValue("submit", out var flag)

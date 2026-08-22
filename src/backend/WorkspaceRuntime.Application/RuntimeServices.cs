@@ -153,14 +153,23 @@ public sealed class AgentRuntime
 
         // Console I/O targets a live session; gate it on that session's owner at
         // the same choke point, so an agent can only observe/act on its own
-        // console and a human only on a session it or its agents own.
-        if (dto.ToolName == "console"
-            && dto.Arguments.TryGetValue("id", out var consoleTarget)
-            && sessions is not null)
+        // console and a human only on a session it or its agents own. Console
+        // ops fail CLOSED: if the backend is missing or the session cannot be
+        // resolved, deny rather than let an unowned action slip through.
+        if (dto.ToolName == "console" && dto.Arguments.TryGetValue("id", out var consoleTarget))
         {
+            if (sessions is null)
+            {
+                return Denied(request, user.Id, agent.Id, actor, "Console operations are unavailable: no session backend is configured.");
+            }
+
             var target = (await sessions.ListAsync(cancellationToken))
                 .FirstOrDefault(session => string.Equals(session.Id, consoleTarget, StringComparison.Ordinal));
-            if (target is not null && !Ownership.CanAccessHome(principal, target.Owner, store))
+            if (target is null)
+            {
+                return Denied(request, user.Id, agent.Id, actor, $"Console session '{consoleTarget}' was not found.");
+            }
+            if (!Ownership.CanAccessHome(principal, target.Owner, store))
             {
                 return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not operate the console of a session owned by '{target.Owner}'.");
             }
@@ -189,7 +198,12 @@ public sealed class AgentRuntime
                         return Denied(request, user.Id, agent.Id, actor, $"Executor rejected the request: {exception.Message}");
                     }
 
-                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, evaluation.Reason, request.Id, actor, onBehalfOf));
+                    // A real input ledger: for console typing, record the exact
+                    // text (truncated) the principal sent, not just "type happened".
+                    var successDetail = dto.ToolName == "console" && dto.Operation == "type"
+                        ? $"input: {Truncate(dto.Arguments.GetValueOrDefault("text", ""))}"
+                        : evaluation.Reason;
+                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, successDetail, request.Id, actor, onBehalfOf));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, result, null, store.AuditEvents);
 
                 case PolicyDecision.RequireApproval:
@@ -273,6 +287,9 @@ public sealed class AgentRuntime
             mutationGate.Release();
         }
     }
+
+    private static string Truncate(string value, int max = 200) =>
+        value.Length <= max ? value : value[..max] + "…";
 
     private ToolRequestResultDto Denied(ToolRequest request, Guid userId, Guid agentId, string principal, string reason)
     {

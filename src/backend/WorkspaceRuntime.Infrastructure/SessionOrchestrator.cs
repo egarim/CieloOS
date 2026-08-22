@@ -243,10 +243,17 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         }
 
         // Let the shell render, then read the screen back so the caller sees the
-        // effect of what it just typed (observe-after-act).
+        // effect of what it just typed (observe-after-act). The keystrokes did
+        // land; if the readback itself fails, say so rather than returning a
+        // silent empty screen.
         await Task.Delay(300, cancellationToken);
         var view = await CaptureAsync(sessionId, cancellationToken);
-        return new ConsoleActionResult(true, view.Screen, submit ? "Typed and submitted." : "Typed.");
+        var detail = submit ? "Typed and submitted." : "Typed.";
+        if (!view.Available)
+        {
+            detail += $" (screen readback unavailable: {view.Detail})";
+        }
+        return new ConsoleActionResult(true, view.Screen, detail);
     }
 
     private static string LabelOrDefault(JsonElement labels, string key, string fallback) =>

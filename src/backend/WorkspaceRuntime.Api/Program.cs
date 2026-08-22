@@ -198,8 +198,16 @@ app.MapGet("/api/approvals", async (IRuntimeStore store, IDryRunToolExecutor dry
 app.MapGet("/api/surfaces", (ISurfaceRegistry surfaces) =>
     surfaces.Surfaces.Select(surface => new { surface.Id, surface.DisplayName, surface.Kind }));
 
-app.MapGet("/api/sessions", async (ISessionBackend sessions, CancellationToken cancellationToken) =>
-    await sessions.ListAsync(cancellationToken));
+// A caller sees only the sessions it can reach — its own and its agents'.
+// Without this filter the list leaks every user's session ids, owners, and
+// ports to any authenticated principal.
+app.MapGet("/api/sessions", async (HttpContext context, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var visible = (await sessions.ListAsync(cancellationToken))
+        .Where(session => Ownership.CanAccessHome(caller, session.Owner, store));
+    return Results.Ok(visible);
+});
 
 // Observe a console session's screen — the agent's (and the watching human's)
 // read side. Gated on the session owner, like the home browser: a caller may

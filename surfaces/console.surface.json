@@ -27,7 +27,7 @@
         "type": "object",
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
-          "text": { "type": "string" },
+          "text": { "type": "string", "maxLength": 4096 },
           "submit": { "type": "string", "enum": ["true", "false"] }
         },
         "required": ["id", "text"],

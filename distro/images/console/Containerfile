@@ -1,0 +1,19 @@
+# The Lun.Os console session image: a lightweight web terminal (ttyd) over a
+# PERSISTENT, shared tmux session. The persistent session is what lets an agent
+# observe and type into its console headlessly (via `podman exec tmux ...`)
+# while a human can attach to the very same screen through ttyd.
+FROM docker.io/library/ubuntu:24.04
+
+# Check-Date / Valid-Until are relaxed because trial VMs can boot with a skewed
+# clock, which otherwise makes apt reject the archive metadata.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        ttyd tmux bash ca-certificates procps nano less git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /root
+COPY entrypoint.sh /usr/local/bin/lunos-console-entrypoint
+RUN chmod +x /usr/local/bin/lunos-console-entrypoint
+
+EXPOSE 7681
+ENTRYPOINT ["/usr/local/bin/lunos-console-entrypoint"]
