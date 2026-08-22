@@ -14,6 +14,13 @@ public class CommandBusConformanceTests
         "/api/inference/chat"    // local model conversation; advisory, mutates nothing
     };
 
+    // Exact endpoints (normalized, with ${...} -> *) that are bus-respecting even
+    // though they aren't literal /api/surfaces calls.
+    private static readonly string[] AllowedPostPaths =
+    {
+        "/api/sessions/*/agent-run"  // runs the console loop; every keystroke it makes is a policy-checked console.type
+    };
+
     [Fact]
     public void Frontend_mutations_go_through_the_command_bus()
     {
@@ -36,7 +43,8 @@ public class CommandBusConformanceTests
                 }
 
                 var normalized = Regex.Replace(path, "\\$\\{[^}]*\\}", "*");
-                if (!AllowedPostPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal)))
+                if (!AllowedPostPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.Ordinal))
+                    && !AllowedPostPaths.Contains(normalized, StringComparer.Ordinal))
                 {
                     offenders.Add($"{Path.GetFileName(file)}: POST {path}");
                 }

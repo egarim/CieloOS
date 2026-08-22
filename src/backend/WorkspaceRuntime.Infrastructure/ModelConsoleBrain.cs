@@ -26,7 +26,9 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         "(terminal contents) and the HISTORY of what you have already typed. Decide the SINGLE " +
         "next action. Reply with ONLY a JSON object of the form " +
         "{\"done\": boolean, \"text\": string, \"submit\": boolean, \"note\": string}. " +
-        "If the goal is already achieved, set done=true and leave text empty. Otherwise put the " +
+        "If the SCREEN already shows the goal is achieved, set done=true and leave text empty — do " +
+        "this immediately, do not re-verify. NEVER repeat a command you have already run; if you " +
+        "just confirmed a result, you are done. Otherwise put the " +
         "exact shell command to type in \"text\", with submit=true to press Enter. Keep commands " +
         "safe and scoped to the home directory; never run destructive or networked commands unless " +
         "the goal explicitly requires it. Prefer ONE single-line command per step (use python3 -c " +

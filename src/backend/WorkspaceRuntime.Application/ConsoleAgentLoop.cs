@@ -86,6 +86,7 @@ public sealed class ConsoleAgentLoop
     {
         var steps = new List<ConsoleLoopStep>();
         var history = new List<string>();
+        var recent = new List<string>();
         var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
 
         for (var step = 1; step <= cap; step++)
@@ -104,6 +105,17 @@ public sealed class ConsoleAgentLoop
             }
 
             var text = action.Text ?? "";
+
+            // Anti-loop: if the model repeats a command it already ran, it isn't
+            // making progress — stop instead of burning the whole step budget
+            // (and looking like a crash). The result of the earlier run stands.
+            if (!string.IsNullOrWhiteSpace(text) && recent.Contains(text))
+            {
+                steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, "Stopped", "Repeated a command already run."));
+                return new ConsoleLoopResult(sessionId, goal, false,
+                    "Stopped: the agent repeated a command it had already run without making progress (its earlier result stands — check the home).", steps);
+            }
+
             var result = await runtime.SubmitAsync(
                 new SubmitToolRequestDto(userId, agentId, "console", "type", new Dictionary<string, string>
                 {
@@ -116,6 +128,11 @@ public sealed class ConsoleAgentLoop
 
             steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, result.Decision.ToString(), result.Reason));
             history.Add($"typed: {text}");
+            recent.Add(text);
+            if (recent.Count > 2)
+            {
+                recent.RemoveAt(0);
+            }
 
             // A denied keystroke stops the loop — the agent cannot push past the
             // policy that just refused it.
