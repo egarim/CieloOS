@@ -14,7 +14,7 @@
 #    as "no sessions".
 set -uo pipefail
 
-TOKEN="${LUNOS_TOKEN:-REDACTED-DEV-TOKEN}"
+TOKEN="${LUNOS_TOKEN:?Set LUNOS_TOKEN to a bearer token, e.g. export LUNOS_TOKEN=\"\$(cat .data/secrets/<slug>.token)\"}"
 API="${LUNOS_API:-http://127.0.0.1:5150/api/sessions}"
 SSH_HOST="workspace@localhost"
 SSH_PORT="2222"
