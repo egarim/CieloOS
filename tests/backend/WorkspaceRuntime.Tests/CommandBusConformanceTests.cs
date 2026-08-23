@@ -18,7 +18,8 @@ public class CommandBusConformanceTests
     // though they aren't literal /api/surfaces calls.
     private static readonly string[] AllowedPostPaths =
     {
-        "/api/sessions/*/agent-run"  // runs the console loop; every keystroke it makes is a policy-checked console.type
+        "/api/sessions/*/agent-run",   // runs the console loop; every keystroke it makes is a policy-checked console.type
+        "/api/sessions/*/desktop-run"  // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
     };
 
     [Fact]

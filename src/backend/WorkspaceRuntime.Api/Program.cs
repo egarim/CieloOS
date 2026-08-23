@@ -152,6 +152,26 @@ builder.Services.AddSingleton<IConsoleBrainRegistry>(sp =>
 builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
     sp.GetRequiredService<IConsoleBrainRegistry>().Resolve(null).Brain);
 
+// The desktop loop needs a VISION-capable brain (it grounds on the AT-SPI element
+// list + a screenshot). Azure OpenAI gpt-4.1-mini provides it; without a vision
+// provider a stand-in reports "no vision configured" rather than flailing.
+builder.Services.AddSingleton<DesktopAgentLoop>();
+if (!string.IsNullOrWhiteSpace(azureKey))
+{
+    var azureVisionOptions = new ModelBrainOptions
+    {
+        BaseUrl = builder.Configuration["Inference:Azure:BaseUrl"] ?? "https://sivar-aoai-eus.openai.azure.com/openai/v1",
+        Model = builder.Configuration["Inference:Azure:VisionModel"] ?? builder.Configuration["Inference:Azure:Model"] ?? "gpt-4.1-mini",
+        ApiKey = azureKey
+    };
+    builder.Services.AddSingleton<IDesktopAgentBrain>(_ =>
+        new ModelDesktopBrain(new HttpClient { Timeout = TimeSpan.FromSeconds(90) }, azureVisionOptions));
+}
+else
+{
+    builder.Services.AddSingleton<IDesktopAgentBrain, NoVisionDesktopBrain>();
+}
+
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
 builder.Services.AddHostedService<WorkspaceRuntime.Api.SharedInboxWatcher>();
@@ -362,6 +382,29 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
     var brain = brains.Resolve(store.GetAgent(agentId).InferenceProvider).Brain;
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, brain, cancellationToken);
+    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    return Results.Ok(result);
+});
+
+// Drive a DESKTOP session toward a goal: the loop observes the AT-SPI element list
+// + a screenshot, asks the vision brain for the next action, and submits each
+// click/keystroke as a policy-checked, audited `desktop.*` command. Gated on the
+// session owner like the console loop; per-action ownership/policy still apply.
+app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopAgentBrain brain, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not drive a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
+    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
@@ -767,6 +810,7 @@ public sealed record SurfaceCommandRequest(
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
+public sealed record DesktopRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
 
 public sealed record AgentChatMessage(
     [property: System.Text.Json.Serialization.JsonPropertyName("role")] string? Role,
