@@ -179,8 +179,12 @@ if (visionDefault is not null)
 }
 
 builder.Services.AddSingleton<IUserModelConfig, EmptyUserModelConfig>();
+// The mutable provider layer (the models surface): runtime-added providers + OS
+// default overrides, persisted 0600. The registry reads it live, so a provider
+// added from the panel is usable with no restart.
+builder.Services.AddSingleton<IProviderConfigStore>(_ => new ProviderConfigStore(secretsPath));
 builder.Services.AddSingleton<IModelRegistry>(sp =>
-    new ModelRegistry(providerProfiles, osModelDefaults, sp.GetRequiredService<IUserModelConfig>()));
+    new ModelRegistry(providerProfiles, osModelDefaults, sp.GetRequiredService<IUserModelConfig>(), sp.GetRequiredService<IProviderConfigStore>()));
 
 // The fallback brain when no chat provider resolves for an agent. On a demo image
 // that is the deterministic RecipeConsoleBrain (shows the loop with no model); on
@@ -299,6 +303,116 @@ app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISe
 });
 
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
+
+// Add a teammate (an existing owner invites another user). Human-only (enforced
+// in AccessPolicy). Returns the new user's slug + bearer token for the owner to
+// hand over; the token file is also written 0600 on the box.
+app.MapPost("/api/users", (AddUserRequest? request, ISetupService setup) =>
+{
+    var result = setup.AddUser(request?.Name);
+    return result.Outcome switch
+    {
+        AddUserOutcome.Ok => Results.Ok(new { result.Slug, result.Token }),
+        AddUserOutcome.Conflict => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status409Conflict),
+        _ => Results.BadRequest(new { error = result.Error })
+    };
+});
+
+// The models surface: list/add/remove providers and set OS defaults per capability.
+// GET is AnyPrincipal; mutations are human-only (AccessPolicy). API keys are NEVER
+// returned (only a hasKey flag), never logged, never placed in audit detail.
+app.MapGet("/api/models", (IModelRegistry registry, IProviderConfigStore store) =>
+{
+    var managed = store.All().Select(profile => profile.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var providers = registry.Providers
+        .OrderBy(profile => profile.Id, StringComparer.Ordinal)
+        .Select(profile => new
+        {
+            profile.Id,
+            profile.DisplayName,
+            profile.Kind,
+            profile.BaseUrl,
+            profile.Model,
+            capabilities = profile.Capabilities.OrderBy(capability => capability, StringComparer.Ordinal).ToArray(),
+            profile.Locality,
+            hasKey = !string.IsNullOrWhiteSpace(profile.ApiKey),
+            managed = managed.Contains(profile.Id)
+        });
+    return Results.Ok(new
+    {
+        providers,
+        defaults = new { chat = registry.OsDefault("chat"), vision = registry.OsDefault("vision") }
+    });
+});
+
+app.MapPost("/api/models", (AddProviderRequest request, HttpContext context, IProviderConfigStore store, IModelRegistry registry, IRuntimeStore runtimeStore) =>
+{
+    var displayName = (request.DisplayName ?? "").Trim();
+    var baseUrl = (request.BaseUrl ?? "").Trim();
+    var model = (request.Model ?? "").Trim();
+    var kind = string.IsNullOrWhiteSpace(request.Kind) ? "openai-compatible" : request.Kind!.Trim();
+    var locality = string.IsNullOrWhiteSpace(request.Locality) ? "cloud" : request.Locality!.Trim().ToLowerInvariant();
+    var capabilities = (request.Capabilities ?? new List<string>())
+        .Select(capability => capability.Trim().ToLowerInvariant())
+        .Where(capability => capability.Length > 0)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    var allowedCapabilities = new[] { "chat", "vision", "embedding" };
+    var allowedLocalities = new[] { "on-box", "remote-self-hosted", "cloud" };
+
+    if (displayName.Length == 0) return Results.BadRequest(new { error = "A display name is required." });
+    if (model.Length == 0) return Results.BadRequest(new { error = "A model name is required." });
+    if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var parsed) || (parsed.Scheme != "http" && parsed.Scheme != "https"))
+        return Results.BadRequest(new { error = "Base URL must be an absolute http(s) URL." });
+    if (capabilities.Count == 0) return Results.BadRequest(new { error = "Select at least one capability." });
+    if (capabilities.Any(capability => !allowedCapabilities.Contains(capability)))
+        return Results.BadRequest(new { error = $"Capabilities must be among: {string.Join(", ", allowedCapabilities)}." });
+    if (!allowedLocalities.Contains(locality))
+        return Results.BadRequest(new { error = $"Locality must be one of: {string.Join(", ", allowedLocalities)}." });
+
+    var apiKey = string.IsNullOrWhiteSpace(request.ApiKey) ? null : request.ApiKey!.Trim();
+    var added = store.Add(new ProviderDraft(displayName, kind, baseUrl, model, capabilities, locality, apiKey));
+
+    foreach (var capability in (request.DefaultFor ?? new List<string>()).Select(value => value.Trim().ToLowerInvariant()))
+    {
+        if (added.Serves(capability)) store.SetOsDefault(capability, added.Id);
+    }
+
+    var caller = Caller(context);
+    runtimeStore.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "model.add", AuditOutcome.Success,
+        $"Added provider '{added.DisplayName}' ({added.Kind}, {string.Join('/', added.Capabilities)}, {added.Locality})."));
+
+    return Results.Ok(new { added.Id, added.DisplayName, capabilities = added.Capabilities });
+});
+
+app.MapDelete("/api/models/{id}", (string id, HttpContext context, IProviderConfigStore store, IRuntimeStore runtimeStore) =>
+{
+    if (!store.Remove(id))
+    {
+        return Results.NotFound(new { error = $"No runtime-added provider '{id}' (built-in providers can't be removed here)." });
+    }
+    var caller = Caller(context);
+    runtimeStore.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "model.remove", AuditOutcome.Success, $"Removed provider '{id}'."));
+    return Results.Ok(new { removed = id });
+});
+
+app.MapPost("/api/models/defaults", (SetDefaultRequest request, IProviderConfigStore store, IModelRegistry registry) =>
+{
+    var capability = (request.Capability ?? "").Trim().ToLowerInvariant();
+    var providerId = (request.ProviderId ?? "").Trim();
+    if (capability.Length == 0 || providerId.Length == 0)
+        return Results.BadRequest(new { error = "capability and providerId are required." });
+
+    var provider = registry.Providers.FirstOrDefault(candidate => string.Equals(candidate.Id, providerId, StringComparison.OrdinalIgnoreCase));
+    if (provider is null) return Results.NotFound(new { error = $"Unknown provider '{providerId}'." });
+    if (!provider.Serves(capability)) return Results.BadRequest(new { error = $"Provider '{providerId}' does not serve '{capability}'." });
+
+    store.SetOsDefault(capability, providerId);
+    return Results.Ok(new { capability, providerId });
+});
+
 app.MapGet("/api/workspaces", (IRuntimeStore store) => store.Workspaces);
 app.MapGet("/api/agents", (IRuntimeStore store) => store.Agents);
 app.MapGet("/api/audit-events", (IRuntimeStore store) => store.AuditEvents);
@@ -876,6 +990,21 @@ public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedR
 
 public sealed record ClaimRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
+
+public sealed record AddUserRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
+
+public sealed record AddProviderRequest(
+    string? DisplayName,
+    string? Kind,
+    string? BaseUrl,
+    string? Model,
+    List<string>? Capabilities,
+    string? Locality,
+    string? ApiKey,
+    List<string>? DefaultFor);
+
+public sealed record SetDefaultRequest(string? Capability, string? ProviderId);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
 public sealed record DesktopRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);

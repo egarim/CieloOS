@@ -11,7 +11,9 @@ public class CommandBusConformanceTests
     {
         "/api/surfaces/",        // surface command dispatch (the bus)
         "/api/approvals/",       // human consent verbs (approve/reject, human principal only)
-        "/api/inference/chat"    // local model conversation; advisory, mutates nothing
+        "/api/inference/chat",   // local model conversation; advisory, mutates nothing
+        "/api/setup/",           // first-run claim: control-plane, loopback-gated, not agent-emittable
+        "/api/models"            // models surface: provider config, human-only, not a surface mutation
     };
 
     // Exact endpoints (normalized, with ${...} -> *) that are bus-respecting even
@@ -19,7 +21,8 @@ public class CommandBusConformanceTests
     private static readonly string[] AllowedPostPaths =
     {
         "/api/sessions/*/agent-run",   // runs the console loop; every keystroke it makes is a policy-checked console.type
-        "/api/sessions/*/desktop-run"  // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
+        "/api/sessions/*/desktop-run", // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
+        "/api/users"                   // add a teammate: control-plane identity creation, human-only
     };
 
     [Fact]

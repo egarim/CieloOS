@@ -163,6 +163,51 @@ public sealed class FirstRunSetupTests
         }, seedDemo: true);
     }
 
+    // --- add teammate (multi-user) ---
+
+    [Fact]
+    public void AddUser_creates_a_second_identity_with_its_own_token()
+    {
+        Run((store, auth) =>
+        {
+            var setup = new SetupService(store, auth);
+            setup.Claim("Owner One", fromLoopback: true);
+
+            var result = setup.AddUser("Grace Hopper");
+
+            Assert.Equal(AddUserOutcome.Ok, result.Outcome);
+            Assert.Equal("grace-hopper", result.Slug);
+            Assert.Equal(2, store.Users.Count);
+            Assert.Contains(store.Agents, agent => agent.Slug == "grace-hopper-agent");
+            Assert.Equal("grace-hopper", auth.Authenticate(result.Token!)!.Slug);
+        });
+    }
+
+    [Fact]
+    public void AddUser_rejects_a_taken_name()
+    {
+        Run((store, auth) =>
+        {
+            var setup = new SetupService(store, auth);
+            setup.Claim("Grace Hopper", fromLoopback: true);
+
+            var duplicate = setup.AddUser("Grace Hopper"); // same slug as the owner
+            Assert.Equal(AddUserOutcome.Conflict, duplicate.Outcome);
+            Assert.Single(store.Users);
+        });
+    }
+
+    [Fact]
+    public void AddUser_rejects_an_empty_name()
+    {
+        Run((store, auth) =>
+        {
+            var setup = new SetupService(store, auth);
+            setup.Claim("Owner", fromLoopback: true);
+            Assert.Equal(AddUserOutcome.Invalid, setup.AddUser("   ").Outcome);
+        });
+    }
+
     // --- the unconfigured brain ---
 
     [Fact]

@@ -14,6 +14,33 @@ public static class OwnerDefaults
     };
 }
 
+// A conservative slug: lowercase, ASCII alphanumerics kept, every other run
+// collapsed to a single '-', edges trimmed. "José Peña" -> "jos-pe-a". Shared by
+// identity creation and the provider store so ids are formed one way.
+public static class Slug
+{
+    public static string Of(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        var lastWasDash = false;
+        foreach (var character in value.ToLowerInvariant())
+        {
+            if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                builder.Append(character);
+                lastWasDash = false;
+            }
+            else if (!lastWasDash && builder.Length > 0)
+            {
+                builder.Append('-');
+                lastWasDash = true;
+            }
+        }
+
+        return builder.ToString().Trim('-');
+    }
+}
+
 public enum ClaimOutcome
 {
     Ok,             // owner created; Slug + Token are set
@@ -30,10 +57,23 @@ public sealed record ClaimResult(ClaimOutcome Outcome, string? Slug = null, stri
 // SSH tunnel the panel already uses, or the CLI) can create the owner. A single
 // in-process lock makes concurrent claims single-winner; the runtime is one
 // process, so that lock plus the store's at-most-one-owner recheck is authoritative.
+public enum AddUserOutcome
+{
+    Ok,       // user created; Slug + Token are set
+    Invalid,  // empty/unusable name (400)
+    Conflict  // the slug is already taken (409)
+}
+
+public sealed record AddUserResult(AddUserOutcome Outcome, string? Slug = null, string? Token = null, string? Error = null);
+
 public interface ISetupService
 {
     bool IsClaimed();
     ClaimResult Claim(string? name, bool fromLoopback);
+    // Add a further user AFTER the first owner (an existing owner invites a
+    // teammate). Authorization is at the endpoint (human principal); this creates
+    // the identity + agent + token. Single-owner today; this is the multi-user seam.
+    AddUserResult AddUser(string? name);
 }
 
 public sealed class SetupService : ISetupService
@@ -67,7 +107,7 @@ public sealed class SetupService : ISetupService
             return new ClaimResult(ClaimOutcome.Invalid, Error: "A non-empty owner name is required.");
         }
 
-        var slug = Slugify(displayName);
+        var slug = Slug.Of(displayName);
         if (slug.Length == 0)
         {
             return new ClaimResult(ClaimOutcome.Invalid, Error: "The name must contain at least one letter or digit.");
@@ -80,48 +120,57 @@ public sealed class SetupService : ISetupService
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
             }
 
-            var user = new PlatformUser(Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug);
-            var workspace = new Workspace(Guid.NewGuid(), user.Id, $"{displayName}'s workspace");
-            var agentSlug = $"{slug}-agent";
-            var agent = new AgentProfile(
-                Guid.NewGuid(), user.Id, workspace.Id, $"{displayName}'s Agent",
-                // No agent-level provider override — resolves through the model
-                // registry cascade (user -> OS). With no provider configured the
-                // agent gets the UnconfiguredBrain, not a connection error.
-                "", OwnerDefaults.AgentTools, agentSlug);
-
+            var (user, workspace, agent) = BuildIdentity(displayName, slug);
             if (!store.CreateOwner(user, workspace, agent))
             {
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
             }
 
             var token = authenticator.IssueToken(slug);
-            // The agent identity gets its token file too, mirroring the seed path.
-            authenticator.IssueToken(agentSlug);
+            authenticator.IssueToken(agent.Slug); // the agent identity's token file too
             return new ClaimResult(ClaimOutcome.Ok, slug, token);
         }
     }
 
-    // A conservative slug: lowercase, ASCII alphanumerics kept, every other run
-    // collapsed to a single '-', edges trimmed. "José Peña" -> "jos-pe-a".
-    private static string Slugify(string value)
+    public AddUserResult AddUser(string? name)
     {
-        var builder = new StringBuilder(value.Length);
-        var lastWasDash = false;
-        foreach (var character in value.ToLowerInvariant())
+        var displayName = (name ?? "").Trim();
+        if (displayName.Length == 0)
         {
-            if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
-            {
-                builder.Append(character);
-                lastWasDash = false;
-            }
-            else if (!lastWasDash && builder.Length > 0)
-            {
-                builder.Append('-');
-                lastWasDash = true;
-            }
+            return new AddUserResult(AddUserOutcome.Invalid, Error: "A non-empty name is required.");
         }
 
-        return builder.ToString().Trim('-');
+        var slug = Slug.Of(displayName);
+        if (slug.Length == 0)
+        {
+            return new AddUserResult(AddUserOutcome.Invalid, Error: "The name must contain at least one letter or digit.");
+        }
+
+        lock (gate)
+        {
+            var (user, workspace, agent) = BuildIdentity(displayName, slug);
+            // store.AddUser rejects a duplicate user/agent slug inside the same
+            // transaction; the lock serializes all identity creation.
+            if (!store.AddUser(user, workspace, agent))
+            {
+                return new AddUserResult(AddUserOutcome.Conflict, Error: $"The name '{displayName}' is already taken (slug '{slug}').");
+            }
+
+            var token = authenticator.IssueToken(slug);
+            authenticator.IssueToken(agent.Slug);
+            return new AddUserResult(AddUserOutcome.Ok, slug, token);
+        }
+    }
+
+    // One user + their workspace + their agent, with the agent granted the full
+    // owner tool set and no provider override (resolves via the registry cascade).
+    private static (PlatformUser user, Workspace workspace, AgentProfile agent) BuildIdentity(string displayName, string slug)
+    {
+        var user = new PlatformUser(Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug);
+        var workspace = new Workspace(Guid.NewGuid(), user.Id, $"{displayName}'s workspace");
+        var agent = new AgentProfile(
+            Guid.NewGuid(), user.Id, workspace.Id, $"{displayName}'s Agent",
+            "", OwnerDefaults.AgentTools, $"{slug}-agent");
+        return (user, workspace, agent);
     }
 }

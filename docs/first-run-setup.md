@@ -2,12 +2,13 @@
 
 *Design plan — 2026-08-23, revised after adversarial review (13 findings). Closes the onboarding gap: today users are hardcoded demo seed (`joche`, `yulia`) authenticated by token files, and there is no step that creates YOUR owner or lets you run the OS with no AI provider.*
 
-> **Status: Phases A + B SHIPPED** (2026-08-23). Provider-free install + loopback-gated
-> single-winner claim + `UnconfiguredBrain` + the `create-owner` CLI (Phase A, 121
-> tests) and the panel's first-run wizard (Phase B, verified live in the browser).
-> See **What shipped** below for the two deviations from this plan (single-owner
+> **Status: Phases A + B + C SHIPPED** (2026-08-23). Provider-free install +
+> loopback-gated single-winner claim + `UnconfiguredBrain` + `create-owner` CLI
+> (Phase A), the panel's first-run wizard (Phase B), and **multi-user + the in-panel
+> models surface** (Phase C): add a teammate and add/configure model providers from
+> the panel with no restart. 129 backend tests; verified live in the browser. See
+> **What shipped** below for the two deviations from this plan (single-owner
 > in-process claim lock instead of a marker table; `/api/setup/status` kept public).
-> Remaining: `add-user` (multi-owner) and the in-panel add-provider (models surface, Phase 3).
 
 ## Goals
 
@@ -46,8 +47,8 @@ The review verified these are load-bearing — the plan must call them out, not 
 3. **Whitelist the setup routes in the choke point.** `AccessPolicy.Required` (the auth gate) demands a bearer for everything except `/`, `/api/branding`, `/api/inference/status` — so on a fresh box the setup routes 401 *before* their own handler. Add `/api/setup/status` + `/api/setup/claim` to the Public branch; the claim gate (loopback + single-winner) lives in the handler.
 4. **Atomic single-winner claim.** "Users empty" is check-then-act (TOCTOU → two owners). Enforce at-most-one-owner with a **persistent UNIQUE constraint** — a dedicated `owner_claim` marker row inserted in the *same transaction* that creates the owner; the second inserter hits a unique-violation → `409`. A process lock alone is insufficient. Do not anchor "claimed" on `Users.Any()`.
 5. **Provider-free must include the no-provider brain state (fold Phase C into A).** Register `local-bonsai` **only if the local model is enabled/installed**; otherwise the resolved chat brain is an explicit **`UnconfiguredBrain`** returning one clear step. Without this, a freshly-claimed agent errors on its first message — so it ships *with* claim, not later.
-6. **Honest provider onboarding.** There is **no runtime add-provider surface this release** (models surface is model-config.md Phase 3). So the `UnconfiguredBrain` message names the action that works **now**: *"No AI provider configured — set a key in config (`Inference:Deepseek:ApiKey` / `Inference:Azure:*`) or enable the local model, then restart."* Onboarding is **restart-based** until the models surface lands; state this plainly.
-7. **Single-owner release.** After claim, a second human cannot be created except by hand. State the test release is **single-owner**; if a second tester principal is needed, add a `workspace-setup add-user --name` (reusing `CreateOwner` + `Mint`) — do not defer the whole multi-user story silently.
+6. **Honest provider onboarding.** *(Superseded by Phase C.)* Onboarding is no longer restart-based: the **Models** panel tab adds a provider that works immediately. The `UnconfiguredBrain` message now points there first (*"Add one from the Models tab … or set a key in config and restart"*). Setting a key in `config/branding.json`/env + restart still works as the config path.
+7. **Multi-user.** *(Delivered in Phase C.)* After claim, an owner adds further users from the panel ("＋ Add teammate") or CLI (`add-user --name … --token …`) — human-only, slug-collision-guarded, each gets their own agent + token. No longer single-owner.
 8. **Durability of "claimed."** Anchor on the persistent `owner_claim` marker, not the users rows. Forbid deleting the last owner (future user-mgmt). Treat a DB reset as a **deliberate re-provision** that re-opens ownership — document that operators must protect the DB file perms/backups (wiping the DB is the re-claim path, by design).
 9. **Token recovery vs rotation (state the limits).** Recovery of a lost owner token = **restart** (the authenticator rewrites `<slug>.token` deterministically now that the user exists), or re-print via CLI. **Rotation** of a *leaked* token is impossible per-user — it requires rotating the shared `signing.key`, invalidating *all* tokens. Flag as a known release limitation (consistent with release-checklist.md token-storage).
 10. **Store parity + seed hygiene.** Gate InMemory seeding on the **same** `LUNOS_DEMO` flag as EF so both stores share the first-run predicate (default demo ON for the test suite via the flag). Fix `RuntimeSeed`'s `InferenceProvider` from the dead `"local-inference"` to a real id (`"local-bonsai"`) or empty.
@@ -64,7 +65,7 @@ The review verified these are load-bearing — the plan must call them out, not 
 
 - **A. Provider-free first-run (one releasable unit) — ✅ SHIPPED:** unconditional spreadsheet seed; `LUNOS_DEMO`-gated demo seed (both stores); `CreateOwner` + `Mint`/`IssueToken` on the interfaces + token-file write; `AccessPolicy` whitelist; loopback + single-winner `claim` + `status`; the `create-owner` CLI; **and** `local-bonsai`-optional + `UnconfiguredBrain` with the restart-based message. This is the shippable test-release core. (See **What shipped** for the two deviations.)
 - **B. Panel wizard — ✅ SHIPPED:** the panel fetches `/api/setup/status` while signed out; unclaimed renders a "Claim this machine" wizard (name → `POST /api/setup/claim` → store the returned token → straight into the app), claimed renders token login. A 403/409 from the claim maps to a clear message (loopback-only / already-claimed). Verified live: unclaimed → wizard → claim → app → sign out → login.
-- **C. (later) models surface** (model-config.md Phase 3) turns the "restart to add a key" into an in-panel add-provider; then the `UnconfiguredBrain` copy points at Settings for real.
+- **C. Models surface + multi-user — ✅ SHIPPED:** a persistent provider store (`.data/secrets/providers.json`, 0600) the `ModelRegistry` reads LIVE, so a provider added from the panel is usable with no restart (`ConsoleBrainRegistry` builds brains lazily by provider id). Endpoints `GET/POST/DELETE /api/models` + `POST /api/models/defaults` (human-only; API keys stored 0600, never returned — only a `hasKey` flag). A "Models" panel tab adds providers (DeepSeek/Azure/OpenAI-compatible/Ollama presets) and sets OS defaults; the header badge reflects the real chat default (the legacy `/api/inference/status` badge is retired). Multi-user: `IRuntimeStore.AddUser` (slug-collision-guarded) + `SetupService.AddUser` + `POST /api/users` (human-only) + panel "＋ Add teammate" + CLI `add-user --name … --token …`.
 
 ## What shipped (Phase A)
 

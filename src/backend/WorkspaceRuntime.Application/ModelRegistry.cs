@@ -21,6 +21,29 @@ public sealed record ProviderProfile(
 // Which provider was chosen for a capability, and at which layer.
 public sealed record ResolvedProvider(string Capability, ProviderProfile Profile, string Scope);
 
+// A provider a human adds at runtime (the models surface), before it has an id.
+public sealed record ProviderDraft(
+    string DisplayName,
+    string Kind,
+    string BaseUrl,
+    string Model,
+    IReadOnlySet<string> Capabilities,
+    string Locality,
+    string? ApiKey);
+
+// The persisted, MUTABLE layer of providers + OS-default overrides: what the panel
+// adds at runtime, on top of the immutable startup providers built from config.
+// Kept 0600 (it holds API keys). The registry reads it live, so a newly-added
+// provider is usable without a restart.
+public interface IProviderConfigStore
+{
+    IReadOnlyList<ProviderProfile> All();
+    ProviderProfile Add(ProviderDraft draft);
+    bool Remove(string id);
+    IReadOnlyDictionary<string, string> OsDefaults();     // capability -> providerId (overrides)
+    void SetOsDefault(string capability, string providerId);
+}
+
 // Per-user model configuration (the "user" layer). Phase 1 ships an empty impl;
 // the `models` surface (Phase 3) will let a user set their own providers/defaults.
 public interface IUserModelConfig
@@ -45,26 +68,51 @@ public interface IModelRegistry
 
 public sealed class ModelRegistry : IModelRegistry
 {
-    private readonly IReadOnlyDictionary<string, ProviderProfile> byId;
-    private readonly IReadOnlyDictionary<string, string> osDefaults; // capability -> providerId
+    private readonly IReadOnlyList<ProviderProfile> startup;
+    private readonly IReadOnlyDictionary<string, string> startupOsDefaults; // capability -> providerId
     private readonly IUserModelConfig userConfig;
+    private readonly IProviderConfigStore? dynamicStore;
 
     public ModelRegistry(
         IEnumerable<ProviderProfile> providers,
         IReadOnlyDictionary<string, string> osDefaults,
-        IUserModelConfig userConfig)
+        IUserModelConfig userConfig,
+        IProviderConfigStore? dynamicStore = null)
     {
-        byId = providers.ToDictionary(profile => profile.Id, StringComparer.OrdinalIgnoreCase);
-        this.osDefaults = osDefaults;
+        startup = providers.ToArray();
+        startupOsDefaults = osDefaults;
         this.userConfig = userConfig;
+        this.dynamicStore = dynamicStore;
     }
 
-    public IReadOnlyList<ProviderProfile> Providers => byId.Values.ToArray();
+    // Startup providers overlaid with the runtime-added ones (dynamic wins on an id
+    // clash), rebuilt each call so a just-added provider is immediately visible.
+    private Dictionary<string, ProviderProfile> ById()
+    {
+        var byId = new Dictionary<string, ProviderProfile>(StringComparer.OrdinalIgnoreCase);
+        foreach (var profile in startup)
+        {
+            byId[profile.Id] = profile;
+        }
+        if (dynamicStore is not null)
+        {
+            foreach (var profile in dynamicStore.All())
+            {
+                byId[profile.Id] = profile;
+            }
+        }
+        return byId;
+    }
 
-    public string? OsDefault(string capability) => osDefaults.GetValueOrDefault(capability);
+    public IReadOnlyList<ProviderProfile> Providers => ById().Values.ToArray();
+
+    public string? OsDefault(string capability) =>
+        dynamicStore?.OsDefaults().GetValueOrDefault(capability) ?? startupOsDefaults.GetValueOrDefault(capability);
 
     public ResolvedProvider? Resolve(string capability, AgentProfile agent)
     {
+        var byId = ById();
+
         // 1. Agent override — the agent's own InferenceProvider, if it names a
         //    provider that can serve this capability.
         if (!string.IsNullOrWhiteSpace(agent.InferenceProvider)
@@ -81,8 +129,8 @@ public sealed class ModelRegistry : IModelRegistry
             return new ResolvedProvider(capability, userPick, "user");
         }
 
-        // 3. OS default.
-        var osId = osDefaults.GetValueOrDefault(capability);
+        // 3. OS default (runtime override wins over the startup default).
+        var osId = OsDefault(capability);
         if (osId is not null && byId.TryGetValue(osId, out var osPick) && osPick.Serves(capability))
         {
             return new ResolvedProvider(capability, osPick, "os");

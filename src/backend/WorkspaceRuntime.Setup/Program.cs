@@ -9,7 +9,7 @@ try
 {
     if (args.Length == 0)
     {
-        return Fail("A command is required: defaults, probe, plan, validate, approve, or create-owner.", 2);
+        return Fail("A command is required: defaults, probe, plan, validate, approve, create-owner, or add-user.", 2);
     }
 
     switch (args[0])
@@ -63,6 +63,17 @@ try
             var name = RequireOption(args, "--name");
             var url = (GetOption(args, "--url") ?? "http://127.0.0.1:5148").TrimEnd('/');
             return ClaimOwner(name, url);
+        }
+
+        case "add-user":
+        {
+            // Add a teammate after the machine is claimed. Requires an existing
+            // owner's bearer token (this is a human-only action). Prints the new
+            // user's slug + token for the owner to hand over.
+            var name = RequireOption(args, "--name");
+            var token = RequireOption(args, "--token");
+            var url = (GetOption(args, "--url") ?? "http://127.0.0.1:5148").TrimEnd('/');
+            return AddUser(name, token, url);
         }
 
         default:
@@ -131,6 +142,40 @@ static int ClaimOwner(string name, string url)
 
     var reason = TryReadError(body) ?? $"HTTP {(int)response.StatusCode}";
     return Fail($"Claim failed: {reason}", 3);
+}
+
+static int AddUser(string name, string token, string url)
+{
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    var payload = new StringContent(
+        JsonSerializer.Serialize(new { name }),
+        System.Text.Encoding.UTF8, "application/json");
+
+    using var request = new HttpRequestMessage(HttpMethod.Post, $"{url}/api/users") { Content = payload };
+    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+    HttpResponseMessage response;
+    try
+    {
+        response = client.SendAsync(request).GetAwaiter().GetResult();
+    }
+    catch (HttpRequestException exception)
+    {
+        return Fail($"Could not reach the runtime at {url}: {exception.Message}. Is it running?", 5);
+    }
+
+    var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+    if (response.IsSuccessStatusCode)
+    {
+        using var document = JsonDocument.Parse(body);
+        var slug = document.RootElement.GetProperty("slug").GetString();
+        var issued = document.RootElement.GetProperty("token").GetString();
+        Console.WriteLine(JsonSerializer.Serialize(new { user = slug, token = issued }, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    var reason = TryReadError(body) ?? $"HTTP {(int)response.StatusCode}";
+    return Fail($"Add user failed: {reason}", 3);
 }
 
 static string? TryReadError(string body)

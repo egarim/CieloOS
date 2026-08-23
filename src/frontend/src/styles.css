@@ -369,6 +369,148 @@ button.danger:hover {
   flex-shrink: 0;
 }
 
+/* Models surface + add-teammate */
+
+.providerList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.providerCard {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.providerHead {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.providerMeta {
+  margin: 4px 0 8px;
+}
+
+.capRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.capBadge {
+  background: #eef2ff;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  padding: 2px 9px;
+}
+
+.capBadge.isDefault {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.field {
+  display: block;
+  margin-top: 10px;
+}
+
+.field input,
+.field select {
+  margin-top: 5px;
+  width: 100%;
+}
+
+.capChoose {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.checkRow {
+  align-items: center;
+  color: var(--ink);
+  display: inline-flex;
+  flex-direction: row;
+  font-size: 13px;
+  gap: 5px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.checkRow input {
+  height: auto;
+  margin: 0;
+  width: auto;
+}
+
+.presetRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--accent-strong);
+}
+
+button.ghost:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.teammate {
+  border-top: 1px solid var(--hairline);
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.addTeammateToggle {
+  font-size: 12px;
+  min-height: 0;
+  padding: 5px 10px;
+  width: 100%;
+}
+
+.teammateForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.teammateForm input {
+  width: 100%;
+}
+
+.teammateToken {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.tokenValue {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  white-space: normal;
+}
+
 .setupLoading {
   text-align: center;
 }

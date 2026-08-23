@@ -43,8 +43,13 @@ multi-tenant** release. Items are marked ✅ done · 🟡 in progress · ⬜ ope
 - ✅ **Panel wizard (Phase B).** The panel checks `/api/setup/status` while signed
   out: unclaimed → a "Claim this machine" wizard (name → claim → straight into the
   app); claimed → token login. Verified end-to-end in the browser.
-- ⬜ **Second-tester onboarding.** Test release is **single-owner**; a second human
-  needs a hand-added user (`add-user` reusing `CreateOwner`+`Mint`) — not built yet.
+- ✅ **Add a teammate.** An owner adds another user from the panel (desks rail →
+  "+ Add teammate") or CLI (`workspace-installer add-user --name … --token …`);
+  human-only, returns the new user's token to hand over. Multi-user, not just single-owner.
+- ✅ **In-panel model providers (models surface).** A "Models" tab lists providers
+  and adds one (DeepSeek / Azure / OpenAI-compatible / Ollama presets) with base
+  URL + model + key; usable immediately, **no restart**. Keys are stored 0600 and
+  never returned by the API. OS defaults per capability are set from the panel.
 
 ## Ops / packaging
 

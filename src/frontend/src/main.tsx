@@ -57,6 +57,53 @@ type AgentRunResult = { sessionId: string; goal: string; completed: boolean; sto
 
 type Desk = { slug: string; label: string; isSelf: boolean };
 
+type ModelProvider = {
+  id: string;
+  displayName: string;
+  kind: string;
+  baseUrl: string;
+  model: string;
+  capabilities: string[];
+  locality: string;
+  hasKey: boolean;
+  managed: boolean;
+};
+type ModelsData = { providers: ModelProvider[]; defaults: { chat: string | null; vision: string | null } };
+type ProviderForm = {
+  preset: string;
+  displayName: string;
+  kind: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  capabilities: string[];
+  locality: string;
+  defaultChat: boolean;
+  defaultVision: boolean;
+};
+
+// Presets prefill the add-provider form; every one speaks the OpenAI chat format
+// (Bearer + /chat/completions), which is what the model brain calls.
+const PROVIDER_PRESETS: Record<string, { label: string; kind: string; baseUrl: string; model: string; locality: string; capabilities: string[] }> = {
+  deepseek: { label: "DeepSeek", kind: "openai-compatible", baseUrl: "https://api.deepseek.com", model: "deepseek-chat", locality: "cloud", capabilities: ["chat"] },
+  azure: { label: "Azure OpenAI", kind: "azure-openai", baseUrl: "https://<resource>.openai.azure.com/openai/v1", model: "gpt-4.1-mini", locality: "cloud", capabilities: ["chat", "vision"] },
+  openai: { label: "OpenAI-compatible", kind: "openai-compatible", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini", locality: "cloud", capabilities: ["chat", "vision"] },
+  ollama: { label: "Ollama (local)", kind: "ollama", baseUrl: "http://127.0.0.1:11434/v1", model: "llama3.1", locality: "on-box", capabilities: ["chat"] }
+};
+
+const emptyProviderForm: ProviderForm = {
+  preset: "deepseek",
+  displayName: "DeepSeek",
+  kind: "openai-compatible",
+  baseUrl: "https://api.deepseek.com",
+  model: "deepseek-chat",
+  apiKey: "",
+  capabilities: ["chat"],
+  locality: "cloud",
+  defaultChat: true,
+  defaultVision: false
+};
+
 const emptyBranding: Branding = {
   productName: "Workspace Runtime",
   shortName: "Runtime",
@@ -109,14 +156,22 @@ function App() {
   const [surface, setSurface] = React.useState<SurfaceState | null>(null);
   const [commands, setCommands] = React.useState<SurfaceCommand[]>([]);
   const [commandInputs, setCommandInputs] = React.useState<Record<string, string>>(inputDefaults);
-  const [inferenceStatus, setInferenceStatus] = React.useState<InferenceStatus | null>(null);
   const [lastResult, setLastResult] = React.useState<{ decision: string; reason: string } | null>(null);
   const [sessions, setSessions] = React.useState<SessionView[]>([]);
   const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
   const [newSessionProfile, setNewSessionProfile] = React.useState("agent-console");
   const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [selectedDesk, setSelectedDesk] = React.useState<string | null>(null);
-  const [view, setView] = React.useState<"desk" | "surfaces">("desk");
+  const [view, setView] = React.useState<"desk" | "surfaces" | "models">("desk");
+  const [models, setModels] = React.useState<ModelsData | null>(null);
+  const [providerForm, setProviderForm] = React.useState<ProviderForm>(emptyProviderForm);
+  const [modelsMsg, setModelsMsg] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const [modelsBusy, setModelsBusy] = React.useState(false);
+  const [teammateOpen, setTeammateOpen] = React.useState(false);
+  const [teammateName, setTeammateName] = React.useState("");
+  const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
+  const [teammateError, setTeammateError] = React.useState<string | null>(null);
+  const [teammateBusy, setTeammateBusy] = React.useState(false);
   const [filesOwner, setFilesOwner] = React.useState<string>("");
   const [filesPath, setFilesPath] = React.useState("");
   const [listing, setListing] = React.useState<HomeListing | null>(null);
@@ -181,7 +236,7 @@ function App() {
       load<AuditEvent[]>("/api/audit-events", setAuditEvents),
       load<SurfaceState>("/api/surfaces/spreadsheet/state", setSurface),
       load<SurfaceCommands>("/api/surfaces/spreadsheet/commands", (value) => setCommands(value.commands)),
-      load<InferenceStatus>("/api/inference/status", setInferenceStatus),
+      load<ModelsData>("/api/models", setModels),
       load<Whoami>("/api/whoami", setWhoami)
     ]);
 
@@ -341,6 +396,132 @@ function App() {
       setSetupError("The runtime is unreachable.");
     } finally {
       setSetupBusy(false);
+    }
+  }
+
+  // Pull a human-readable error out of an api() failure (it throws the raw
+  // response body, which is JSON {error}).
+  function extractError(error: unknown): string {
+    const raw = error instanceof Error ? error.message : String(error);
+    try {
+      return (JSON.parse(raw) as { error?: string }).error ?? raw;
+    } catch {
+      return raw;
+    }
+  }
+
+  const refreshModels = React.useCallback(async () => {
+    try {
+      setModels(await api<ModelsData>("/api/models"));
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+    }
+  }, [signOut]);
+
+  function applyPreset(key: string) {
+    const preset = PROVIDER_PRESETS[key];
+    if (!preset) return;
+    setProviderForm((form) => ({
+      ...form,
+      preset: key,
+      displayName: preset.label,
+      kind: preset.kind,
+      baseUrl: preset.baseUrl,
+      model: preset.model,
+      locality: preset.locality,
+      capabilities: preset.capabilities,
+      defaultVision: preset.capabilities.includes("vision") ? form.defaultVision : false
+    }));
+  }
+
+  function toggleCapability(capability: string) {
+    setProviderForm((form) => ({
+      ...form,
+      capabilities: form.capabilities.includes(capability)
+        ? form.capabilities.filter((value) => value !== capability)
+        : [...form.capabilities, capability]
+    }));
+  }
+
+  // Add a model provider from the panel. On success it is usable immediately —
+  // no restart — because the registry reads the provider store live.
+  async function addProvider() {
+    if (modelsBusy) return;
+    const form = providerForm;
+    if (!form.displayName.trim() || !form.baseUrl.trim() || !form.model.trim() || form.capabilities.length === 0) {
+      setModelsMsg({ kind: "err", text: "Name, base URL, model, and at least one capability are required." });
+      return;
+    }
+    setModelsBusy(true);
+    setModelsMsg(null);
+    const defaultFor = [form.defaultChat ? "chat" : null, form.defaultVision ? "vision" : null].filter(Boolean);
+    try {
+      await api("/api/models", {
+        method: "POST",
+        body: JSON.stringify({
+          displayName: form.displayName.trim(),
+          kind: form.kind,
+          baseUrl: form.baseUrl.trim(),
+          model: form.model.trim(),
+          apiKey: form.apiKey.trim() || null,
+          capabilities: form.capabilities,
+          locality: form.locality,
+          defaultFor
+        })
+      });
+      setModelsMsg({ kind: "ok", text: `Added ${form.displayName.trim()}. Your agent can use it now.` });
+      setProviderForm({ ...emptyProviderForm });
+      await refreshModels();
+      await refresh();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setModelsMsg({ kind: "err", text: extractError(error) });
+    } finally {
+      setModelsBusy(false);
+    }
+  }
+
+  async function deleteProvider(id: string) {
+    try {
+      await api(`/api/models/${encodeURIComponent(id)}`, { method: "DELETE" });
+      setModelsMsg({ kind: "ok", text: `Removed ${id}.` });
+      await refreshModels();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setModelsMsg({ kind: "err", text: extractError(error) });
+    }
+  }
+
+  async function makeDefault(capability: string, providerId: string) {
+    try {
+      await api("/api/models/defaults", { method: "POST", body: JSON.stringify({ capability, providerId }) });
+      await refreshModels();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setModelsMsg({ kind: "err", text: extractError(error) });
+    }
+  }
+
+  // Invite a teammate. The runtime returns their bearer token for you to hand
+  // over (it is also written to a 0600 file on the box).
+  async function addTeammate() {
+    const name = teammateName.trim();
+    if (!name || teammateBusy) return;
+    setTeammateBusy(true);
+    setTeammateError(null);
+    try {
+      const result = await api<{ slug: string; token: string }>("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ name })
+      });
+      setTeammateResult(result);
+      setTeammateName("");
+      await refresh();
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setTeammateError(extractError(error));
+    } finally {
+      setTeammateBusy(false);
     }
   }
 
@@ -647,9 +828,12 @@ function App() {
           <p>{branding.companyName}</p>
         </div>
         <div className="topbarRight">
-          {inferenceStatus && (
-            <span className="modelStatus" title={inferenceStatus.stableEndpoint}>
-              <Cpu size={13} /> {inferenceStatus.activeProvider.displayName} · {inferenceStatus.activeProvider.runtime.engine}
+          {models && (
+            <span className="modelStatus" title="Chat model — configure in Models">
+              <Cpu size={13} />{" "}
+              {models.defaults.chat
+                ? models.providers.find((provider) => provider.id === models.defaults.chat)?.displayName ?? models.defaults.chat
+                : "no model — add one"}
             </span>
           )}
           <span className="status" data-automation-id="whoami">
@@ -661,11 +845,25 @@ function App() {
 
       <nav className="viewNav">
         <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desks</button>
+        <button className={view === "models" ? "active" : ""} onClick={() => setView("models")}>Models</button>
         <button className={view === "surfaces" ? "active" : ""} onClick={() => setView("surfaces")}>Surface playground</button>
         <span className="viewNavHint">conformance demo</span>
       </nav>
 
-      {view === "surfaces" ? (
+      {view === "models" ? (
+        <ModelsView
+          models={models}
+          form={providerForm}
+          setForm={setProviderForm}
+          applyPreset={applyPreset}
+          toggleCapability={toggleCapability}
+          addProvider={addProvider}
+          deleteProvider={deleteProvider}
+          makeDefault={makeDefault}
+          message={modelsMsg}
+          busy={modelsBusy}
+        />
+      ) : view === "surfaces" ? (
         <section className="grid">
           <div className="panel">
             <h2>Surface Commands</h2>
@@ -741,6 +939,34 @@ function App() {
                     <span className="deskSub">{entry.slug}</span>
                   </button>
                 ))
+              )}
+            </div>
+            <div className="teammate">
+              <button className="ghost addTeammateToggle" data-automation-id="teammate-toggle" onClick={() => setTeammateOpen((open) => !open)}>
+                {teammateOpen ? "− Cancel" : "+ Add teammate"}
+              </button>
+              {teammateOpen && (
+                <div className="teammateForm">
+                  <p className="muted small">Create another user on this machine — you'll get a token to hand them.</p>
+                  <input
+                    data-automation-id="teammate-name"
+                    value={teammateName}
+                    placeholder="their name"
+                    disabled={teammateBusy}
+                    onChange={(event) => setTeammateName(event.target.value)}
+                    onKeyDown={(event) => event.key === "Enter" && addTeammate()}
+                  />
+                  <button data-automation-id="teammate-add" disabled={teammateBusy || !teammateName.trim()} onClick={addTeammate}>
+                    {teammateBusy ? <><Loader2 size={14} className="spin" /> …</> : "Create user"}
+                  </button>
+                  {teammateError && <p className="decision deny small">{teammateError}</p>}
+                  {teammateResult && (
+                    <div className="teammateToken" data-automation-id="teammate-result">
+                      <p className="muted small">Created <strong>{teammateResult.slug}</strong>. Share this token with them:</p>
+                      <code className="tokenValue" data-automation-id="teammate-token">{teammateResult.token}</code>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </aside>
@@ -1044,6 +1270,149 @@ function App() {
         </section>
       )}
     </main>
+  );
+}
+
+function ModelsView({
+  models,
+  form,
+  setForm,
+  applyPreset,
+  toggleCapability,
+  addProvider,
+  deleteProvider,
+  makeDefault,
+  message,
+  busy
+}: {
+  models: ModelsData | null;
+  form: ProviderForm;
+  setForm: React.Dispatch<React.SetStateAction<ProviderForm>>;
+  applyPreset: (key: string) => void;
+  toggleCapability: (capability: string) => void;
+  addProvider: () => void;
+  deleteProvider: (id: string) => void;
+  makeDefault: (capability: string, id: string) => void;
+  message: { kind: "ok" | "err"; text: string } | null;
+  busy: boolean;
+}) {
+  const providers = models?.providers ?? [];
+  const defaults = models?.defaults ?? { chat: null, vision: null };
+
+  return (
+    <section className="grid" data-automation-id="models">
+      <div className="panel">
+        <h2><Cpu size={15} /> Model providers</h2>
+        <p className="muted small">
+          The brains your agents use. The OS runs with none; add one and it's usable immediately — no restart.
+          A <strong>default</strong> is what an agent uses unless it has its own choice.
+        </p>
+        {providers.length === 0 ? (
+          <p className="muted">No providers yet — add one on the right to give your agents a brain.</p>
+        ) : (
+          <div className="providerList">
+            {providers.map((provider) => (
+              <div className="providerCard" key={provider.id} data-automation-id={`provider-${provider.id}`}>
+                <div className="providerHead">
+                  <strong>{provider.displayName}</strong>
+                  <span className="tag">{provider.locality}</span>
+                  {!provider.managed && <span className="tag muted">built-in</span>}
+                </div>
+                <p className="muted small providerMeta">
+                  <code>{provider.model}</code> · {provider.kind}
+                  {provider.hasKey ? " · key set" : provider.locality === "on-box" ? " · keyless" : " · no key"}
+                </p>
+                <div className="capRow">
+                  {provider.capabilities.map((capability) => {
+                    const isDefault = defaults[capability as "chat" | "vision"] === provider.id;
+                    return (
+                      <span key={capability} className={`capBadge${isDefault ? " isDefault" : ""}`}>
+                        {capability}{isDefault ? " · default" : ""}
+                      </span>
+                    );
+                  })}
+                </div>
+                <div className="actions">
+                  {["chat", "vision"].filter((capability) => provider.capabilities.includes(capability) && defaults[capability as "chat" | "vision"] !== provider.id).map((capability) => (
+                    <button key={capability} className="ghost" onClick={() => makeDefault(capability, provider.id)}>
+                      Make {capability} default
+                    </button>
+                  ))}
+                  {provider.managed && (
+                    <button className="danger" data-automation-id={`provider-delete-${provider.id}`} onClick={() => deleteProvider(provider.id)}>
+                      <X size={14} /> Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Add a provider</h2>
+        <div className="presetRow">
+          {Object.entries(PROVIDER_PRESETS).map(([key, preset]) => (
+            <button
+              key={key}
+              className={`segBtn${form.preset === key ? " active" : ""}`}
+              data-automation-id={`preset-${key}`}
+              onClick={() => applyPreset(key)}
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <label className="field">
+          Display name
+          <input data-automation-id="provider-name" value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
+        </label>
+        <label className="field">
+          Base URL
+          <input data-automation-id="provider-baseurl" value={form.baseUrl} onChange={(event) => setForm({ ...form, baseUrl: event.target.value })} />
+        </label>
+        <label className="field">
+          Model
+          <input data-automation-id="provider-model" value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })} />
+        </label>
+        <label className="field">
+          API key {form.locality === "on-box" ? <span className="muted small">(local models are usually keyless)</span> : null}
+          <input data-automation-id="provider-key" type="password" placeholder="stored 0600, never shown again" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} />
+        </label>
+        <div className="capChoose">
+          <span className="muted small">Capabilities</span>
+          {["chat", "vision", "embedding"].map((capability) => (
+            <label key={capability} className="checkRow">
+              <input type="checkbox" checked={form.capabilities.includes(capability)} onChange={() => toggleCapability(capability)} /> {capability}
+            </label>
+          ))}
+        </div>
+        <label className="field">
+          Locality
+          <select value={form.locality} onChange={(event) => setForm({ ...form, locality: event.target.value })}>
+            <option value="cloud">cloud</option>
+            <option value="remote-self-hosted">remote-self-hosted</option>
+            <option value="on-box">on-box</option>
+          </select>
+        </label>
+        <div className="capChoose">
+          <span className="muted small">Set as default for</span>
+          <label className="checkRow">
+            <input type="checkbox" disabled={!form.capabilities.includes("chat")} checked={form.defaultChat && form.capabilities.includes("chat")} onChange={(event) => setForm({ ...form, defaultChat: event.target.checked })} /> chat
+          </label>
+          <label className="checkRow">
+            <input type="checkbox" disabled={!form.capabilities.includes("vision")} checked={form.defaultVision && form.capabilities.includes("vision")} onChange={(event) => setForm({ ...form, defaultVision: event.target.checked })} /> vision
+          </label>
+        </div>
+        <div className="setupActions">
+          <button data-automation-id="provider-add" disabled={busy} onClick={addProvider}>
+            {busy ? <><Loader2 size={16} className="spin" /> Adding…</> : <><Check size={16} /> Add provider</>}
+          </button>
+        </div>
+        {message && <p className={`decision ${message.kind === "ok" ? "allow" : "deny"}`} data-automation-id="models-message">{message.text}</p>}
+      </div>
+    </section>
   );
 }
 

@@ -48,6 +48,20 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // Owner (human) actions: inviting a teammate, and changing model providers
+        // or defaults. Reads (GET) of these stay AnyPrincipal.
+        var isPost = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);
+        var isDelete = string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase);
+        if (isPost && path == "/api/users")
+        {
+            return AccessLevel.HumanOnly;
+        }
+        if ((isPost || isDelete)
+            && (path == "/api/models" || path.StartsWith("/api/models/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return AccessLevel.HumanOnly;
+        }
+
         return AccessLevel.AnyPrincipal;
     }
 }

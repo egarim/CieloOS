@@ -236,6 +236,22 @@ public sealed class EfRuntimeStore : IRuntimeStore
         return true;
     }
 
+    public bool AddUser(PlatformUser user, Workspace workspace, AgentProfile agent)
+    {
+        using var context = contextFactory.CreateDbContext();
+        if (context.Users.Any(row => row.Slug == user.Slug) || context.Agents.Any(row => row.Slug == agent.Slug))
+        {
+            return false;
+        }
+
+        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug });
+        context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
+        context.Agents.Add(ToAgentRow(agent));
+        context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "user.add", AuditOutcome.Success, $"Added user '{user.Slug}'.")));
+        context.SaveChanges();
+        return true;
+    }
+
     private static AgentRow ToAgentRow(AgentProfile agent) => new()
     {
         Id = agent.Id,

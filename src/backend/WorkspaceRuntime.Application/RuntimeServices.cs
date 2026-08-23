@@ -46,6 +46,12 @@ public interface IRuntimeStore
     // at-most-one-owner guard that makes a re-issued claim a no-op rather than a
     // second owner. Callers serialize concurrent claims (see ISetupService).
     bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent);
+
+    // Add a further user (+ workspace + agent) after the first owner exists.
+    // Returns false if the user OR agent slug is already taken (slugs are the
+    // stable identity keys — a collision would break token auth and home volumes).
+    // Callers serialize concurrent adds (see ISetupService).
+    bool AddUser(PlatformUser user, Workspace workspace, AgentProfile agent);
 }
 
 public sealed record SubmitToolRequestDto(Guid UserId, Guid AgentId, string ToolName, string Operation, Dictionary<string, string> Arguments);

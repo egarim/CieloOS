@@ -95,4 +95,18 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
         auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "owner.claim", AuditOutcome.Success, $"Claimed owner '{user.Slug}'."));
         return true;
     }
+
+    public bool AddUser(PlatformUser user, Workspace workspace, AgentProfile agent)
+    {
+        if (users.Any(existing => existing.Slug == user.Slug) || agents.Any(existing => existing.Slug == agent.Slug))
+        {
+            return false;
+        }
+
+        users.Add(user);
+        workspaces.Add(workspace);
+        agents.Add(agent);
+        auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "user.add", AuditOutcome.Success, $"Added user '{user.Slug}'."));
+        return true;
+    }
 }

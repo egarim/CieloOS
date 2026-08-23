@@ -64,9 +64,9 @@ public sealed class RecipeConsoleBrain : IConsoleAgentBrain
 public sealed class UnconfiguredBrain : IConsoleAgentBrain
 {
     public const string DefaultMessage =
-        "No AI provider is configured yet. Set a key in config " +
-        "(Inference:Deepseek:ApiKey or Inference:Azure:ApiKey) or enable the on-box " +
-        "model (Inference:Local:Enabled=true), then restart the runtime.";
+        "No AI provider is configured yet. Add one from the Models tab in the panel " +
+        "(it works immediately, no restart) — or set a key in config " +
+        "(Inference:Deepseek:ApiKey / Inference:Azure:ApiKey) and restart.";
 
     private readonly string message;
 
