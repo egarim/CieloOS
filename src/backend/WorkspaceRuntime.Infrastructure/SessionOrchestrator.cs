@@ -150,6 +150,18 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         runArguments.Add($"127.0.0.1::{containerPort}");
         runArguments.Add(image);
 
+        // A missing image is the expected state right after an --offline/--skip-images
+        // install, while cielo-session-images.service is still building. Say that,
+        // rather than surfacing raw podman stderr about an unknown image.
+        var imagePresent = await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken);
+        if (imagePresent.ExitCode != 0)
+        {
+            return new ToolExecutionResult(false,
+                $"The {(isConsole ? "console" : "desktop")} session image '{image}' is not available yet. If this machine was just " +
+                "installed it is still building (systemctl status cielo-session-images); otherwise build " +
+                "it with /usr/local/bin/cielo-build-session-images.", null);
+        }
+
         var run = await RunPodmanAsync(runArguments.ToArray(), cancellationToken);
 
         if (run.ExitCode != 0)

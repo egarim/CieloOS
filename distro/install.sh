@@ -151,11 +151,19 @@ else
 fi
 
 echo "==> [4/8] Session restart policy"
-if [[ "$CI" -eq 1 || "$OFFLINE" -eq 1 ]]; then
-  echo "    (skipped: --ci/--offline)"
+# Sessions are created with --restart=unless-stopped; podman-restart.service is what
+# acts on that after a reboot. Without it the runtime comes back and every session is
+# dead. This is a USER unit for cielo, so offline installs get the wants-symlink
+# written directly rather than being skipped: systemctl cannot run in a chroot.
+if [[ "$CI" -eq 1 ]]; then
+  echo "    (skipped: --ci)"
+elif [[ "$OFFLINE" -eq 1 ]]; then
+  install -d -o cielo -g cielo /var/lib/cielo/.config/systemd/user/default.target.wants
+  ln -sf /usr/lib/systemd/user/podman-restart.service \
+    /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
+  chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
+  echo "    podman-restart linked for cielo (activates on first boot)"
 else
-  # Sessions are created with --restart=unless-stopped; this is the unit that acts on
-  # that after a reboot. Without it the runtime comes back and every session is dead.
   runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable podman-restart.service >/dev/null 2>&1 \
     && echo "    podman-restart enabled for cielo" \
