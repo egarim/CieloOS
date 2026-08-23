@@ -14,10 +14,12 @@ public sealed class IdentityTokenAuthenticator : ITokenAuthenticator
 {
     private readonly byte[] signingKey;
     private readonly IRuntimeStore store;
+    private readonly string secretsDirectory;
 
     public IdentityTokenAuthenticator(string secretsDirectory, IRuntimeStore store)
     {
         this.store = store;
+        this.secretsDirectory = secretsDirectory;
         Directory.CreateDirectory(secretsDirectory);
         signingKey = LoadOrCreateKey(Path.Combine(secretsDirectory, "signing.key"));
 
@@ -52,6 +54,13 @@ public sealed class IdentityTokenAuthenticator : ITokenAuthenticator
     }
 
     public string Mint(string slug) => $"{slug}:{Sign(slug)}";
+
+    public string IssueToken(string slug)
+    {
+        var token = Mint(slug);
+        WriteTokenFile(Path.Combine(secretsDirectory, $"{slug}.token"), token);
+        return token;
+    }
 
     private string Sign(string slug) =>
         Convert.ToHexString(HMACSHA256.HashData(signingKey, Encoding.UTF8.GetBytes(slug))).ToLowerInvariant();

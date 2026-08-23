@@ -56,6 +56,26 @@ public sealed class RecipeConsoleBrain : IConsoleAgentBrain
         value.Replace("\"", "").Replace("$", "").Replace("`", "").Replace("\n", " ").Trim();
 }
 
+// The brain used when NO chat provider is configured. It types nothing and takes
+// no action — it ends the loop immediately with a single, honest message telling
+// the operator how to add a provider. This is what makes a provider-free install
+// coherent: the OS runs, the agent is reachable, and asking it to think returns a
+// clear "not configured yet" instead of a model-connection error.
+public sealed class UnconfiguredBrain : IConsoleAgentBrain
+{
+    public const string DefaultMessage =
+        "No AI provider is configured yet. Set a key in config " +
+        "(Inference:Deepseek:ApiKey or Inference:Azure:ApiKey) or enable the on-box " +
+        "model (Inference:Local:Enabled=true), then restart the runtime.";
+
+    private readonly string message;
+
+    public UnconfiguredBrain(string? message = null) => this.message = string.IsNullOrWhiteSpace(message) ? DefaultMessage : message;
+
+    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        Task.FromResult(new ConsoleAgentAction(true, null, false, message));
+}
+
 // Drives a console session toward a goal: observe the screen, ask the brain for
 // the next action, and submit each keystroke batch as a `console.type` through
 // AgentRuntime — so ownership, policy, and audit apply to every step exactly as

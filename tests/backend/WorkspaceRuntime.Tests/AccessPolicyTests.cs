@@ -10,6 +10,8 @@ public class AccessPolicyTests
     [InlineData("/", "GET", AccessLevel.Public)]
     [InlineData("/api/branding", "GET", AccessLevel.Public)]
     [InlineData("/api/inference/status", "GET", AccessLevel.Public)]
+    [InlineData("/api/setup/status", "GET", AccessLevel.Public)]
+    [InlineData("/api/setup/claim", "POST", AccessLevel.Public)]
     [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]

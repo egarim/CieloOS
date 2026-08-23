@@ -32,7 +32,12 @@ public static class AccessPolicy
         // /api/inference/status doubles as the readiness probe that the VM's
         // agent-runtime.service and `workspace-agent status` call before any
         // token can exist on a fresh installation.
-        if (path == "/" || path == "/api/branding" || path == "/api/inference/status")
+        //
+        // /api/setup/* is the first-run claim: on a fresh, unclaimed machine no
+        // token exists yet, so these must pass the auth gate. The claim's real
+        // guard is in the handler (loopback-only + at-most-one-owner), not here.
+        if (path == "/" || path == "/api/branding" || path == "/api/inference/status"
+            || path == "/api/setup/status" || path == "/api/setup/claim")
         {
             return AccessLevel.Public;
         }
@@ -73,6 +78,14 @@ public interface ITokenAuthenticator
     // token cryptographically binds to a slug; the slug is then looked up
     // among the known users and agents.
     RuntimePrincipal? Authenticate(string bearerToken);
+
+    // Deterministically mint the bearer token for a slug (does not touch disk).
+    string Mint(string slug);
+
+    // Mint AND persist the slug's 0600 token file, returning the token. Used when
+    // an identity is created at runtime (the first-run claim) — the constructor's
+    // startup pass has already run, so a new owner's token file must be written now.
+    string IssueToken(string slug);
 }
 
 // Ownership: a human may act as, and inhabit, only the agents it owns; an

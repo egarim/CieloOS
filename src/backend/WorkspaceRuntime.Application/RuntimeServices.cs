@@ -40,6 +40,12 @@ public interface IRuntimeStore
     ToolRequest GetPendingRequest(Guid approvalId);
     ToolRequest? FindPendingRequest(Guid approvalId);
     RuntimePrincipal? FindPrincipalBySlug(string slug);
+
+    // First-run ownership: create the first owner (+ their workspace and agent)
+    // in one transaction. Returns false if an owner already exists — the
+    // at-most-one-owner guard that makes a re-issued claim a no-op rather than a
+    // second owner. Callers serialize concurrent claims (see ISetupService).
+    bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent);
 }
 
 public sealed record SubmitToolRequestDto(Guid UserId, Guid AgentId, string ToolName, string Operation, Dictionary<string, string> Arguments);

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using WorkspaceRuntime.Application;
@@ -28,18 +29,28 @@ builder.Services.AddCors(options =>
         .WithExposedHeaders("ETag"));
 });
 
+// Demo population (joche/yulia) is OPT-IN. A shipped, provider-free install has
+// NO users until the first owner claims it; only a demo/dev image sets this on
+// (Runtime:SeedDemo=true or LUNOS_DEMO=1). Default OFF for a clean first-run.
+static bool IsTruthy(string? value) =>
+    value is not null && (value == "1"
+        || value.Equals("true", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
+        || value.Equals("on", StringComparison.OrdinalIgnoreCase));
+var demoEnabled = IsTruthy(builder.Configuration["Runtime:SeedDemo"] ?? Environment.GetEnvironmentVariable("LUNOS_DEMO"));
+
 var databaseProvider = (builder.Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
 switch (databaseProvider)
 {
     case "memory":
-        builder.Services.AddSingleton<IRuntimeStore, InMemoryRuntimeStore>();
+        builder.Services.AddSingleton<IRuntimeStore>(_ => new InMemoryRuntimeStore(demoEnabled));
         break;
 
     case "postgres":
         var postgresConnection = builder.Configuration["Database:PostgresConnection"]
             ?? throw new InvalidOperationException("Database:PostgresConnection is required when Database:Provider is postgres.");
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseNpgsql(postgresConnection));
-        builder.Services.AddSingleton<IRuntimeStore, EfRuntimeStore>();
+        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled));
         break;
 
     case "sqlite":
@@ -51,7 +62,7 @@ switch (databaseProvider)
             sqlitePath = Path.Combine(dataRoot, "workspace-runtime.db");
         }
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseSqlite($"Data Source={sqlitePath}"));
-        builder.Services.AddSingleton<IRuntimeStore, EfRuntimeStore>();
+        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled));
         break;
 
     default:
@@ -66,6 +77,9 @@ if (string.IsNullOrWhiteSpace(secretsPath))
 
 builder.Services.AddSingleton<ITokenAuthenticator>(provider =>
     new IdentityTokenAuthenticator(secretsPath, provider.GetRequiredService<IRuntimeStore>()));
+// First-run setup: the loopback-gated, single-winner owner claim.
+builder.Services.AddSingleton<ISetupService>(provider =>
+    new SetupService(provider.GetRequiredService<IRuntimeStore>(), provider.GetRequiredService<ITokenAuthenticator>()));
 builder.Services.AddSingleton<ISurfaceRegistry>(_ => new FileSurfaceRegistry(repositoryRoot));
 builder.Services.AddSingleton<IRuntimeEventStream, ChannelRuntimeEventStream>();
 builder.Services.AddSingleton<IPolicyEngine, ManifestPolicyEngine>();
@@ -131,22 +145,32 @@ if (!string.IsNullOrWhiteSpace(azureKey))
         new HashSet<string> { "chat", "vision" }, "cloud", azureKey));
 }
 
-// The on-box default: local Bonsai over llama.cpp (keyless). Always present so a
-// no-cloud machine still has a chat provider.
-providerProfiles.Add(new ProviderProfile(
-    "local-bonsai", "PrismML Bonsai 4B", "local-llamacpp",
-    builder.Configuration["Inference:Local:BaseUrl"] ?? "http://127.0.0.1:8080/v1",
-    builder.Configuration["Inference:Local:Model"] ?? "bonsai",
-    new HashSet<string> { "chat" }, "on-box", null));
+// The on-box option: local Bonsai over llama.cpp (keyless). Registered ONLY when
+// enabled — otherwise a fresh machine with no model server would resolve to it
+// and every agent turn would fail with a connection error. Off by default (no
+// weights are bundled in the test release); a no-cloud image sets
+// Inference:Local:Enabled=true once the local server is present.
+var localEnabled = IsTruthy(builder.Configuration["Inference:Local:Enabled"]);
+if (localEnabled)
+{
+    providerProfiles.Add(new ProviderProfile(
+        "local-bonsai", "PrismML Bonsai 4B", "local-llamacpp",
+        builder.Configuration["Inference:Local:BaseUrl"] ?? "http://127.0.0.1:8080/v1",
+        builder.Configuration["Inference:Local:Model"] ?? "bonsai",
+        new HashSet<string> { "chat" }, "on-box", null));
+}
 
 // OS defaults per capability. Behavior-neutral for now: prefer DeepSeek if
 // configured (today's effective default); a shipped no-cloud image sets
 // Inference:DefaultChatProvider=local-bonsai instead.
-var osModelDefaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+var osModelDefaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+var chatDefault = builder.Configuration["Inference:DefaultChatProvider"]
+    ?? providerProfiles.FirstOrDefault(profile => profile.Id == "deepseek")?.Id
+    ?? providerProfiles.FirstOrDefault(profile => profile.Serves("chat"))?.Id;
+if (chatDefault is not null)
 {
-    ["chat"] = builder.Configuration["Inference:DefaultChatProvider"]
-        ?? (providerProfiles.Any(profile => profile.Id == "deepseek") ? "deepseek" : "local-bonsai"),
-};
+    osModelDefaults["chat"] = chatDefault;
+}
 var visionDefault = builder.Configuration["Inference:DefaultVisionProvider"]
     ?? providerProfiles.FirstOrDefault(profile => profile.Serves("vision"))?.Id;
 if (visionDefault is not null)
@@ -158,9 +182,14 @@ builder.Services.AddSingleton<IUserModelConfig, EmptyUserModelConfig>();
 builder.Services.AddSingleton<IModelRegistry>(sp =>
     new ModelRegistry(providerProfiles, osModelDefaults, sp.GetRequiredService<IUserModelConfig>()));
 
+// The fallback brain when no chat provider resolves for an agent. On a demo image
+// that is the deterministic RecipeConsoleBrain (shows the loop with no model); on
+// a real, provider-free install it is the UnconfiguredBrain, which ends the turn
+// with an honest "set a key and restart" message instead of a connection error.
+IConsoleAgentBrain fallbackBrain = demoEnabled ? new RecipeConsoleBrain() : new UnconfiguredBrain();
 builder.Services.AddSingleton<IConsoleBrainRegistry>(sp => new ConsoleBrainRegistry(
     sp.GetRequiredService<IModelRegistry>(),
-    new RecipeConsoleBrain(),
+    fallbackBrain,
     sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>()));
 // A default single brain for any injection site that does not select per-agent.
 builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
@@ -251,6 +280,22 @@ app.MapGet("/api/branding", (IConfiguration configuration) =>
         supportName = section["SupportName"] ?? "Support",
         agentName = section["AgentName"] ?? "Assistant"
     });
+});
+
+// First-run setup. Public (a fresh machine has no token yet), but claim is guarded
+// in-handler: only from loopback, and only while unclaimed (single-winner).
+app.MapGet("/api/setup/status", (ISetupService setup) => Results.Ok(new { claimed = setup.IsClaimed() }));
+
+app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup) =>
+{
+    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress));
+    return result.Outcome switch
+    {
+        ClaimOutcome.Ok => Results.Ok(new { result.Slug, result.Token }),
+        ClaimOutcome.AlreadyClaimed => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status409Conflict),
+        ClaimOutcome.Forbidden => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status403Forbidden),
+        _ => Results.BadRequest(new { error = result.Error })
+    };
 });
 
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
@@ -762,6 +807,20 @@ static async Task<IResult> ResolveAsync(
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
 
+// Loopback = the request originates on the box itself (a local browser, the SSH
+// tunnel the panel uses, or the CLI). IPv4-mapped IPv6 (::ffff:127.0.0.1) is
+// unwrapped first so a mapped loopback still counts.
+static bool IsLoopback(IPAddress? address)
+{
+    if (address is null)
+    {
+        return false;
+    }
+
+    var normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+    return IPAddress.IsLoopback(normalized);
+}
+
 // The user/agent a request acts as, derived from the authenticated identity:
 // an agent acts as itself; a human acts through an agent it owns (the one it
 // named, if valid, else its first).
@@ -814,6 +873,9 @@ public sealed record SurfaceCommandRequest(
     Guid? AgentId);
 
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
+
+public sealed record ClaimRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
 public sealed record DesktopRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);

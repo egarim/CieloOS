@@ -9,7 +9,7 @@ try
 {
     if (args.Length == 0)
     {
-        return Fail("A command is required: defaults, probe, plan, validate, or approve.", 2);
+        return Fail("A command is required: defaults, probe, plan, validate, approve, or create-owner.", 2);
     }
 
     switch (args[0])
@@ -55,6 +55,16 @@ try
             return 0;
         }
 
+        case "create-owner":
+        {
+            // Claim the first owner on THIS machine. Runs on the box, so the POST
+            // reaches the runtime over loopback — the only origin the claim
+            // accepts while unclaimed. Prints the owner's bearer token to stdout.
+            var name = RequireOption(args, "--name");
+            var url = (GetOption(args, "--url") ?? "http://127.0.0.1:5148").TrimEnd('/');
+            return ClaimOwner(name, url);
+        }
+
         default:
             return Fail($"Unknown command '{args[0]}'.", 2);
     }
@@ -90,6 +100,50 @@ static int Fail(string message, int exitCode)
 {
     Console.Error.WriteLine(JsonSerializer.Serialize(new { error = message, exitCode }));
     return exitCode;
+}
+
+static int ClaimOwner(string name, string url)
+{
+    using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+    var payload = new StringContent(
+        JsonSerializer.Serialize(new { name }),
+        System.Text.Encoding.UTF8, "application/json");
+
+    HttpResponseMessage response;
+    try
+    {
+        response = client.PostAsync($"{url}/api/setup/claim", payload).GetAwaiter().GetResult();
+    }
+    catch (HttpRequestException exception)
+    {
+        return Fail($"Could not reach the runtime at {url}: {exception.Message}. Is it running?", 5);
+    }
+
+    var body = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+    if (response.IsSuccessStatusCode)
+    {
+        using var document = JsonDocument.Parse(body);
+        var slug = document.RootElement.GetProperty("slug").GetString();
+        var token = document.RootElement.GetProperty("token").GetString();
+        Console.WriteLine(JsonSerializer.Serialize(new { owner = slug, token }, new JsonSerializerOptions { WriteIndented = true }));
+        return 0;
+    }
+
+    var reason = TryReadError(body) ?? $"HTTP {(int)response.StatusCode}";
+    return Fail($"Claim failed: {reason}", 3);
+}
+
+static string? TryReadError(string body)
+{
+    try
+    {
+        using var document = JsonDocument.Parse(body);
+        return document.RootElement.TryGetProperty("error", out var error) ? error.GetString() : null;
+    }
+    catch (JsonException)
+    {
+        return null;
+    }
 }
 
 static InstallationProbe ProbeSystem()

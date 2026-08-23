@@ -2,6 +2,12 @@
 
 *Design plan — 2026-08-23, revised after adversarial review (13 findings). Closes the onboarding gap: today users are hardcoded demo seed (`joche`, `yulia`) authenticated by token files, and there is no step that creates YOUR owner or lets you run the OS with no AI provider.*
 
+> **Status: Phase A SHIPPED** (2026-08-23). Provider-free install + loopback-gated
+> single-winner claim + `UnconfiguredBrain` + the `create-owner` CLI are built and
+> tested (121 tests). See **What shipped** below for the two deviations from this
+> plan (single-owner in-process claim lock instead of a marker table; `/api/setup/status`
+> kept public). Phase B (panel wizard) is next.
+
 ## Goals
 
 1. **Install/run with no AI provider.** The whole OS control plane — identities, sessions, surfaces, files, console + desktop, the panel — works with **no local or cloud model**. The agent's autonomous loops are cleanly disabled ("no provider configured"), not broken. Providers are added later.
@@ -55,9 +61,50 @@ The review verified these are load-bearing — the plan must call them out, not 
 
 ## Phasing
 
-- **A. Provider-free first-run (one releasable unit):** unconditional spreadsheet seed; `LUNOS_DEMO`-gated demo seed (both stores); `CreateOwner` + `Mint` on the interfaces + token-file write; `AccessPolicy` whitelist; loopback + single-winner `claim` + `status`; the `workspace-setup` CLI; **and** `local-bonsai`-optional + `UnconfiguredBrain` with the restart-based message. This is the shippable test-release core.
+- **A. Provider-free first-run (one releasable unit) — ✅ SHIPPED:** unconditional spreadsheet seed; `LUNOS_DEMO`-gated demo seed (both stores); `CreateOwner` + `Mint`/`IssueToken` on the interfaces + token-file write; `AccessPolicy` whitelist; loopback + single-winner `claim` + `status`; the `create-owner` CLI; **and** `local-bonsai`-optional + `UnconfiguredBrain` with the restart-based message. This is the shippable test-release core. (See **What shipped** for the two deviations.)
 - **B. Panel wizard:** the unclaimed → "create your account" screen (+ show the provider-config hint).
 - **C. (later) models surface** (model-config.md Phase 3) turns the "restart to add a key" into an in-panel add-provider; then the `UnconfiguredBrain` copy points at Settings for real.
+
+## What shipped (Phase A)
+
+Built and verified end-to-end (unit tests + live HTTP + CLI):
+
+- **Seed refactor (both stores).** Demo population (`joche`/`yulia`) is opt-in via
+  `Runtime:SeedDemo` / `LUNOS_DEMO` (default **off**). The spreadsheet singleton is
+  created **unconditionally** via a per-entity guard (`!Spreadsheets.Any()`), so a
+  provider-free machine boots empty *and* survives repeated boots without a PK
+  clash. `EfRuntimeStore(factory, seedDemo=true)` default keeps `PersistenceTests`
+  green; `InMemoryRuntimeStore(seedDemo=true)` default keeps the 52 unit fixtures green.
+- **`IRuntimeStore.CreateOwner`** (both stores) — one-transaction owner+workspace+agent,
+  returns `false` if a user already exists (writes an `owner.claim` audit event).
+- **`ITokenAuthenticator.Mint` + `IssueToken`** — `IssueToken` mints *and* writes the
+  0600 `<slug>.token` file, so a runtime-created owner has a token file immediately.
+- **`SetupService`** (`ISetupService`) — `IsClaimed()` = `Users.Any()`; `Claim(name, fromLoopback)`
+  slugifies the name, creates the owner + `-agent` (empty `InferenceProvider`, full
+  `OwnerDefaults.AgentTools`), issues both token files. Loopback-gated, name-validated.
+- **`AccessPolicy`** whitelists `/api/setup/status` + `/api/setup/claim` (Public).
+- **Endpoints** `GET /api/setup/status → {claimed}` and `POST /api/setup/claim {name}`
+  → `{slug, token}` / 409 / 403 / 400. Loopback detection unwraps IPv4-mapped IPv6.
+- **`local-bonsai` gated on `Inference:Local:Enabled`** (default off) — no phantom
+  on-box provider that would fail every turn on a machine with no model server.
+- **`UnconfiguredBrain`** — the console fallback when no chat provider resolves
+  (non-demo image): ends the turn with an honest "set a key / enable local / restart"
+  message instead of a connection error. Demo images keep `RecipeConsoleBrain`.
+- **CLI** `workspace-installer create-owner --name "…" [--url http://127.0.0.1:5148]` —
+  claims over loopback and prints the owner token.
+
+**Two deliberate deviations from the plan above:**
+
+1. **Single-winner via an in-process lock + store recheck, not a persistent
+   `owner_claim` UNIQUE marker.** The runtime is a single process (one Kestrel, singleton
+   stores), so a `lock` in `SetupService` fully serializes concurrent claims and the
+   store's `Users.Any()` recheck is authoritative — verified by a 16-way parallel claim
+   test yielding exactly one owner. This avoids an EF migration and matches the
+   single-owner test-release posture. A future multi-process deployment would need the
+   marker row (or a DB unique constraint) as the plan describes.
+2. **`/api/setup/status` kept Public (not loopback-gated).** It returns a single
+   boolean (`claimed`), and keeping it public lets a panel reached without an SSH
+   tunnel still show the right screen. The claim itself remains loopback-only.
 
 ## Known limitations to put in release notes
 

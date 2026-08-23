@@ -1,3 +1,4 @@
+using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
 
 namespace WorkspaceRuntime.Infrastructure;
@@ -21,8 +22,11 @@ internal static class RuntimeSeed
             user.Id,
             workspace.Id,
             $"{displayName}'s Agent",
-            "local-inference",
-            new HashSet<string> { "spreadsheet", "session", "console", "desktop", "session-input" },
+            // Empty = "no agent-level override": the model registry resolves this
+            // agent's chat/vision through the user -> OS cascade. (The old
+            // "local-inference" was a dead provider id that resolved to nothing.)
+            "",
+            OwnerDefaults.AgentTools,
             $"{slug}-agent");
         return (user, workspace, agent);
     }

@@ -12,15 +12,25 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly List<AuditEvent> auditEvents = new();
     private readonly Dictionary<Guid, ToolRequest> pendingRequests = new();
     private long spreadsheetRevision;
-    private SpreadsheetState spreadsheet = new(new Dictionary<string, string>
-    {
-        ["A1"] = "12",
-        ["A2"] = "30",
-        ["B1"] = "Ready"
-    });
+    private SpreadsheetState spreadsheet;
 
-    public InMemoryRuntimeStore()
+    // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
+    // unit-test fixtures) populated with the joche/yulia demo identities. A real,
+    // provider-free install constructs it with seedDemo:false — an empty machine
+    // whose first owner is created by the first-run claim.
+    public InMemoryRuntimeStore(bool seedDemo = true)
     {
+        // The spreadsheet singleton always exists (the control plane reads it on
+        // nearly every mutation/SSE); only its demo contents are gated.
+        spreadsheet = new SpreadsheetState(seedDemo
+            ? new Dictionary<string, string> { ["A1"] = "12", ["A2"] = "30", ["B1"] = "Ready" }
+            : new Dictionary<string, string>());
+
+        if (!seedDemo)
+        {
+            return;
+        }
+
         foreach (var (user, workspace, agent) in RuntimeSeed.People())
         {
             users.Add(user);
@@ -71,4 +81,18 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public RuntimePrincipal? FindPrincipalBySlug(string slug) =>
         PrincipalResolver.BySlug(Users, Agents, slug);
+
+    public bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent)
+    {
+        if (users.Count > 0)
+        {
+            return false;
+        }
+
+        users.Add(user);
+        workspaces.Add(workspace);
+        agents.Add(agent);
+        auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "owner.claim", AuditOutcome.Success, $"Claimed owner '{user.Slug}'."));
+        return true;
+    }
 }

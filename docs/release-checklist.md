@@ -31,6 +31,20 @@ multi-tenant** release. Items are marked ✅ done · 🟡 in progress · ⬜ ope
 - ✅ **Model keys.** DeepSeek / Azure keys read from `.data/secrets/*.env` (0600),
   never logged, never in audited command args.
 
+## First-run setup / install
+
+- ✅ **Provider-free install.** The OS boots with **no AI provider** — identities,
+  sessions, surfaces, files, panel all work; an unconfigured agent returns an
+  honest "set a key and restart" message (`UnconfiguredBrain`), not an error.
+  Demo users (`joche`/`yulia`) are opt-in (`Runtime:SeedDemo`/`LUNOS_DEMO`, default off).
+- ✅ **First owner claim.** A fresh machine has no users; `POST /api/setup/claim`
+  (loopback-only, single-winner) creates the owner + agent + token. CLI:
+  `workspace-installer create-owner --name "…"`. See docs/first-run-setup.md.
+- ⬜ **Panel wizard (Phase B).** The unclaimed → "create your account" screen in the
+  panel (backend `/api/setup/*` is done; the React screen is not yet wired).
+- ⬜ **Second-tester onboarding.** Test release is **single-owner**; a second human
+  needs a hand-added user (`add-user` reusing `CreateOwner`+`Mint`) — not built yet.
+
 ## Ops / packaging
 
 - 🟡 **Bake the desktop image.** `xdotool` + `scrot` + `python3-gi` +
