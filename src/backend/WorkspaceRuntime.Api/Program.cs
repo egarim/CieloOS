@@ -863,21 +863,30 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     else
     {
         var goal =
-            $"Your owner sent you this chat message: \"{userMessage}\". Respond helpfully — if it asks you to do " +
-            "something, use your tools (websearch, python3, the files in ~ and ~/shared). When finished, write your " +
-            "reply by overwriting ~/shared/outbox.md, then you are done.";
+            $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
+            "If you can answer from what you already know, just answer — do not touch the console. " +
+            "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
+            "~/shared), then give the answer. Put your full reply in the note when you finish.";
         var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
 
         var owner = Ownership.RootUserSlug(caller.Slug, store);
         var outbox = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
-        var reply = outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content)
-            ? outbox.Content.Trim()
-            : run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
+        // The answer now comes back through JSON on the finishing step, so newlines, quotes
+        // and code blocks survive. outbox.md remains a fallback for agents that still write it.
+        var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
+        var reply = finished?.Note?.Trim()
+            ?? (outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content) ? outbox.Content.Trim() : null)
+            ?? run.Steps.LastOrDefault(step => step.Note is not null)?.Note
+            ?? run.StopReason;
 
         var actions = string.Join("\n", run.Steps
             .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
             .Select(step => $"› `{step.Text}`"));
-        content = string.IsNullOrEmpty(actions) ? reply : $"{actions}\n\n{reply}";
+        // The answer leads; what the agent typed is kept but folded away - it is context,
+        // not the reply itself.
+        content = string.IsNullOrEmpty(actions)
+            ? reply
+            : $"{reply}\n\n<details>\n<summary>What the agent did</summary>\n\n{actions}\n\n</details>";
     }
 
     if (request.Stream == true)
