@@ -87,25 +87,67 @@ fi
 CIELO_UID="$(id -u cielo)"
 
 echo "==> [3/8] Session images (built here so they match this machine's architecture)"
-if [[ "$CI" -eq 1 || "$OFFLINE" -eq 1 ]]; then
-  echo "    (skipped: --ci/--offline)"
-elif [[ "$SKIP_IMAGES" -eq 1 ]]; then
-  echo "    (skipped: --skip-images; sessions will not start until these exist)"
-elif [[ ! -d "$BUNDLE/images" ]]; then
-  echo "    (no images/ in this bundle - skipping)"
-else
-  # Rootless, as the service user, so the images land in the store the runtime uses.
-  # Built here rather than pulled because the shipped upstream desktop image is
-  # amd64-only and lacks the agent's xdotool/scrot/AT-SPI tooling and ONLYOFFICE.
+# The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
+# to arm64; on an x64 target that would install a foreign-architecture .deb, which
+# either fails or gets masked by apt-get -f and silently ships no editor.
+case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+  arm64|aarch64) OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_arm64.deb" ;;
+  *)             OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb" ;;
+esac
+
+# The runtime now defaults to these local tags, so an install that cannot build them
+# has no working sessions at all. Stage the sources and a first-boot unit that builds
+# whatever is missing: that covers --offline (chroot, no podman yet) and recovers from
+# a build that failed here.
+if [[ -d "$BUNDLE/images" ]]; then
   install -d -o cielo -g cielo /var/lib/cielo/images
   cp -a "$BUNDLE/images/." /var/lib/cielo/images/
   chown -R cielo:cielo /var/lib/cielo/images
-  for img in console desktop; do
-    echo "    building localhost/lunos-$img:latest (this takes a while)"
-    runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-      podman build -t "localhost/lunos-$img:latest" "/var/lib/cielo/images/$img" >/dev/null || {
-        echo "    WARNING: building lunos-$img failed; $img sessions will not start." >&2; }
-  done
+  cat > /etc/systemd/system/cielo-session-images.service <<UNIT
+[Unit]
+Description=Build the CieloOS session images if they are missing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cielo
+Environment=XDG_RUNTIME_DIR=/run/user/${CIELO_UID}
+ExecStart=/usr/local/bin/cielo-build-session-images
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  cat > /usr/local/bin/cielo-build-session-images <<SCRIPT
+#!/usr/bin/env bash
+# Builds any missing session image. Safe to re-run: present images are left alone.
+set -euo pipefail
+OO_DEB="${OO_DEB}"
+for img in console desktop; do
+  if podman image exists "localhost/lunos-\$img:latest"; then continue; fi
+  args=(build -t "localhost/lunos-\$img:latest")
+  if [[ "\$img" == "desktop" ]]; then args+=(--build-arg "ONLYOFFICE_DEB=\${OO_DEB}"); fi
+  podman "\${args[@]}" "/var/lib/cielo/images/\$img"
+done
+SCRIPT
+  chmod +x /usr/local/bin/cielo-build-session-images
+  enable_unit cielo-session-images.service || true
+fi
+
+if [[ "$CI" -eq 1 ]]; then
+  echo "    (skipped: --ci)"
+elif [[ "$OFFLINE" -eq 1 ]]; then
+  echo "    (deferred: --offline; cielo-session-images.service builds them on first boot)"
+elif [[ "$SKIP_IMAGES" -eq 1 ]]; then
+  echo "    (skipped: --skip-images; cielo-session-images.service will build them at next boot)"
+elif [[ ! -d "$BUNDLE/images" ]]; then
+  echo "    (no images/ in this bundle - skipping)"
+else
+  echo "    building now (this takes a while); first boot would otherwise do it"
+  runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    /usr/local/bin/cielo-build-session-images >/dev/null || {
+      echo "    WARNING: image build failed here; cielo-session-images.service retries at boot." >&2; }
 fi
 
 echo "==> [4/8] Session restart policy"
