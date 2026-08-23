@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a self-contained Lun.Os release bundle: the runtime (self-contained, no
+# Build a self-contained CieloOS release bundle: the runtime (self-contained, no
 # .NET needed on the target) + the built panel + surfaces + config, tarred up.
 # Carry the tarball to any Ubuntu (VPS / old machine) or run it locally, then run
 # the bundled install.sh. See distro/install.sh for the target-side steps.
@@ -10,9 +10,9 @@ set -euo pipefail
 ARCH="${1:-linux-x64}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="$ROOT/release"
-STAGE="$OUT/lunos"
+STAGE="$OUT/cielo"
 
-echo "==> Lun.Os release bundle ($ARCH)"
+echo "==> CieloOS release bundle ($ARCH)"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/panel" "$STAGE/surfaces" "$STAGE/config" "$STAGE/systemd"
 
@@ -36,16 +36,16 @@ cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
 
 echo "==> Staging installer + service unit + self-test"
 cp "$ROOT/distro/install.sh" "$STAGE/install.sh"
-cp "$ROOT/distro/scripts/lunos-selftest.sh" "$STAGE/lunos-selftest.sh"
-cp "$ROOT/distro/services/lunos-runtime.service" "$STAGE/systemd/lunos-runtime.service"
-cp "$ROOT/distro/config/lunos.env.example" "$STAGE/lunos.env.example"
+cp "$ROOT/distro/scripts/cielo-selftest.sh" "$STAGE/cielo-selftest.sh"
+cp "$ROOT/distro/services/cielo-runtime.service" "$STAGE/systemd/cielo-runtime.service"
+cp "$ROOT/distro/config/cielo.env.example" "$STAGE/cielo.env.example"
 cp "$ROOT/distro/RELEASE-README.md" "$STAGE/README.md" 2>/dev/null || true
-chmod +x "$STAGE/install.sh" "$STAGE/lunos-selftest.sh"
+chmod +x "$STAGE/install.sh" "$STAGE/cielo-selftest.sh"
 
-TARBALL="$OUT/lunos-$ARCH.tar.gz"
+TARBALL="$OUT/cielo-$ARCH.tar.gz"
 echo "==> Packing $TARBALL"
-tar czf "$TARBALL" -C "$OUT" lunos
+tar czf "$TARBALL" -C "$OUT" cielo
 
 SIZE="$(du -sh "$TARBALL" | cut -f1)"
 echo "==> Done: $TARBALL ($SIZE)"
-echo "    On the target: tar xzf $(basename "$TARBALL") && sudo ./lunos/install.sh --mode headless"
+echo "    On the target: tar xzf $(basename "$TARBALL") && sudo ./cielo/install.sh --mode headless"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Automated end-to-end test of a Lun.Os release bundle on REAL Linux, in Docker:
+# Automated end-to-end test of a CieloOS release bundle on REAL Linux, in Docker:
 # builds the bundle, runs install.sh --ci in ubuntu:24.04, starts the runtime as
-# the service would, and runs lunos-selftest --claim (panel + claim + add-user +
+# the service would, and runs cielo-selftest --claim (panel + claim + add-user +
 # models + key-not-leaked). Proves the exact self-contained binary + installer +
 # panel + first-run flow work on Linux — before you touch the target machine.
 #
@@ -11,7 +11,7 @@
 # Mac (or vice-versa) uses QEMU user-mode emulation, under which .NET FailFasts
 # while unwinding exceptions in EF Core's dynamic query codegen — an EMULATOR bug,
 # not a defect (the same path passes natively). The authoritative cross-arch test
-# is `lunos-selftest` on real target hardware.
+# is `cielo-selftest` on real target hardware.
 set -euo pipefail
 
 case "$(uname -m)" in
@@ -35,7 +35,7 @@ docker info >/dev/null 2>&1 || { echo "docker daemon not reachable (run: colima 
 
 echo "==> Building bundle ($ARCH)"
 bash "$ROOT/distro/scripts/build-release.sh" "$ARCH" >/dev/null
-STAGE="$ROOT/release/lunos"
+STAGE="$ROOT/release/cielo"
 
 echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
 docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
@@ -43,11 +43,11 @@ docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash 
   cp -r /bundle /work && cd /work
   bash ./install.sh --ci --mode headless
 
-  # Start the runtime exactly as the systemd unit would (as lunos, provider-free).
-  runuser -u lunos -- env \
-    WORKSPACE_RUNTIME_ROOT=/opt/lunos Runtime__SeedDemo=false Database__Provider=sqlite \
+  # Start the runtime exactly as the systemd unit would (as cielo, provider-free).
+  runuser -u cielo -- env \
+    WORKSPACE_RUNTIME_ROOT=/opt/cielo Runtime__SeedDemo=false Database__Provider=sqlite \
     ASPNETCORE_URLS=http://127.0.0.1:5148 \
-    /opt/lunos/bin/WorkspaceRuntime.Api >/tmp/runtime.log 2>&1 &
+    /opt/cielo/bin/WorkspaceRuntime.Api >/tmp/runtime.log 2>&1 &
   RUNTIME_PID=$!
 
   ok=0
@@ -59,7 +59,7 @@ docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash 
   if [ "$ok" != "1" ]; then echo "RUNTIME NEVER BECAME READY:"; tail -40 /tmp/runtime.log; exit 1; fi
 
   set +e
-  lunos-selftest --claim
+  cielo-selftest --claim
   rc=$?
   kill "$RUNTIME_PID" 2>/dev/null
   exit $rc

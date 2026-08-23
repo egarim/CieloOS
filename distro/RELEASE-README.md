@@ -1,14 +1,14 @@
-# Lun.Os — release bundle
+# CieloOS — release bundle
 
-A self-contained Lun.Os: the runtime (no .NET needed on the target) that **serves
+A self-contained CieloOS: the runtime (no .NET needed on the target) that **serves
 its own panel**, plus surfaces and config. Provider-free — you add an AI provider
-from the panel's **Models** tab (no restart), or set a key in `/etc/lunos/lunos.env`.
+from the panel's **Models** tab (no restart), or set a key in `/etc/cielo/cielo.env`.
 
 ## Install (Ubuntu 24.04+)
 
 ```
-tar xzf lunos-linux-x64.tar.gz
-sudo ./lunos/install.sh --mode headless   # or: app | kiosk
+tar xzf cielo-linux-x64.tar.gz
+sudo ./cielo/install.sh --mode headless   # or: app | kiosk
 ```
 
 | Mode | For | You see the panel via | Binds |
@@ -23,15 +23,15 @@ The first claim only works **from the machine itself** — nobody on the network
 claim your box. Do it on the box:
 
 - **app / kiosk:** the local browser at `http://127.0.0.1:5148/` shows the claim wizard.
-- **headless:** `ssh` in and run `lunos-claim "Your Name"` — it prints your token.
+- **headless:** `ssh` in and run `cielo-claim "Your Name"` — it prints your token.
   Then open `http://<host-ip>:5148/` from your laptop and sign in with that token.
 
-Add a teammate later: `lunos-add-user "Their Name" <owner-token>` (or the panel).
+Add a teammate later: `cielo-add-user "Their Name" <owner-token>` (or the panel).
 
 ## Notes
 
-- Provider-free and single SQLite DB under `/opt/lunos/.data`.
+- Provider-free and single SQLite DB under `/opt/cielo/.data`.
 - Sessions are rootless podman containers; their images build on first use (or
-  prebuild them from the distro Containerfiles as the `lunos` user).
+  prebuild them from the distro Containerfiles as the `cielo` user).
 - Dogfood posture: plain HTTP, token-gated. For a VPS, put it behind TLS (a reverse
   proxy) or reach it over an SSH tunnel.

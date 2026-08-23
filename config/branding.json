@@ -1,9 +1,9 @@
 {
   "Branding": {
-    "ProductName": "Lun.Os",
-    "ShortName": "Lun",
-    "CompanyName": "Workspace Runtime Labs",
-    "SupportName": "Lun Support",
-    "AgentName": "Lun Assistant"
+    "ProductName": "CieloOS",
+    "ShortName": "Cielo",
+    "CompanyName": "an OS operated by AI",
+    "SupportName": "Cielo Support",
+    "AgentName": "Cielo"
   }
 }

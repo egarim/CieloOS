@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Health-check a running Lun.Os. Non-destructive by default (safe on your real
+# Health-check a running CieloOS. Non-destructive by default (safe on your real
 # machine); with --claim it also runs the full first-run flow (claim + add a
 # provider) — only do that on a throwaway/CI machine.
 #
-#   lunos-selftest [--url http://127.0.0.1:5148] [--claim]
+#   cielo-selftest [--url http://127.0.0.1:5148] [--claim]
 set -u
 
 BASE="http://127.0.0.1:5148"
@@ -23,7 +23,7 @@ fail() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; fails=$((fails + 1)); }
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
 body() { curl -s "$@"; }
 
-echo "Lun.Os self-test → $BASE"
+echo "CieloOS self-test → $BASE"
 
 # --- non-destructive checks (always) ---
 [ "$(code "$BASE/")" = "200" ] && [ -n "$(body "$BASE/" | grep -o 'id="root"')" ] \
