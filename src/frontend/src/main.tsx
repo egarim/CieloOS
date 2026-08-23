@@ -776,6 +776,9 @@ function App() {
     return { slug, label, isSelf };
   });
   const desk = desks.find((candidate) => candidate.slug === selectedDesk) ?? null;
+  // /v1/agent resolves the owner's FIRST agent, so the chat link cannot follow the
+  // selected desk; only warn about that when more than one agent could be confused.
+  const agentDeskCount = desks.filter((candidate) => !candidate.isSelf).length;
   const deskSessions = sessions.filter((session) => session.owner === selectedDesk);
   const deskConsole = deskSessions.find((session) => session.kind === "console" && session.status === "running") ?? null;
   const deskAudit = auditEvents
@@ -1134,14 +1137,23 @@ function App() {
 
             {desk && !desk.isSelf && (
               <div className="panel chat" data-automation-id="chat">
-                <h2><Bot size={13} /> Chat with {desk.label}</h2>
+                <h2><Bot size={13} /> Chat</h2>
                 {branding.chatUrl ? (
                   <>
                     <p className="muted small">
-                      The full chat runs in CieloOS Chat. Every message runs {desk.label}'s console
+                      The full chat runs in CieloOS Chat. Every message runs your agent's console
                       loop — it uses its tools and operates the OS — through the same policy-checked
                       bus as the rest of the panel.
                     </p>
+                    {agentDeskCount > 1 && (
+                      // The chat client carries one identity and /v1/agent resolves the owner's
+                      // FIRST agent, so the link cannot follow the selected desk. Say so rather
+                      // than implying per-desk routing. Real fix tracked in #9.
+                      <p className="muted small" data-automation-id="chat-agent-caveat">
+                        Note: chat always talks to your first agent, not the desk selected here —
+                        per-agent routing needs the per-user credentials tracked in issue #9.
+                      </p>
+                    )}
                     <a
                       className="chatLink"
                       data-automation-id="chat-open"
