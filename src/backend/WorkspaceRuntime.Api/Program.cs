@@ -163,25 +163,14 @@ builder.Services.AddSingleton<IConsoleBrainRegistry>(sp => new ConsoleBrainRegis
 builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
     sp.GetRequiredService<IConsoleBrainRegistry>().ResolveDefault().Brain);
 
-// The desktop loop needs a VISION-capable brain (it grounds on the AT-SPI element
-// list + a screenshot). Azure OpenAI gpt-4.1-mini provides it; without a vision
-// provider a stand-in reports "no vision configured" rather than flailing.
+// The desktop brain is resolved per agent through the model registry: a `chat`
+// provider grounds on the AT-SPI element list (default, no screenshot), and a
+// `vision` provider (if any) is the screenshot fallback. AT-SPI-first means the
+// default path needs no VLM and nothing leaves the box.
 builder.Services.AddSingleton<DesktopAgentLoop>();
-if (!string.IsNullOrWhiteSpace(azureKey))
-{
-    var azureVisionOptions = new ModelBrainOptions
-    {
-        BaseUrl = builder.Configuration["Inference:Azure:BaseUrl"] ?? "https://sivar-aoai-eus.openai.azure.com/openai/v1",
-        Model = builder.Configuration["Inference:Azure:VisionModel"] ?? builder.Configuration["Inference:Azure:Model"] ?? "gpt-4.1-mini",
-        ApiKey = azureKey
-    };
-    builder.Services.AddSingleton<IDesktopAgentBrain>(_ =>
-        new ModelDesktopBrain(new HttpClient { Timeout = TimeSpan.FromSeconds(90) }, azureVisionOptions));
-}
-else
-{
-    builder.Services.AddSingleton<IDesktopAgentBrain, NoVisionDesktopBrain>();
-}
+builder.Services.AddSingleton<IDesktopBrainRegistry>(sp => new DesktopBrainRegistry(
+    sp.GetRequiredService<IModelRegistry>(),
+    sp.GetRequiredService<ILoggerFactory>()));
 
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
@@ -402,7 +391,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
 // + a screenshot, asks the vision brain for the next action, and submits each
 // click/keystroke as a policy-checked, audited `desktop.*` command. Gated on the
 // session owner like the console loop; per-action ownership/policy still apply.
-app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopAgentBrain brain, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -416,6 +405,7 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
+    var brain = desktopBrains.Resolve(store.GetAgent(agentId));
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
