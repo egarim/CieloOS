@@ -308,7 +308,11 @@ app.MapGet("/api/branding", (IConfiguration configuration) =>
         shortName = section["ShortName"] ?? "Runtime",
         companyName = section["CompanyName"] ?? "Workspace Runtime Labs",
         supportName = section["SupportName"] ?? "Support",
-        agentName = section["AgentName"] ?? "Assistant"
+        agentName = section["AgentName"] ?? "Assistant",
+        // Where the full chat UI lives (Open WebUI talking to /v1/agent). Empty when
+        // it is not deployed - the panel then explains how to enable it instead of
+        // linking nowhere. Set with Chat__Url.
+        chatUrl = configuration["Chat:Url"] ?? ""
     });
 });
 
