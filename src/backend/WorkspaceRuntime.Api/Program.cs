@@ -90,7 +90,12 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
     {
         PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman",
         Image = builder.Configuration["Sessions:Image"] ?? "docker.io/accetto/ubuntu-vnc-xfce-g3:latest",
-        ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901
+        ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901,
+        // The desktop chat launcher needs a URL reachable FROM the session container,
+        // where the host's loopback is not the host. Default: take Chat:Url and swap a
+        // loopback host for podman's host alias. Override with Sessions:ChatUrl.
+        ChatUrl = builder.Configuration["Sessions:ChatUrl"]
+            ?? SessionReachableChatUrl(builder.Configuration["Chat:Url"])
     },
     owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>())));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
@@ -308,7 +313,11 @@ app.MapGet("/api/branding", (IConfiguration configuration) =>
         shortName = section["ShortName"] ?? "Runtime",
         companyName = section["CompanyName"] ?? "Workspace Runtime Labs",
         supportName = section["SupportName"] ?? "Support",
-        agentName = section["AgentName"] ?? "Assistant"
+        agentName = section["AgentName"] ?? "Assistant",
+        // Where the full chat UI lives (Open WebUI talking to /v1/agent). Empty when
+        // it is not deployed - the panel then explains how to enable it instead of
+        // linking nowhere. Set with Chat__Url.
+        chatUrl = configuration["Chat:Url"] ?? ""
     });
 });
 
@@ -822,7 +831,7 @@ app.MapPost("/api/tool-requests", async (SubmitToolRequestDto request, HttpConte
 
 // OpenAI-compatible surface for a chat UI (Open WebUI) to talk to the ACTING
 // agent: each message runs the console loop (the agent uses its tools + operates
-// the OS), and the reply is what it writes to ~/shared/outbox.md. Auth is the
+// the OS), and the reply is the note it finishes on. Auth is the
 // same bearer token — the chat UI is configured with the caller's token, so the
 // loop runs as that owner through their agent.
 var agentJson = new JsonSerializerOptions(JsonSerializerDefaults.Web);
@@ -844,29 +853,43 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     var session = (await sessions.ListAsync(cancellationToken))
         .FirstOrDefault(s => string.Equals(s.Owner, agent.Slug, StringComparison.Ordinal) && s.Kind == "console" && s.Status == "running");
 
-    string content;
-    if (session is null)
-    {
-        content = "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
-    }
-    else
-    {
-        var goal =
-            $"Your owner sent you this chat message: \"{userMessage}\". Respond helpfully — if it asks you to do " +
-            "something, use your tools (websearch, python3, the files in ~ and ~/shared). When finished, write your " +
-            "reply by overwriting ~/shared/outbox.md, then you are done.";
-        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+    const string noSession =
+        "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
 
+    var goal =
+        $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
+        "If you can answer from what you already know, just answer — do not touch the console. " +
+        "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
+        "~/shared), then give the answer. Put your full reply in the note when you finish.";
+    // The reply travels as JSON on the finishing step, so newlines, quotes and code
+    // blocks survive. outbox.md stays a fallback for agents that still write it — but
+    // ONLY if this run actually changed it. The current prompt tells the agent not to
+    // write the file, so a run that fails or hits the step limit would otherwise reply
+    // with a leftover answer from an earlier conversation.
+    async Task<string?> ReadOutboxAsync()
+    {
         var owner = Ownership.RootUserSlug(caller.Slug, store);
-        var outbox = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
-        var reply = outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content)
-            ? outbox.Content.Trim()
-            : run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
+        var file = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
+        return file?.Content;
+    }
 
-        var actions = string.Join("\n", run.Steps
-            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
-            .Select(step => $"› `{step.Text}`"));
-        content = string.IsNullOrEmpty(actions) ? reply : $"{actions}\n\n{reply}";
+    var outboxBefore = await ReadOutboxAsync();
+
+    async Task<string> ReplyOfAsync(ConsoleLoopResult run)
+    {
+        var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
+        if (finished?.Note is { } note && !string.IsNullOrWhiteSpace(note))
+        {
+            return note.Trim();
+        }
+
+        var outboxAfter = await ReadOutboxAsync();
+        if (!string.IsNullOrWhiteSpace(outboxAfter) && !string.Equals(outboxAfter, outboxBefore, StringComparison.Ordinal))
+        {
+            return outboxAfter.Trim();
+        }
+
+        return run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
     }
 
     if (request.Stream == true)
@@ -879,11 +902,59 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
             model = "lunos-agent",
             choices = new[] { new { index = 0, delta, finish_reason = finish } }
         };
-        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { role = "assistant", content }, null), agentJson)}\n\n", cancellationToken);
-        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { }, "stop"), agentJson)}\n\n", cancellationToken);
+        async Task SendAsync(object payload)
+        {
+            await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(payload, agentJson)}\n\n", cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
+        }
+
+        await SendAsync(Chunk(new { role = "assistant", content = "" }, null));
+
+        if (session is null)
+        {
+            await SendAsync(Chunk(new { content = noSession }, null));
+        }
+        else
+        {
+            // Emit each command as the agent runs it, so a long turn shows progress
+            // instead of a silent wait, then the answer itself.
+            var typed = 0;
+            var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken,
+                async step =>
+                {
+                    if (step.Done || string.IsNullOrWhiteSpace(step.Text)) return;
+                    typed++;
+                    await SendAsync(Chunk(new { content = $"› `{step.Text}`\n" }, null));
+                });
+
+            var reply = await ReplyOfAsync(run);
+            await SendAsync(Chunk(new { content = typed > 0 ? $"\n{reply}" : reply }, null));
+        }
+
+        await SendAsync(Chunk(new { }, "stop"));
         await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
         await context.Response.Body.FlushAsync(cancellationToken);
         return Results.Empty;
+    }
+
+    string content;
+    if (session is null)
+    {
+        content = noSession;
+    }
+    else
+    {
+        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+        var reply = await ReplyOfAsync(run);
+
+        var actions = string.Join("\n", run.Steps
+            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
+            .Select(step => $"› `{step.Text}`"));
+        // The answer leads; what the agent typed is kept but folded away - it is
+        // context, not the reply itself.
+        content = string.IsNullOrEmpty(actions)
+            ? reply
+            : $"{reply}\n\n<details>\n<summary>What the agent did</summary>\n\n{actions}\n\n</details>";
     }
 
     return Results.Ok(new
@@ -964,6 +1035,18 @@ static bool IsLoopback(IPAddress? address)
 // The user/agent a request acts as, derived from the authenticated identity:
 // an agent acts as itself; a human acts through an agent it owns (the one it
 // named, if valid, else its first).
+
+// A chat URL the PANEL uses is written from the host's point of view, where
+// loopback means the host. Inside a rootless-podman session, loopback is the
+// container itself, so any loopback host — localhost, 127.0.0.0/8, or [::1] —
+// has to become podman's host alias. Uri.IsLoopback covers all of those forms;
+// string matching on "//localhost" and "//127.0.0.1" did not.
+static string SessionReachableChatUrl(string? chatUrl)
+{
+    if (string.IsNullOrWhiteSpace(chatUrl)) return "";
+    if (!Uri.TryCreate(chatUrl, UriKind.Absolute, out var uri) || !uri.IsLoopback) return chatUrl;
+    return new UriBuilder(uri) { Host = "host.containers.internal" }.Uri.ToString();
+}
 static (Guid userId, Guid agentId) ActingAgent(RuntimePrincipal principal, Guid? requestedAgentId, IRuntimeStore store)
 {
     if (principal.Kind == PrincipalKind.Agent)

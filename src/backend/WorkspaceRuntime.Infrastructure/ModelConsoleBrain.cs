@@ -32,8 +32,15 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         "exact shell command to type in \"text\", with submit=true to press Enter. Keep commands " +
         "safe and scoped to the home directory; never run destructive or networked commands unless " +
         "the goal explicitly requires it. Prefer ONE single-line command per step (use python3 -c " +
-        "'...' for short scripts); avoid multi-line heredocs. \"note\" is a one-line explanation of " +
-        "your reasoning.";
+        "'...' for short scripts); avoid multi-line heredocs. " +
+        "If the GOAL is a question, a greeting, or anything you can answer from what you already " +
+        "know, do NOT touch the console: set done=true on the very first step and answer. Only run " +
+        "commands when the goal genuinely needs the machine. " +
+        "\"note\" is a one-line explanation of your reasoning EXCEPT when done=true, where \"note\" " +
+        "is your COMPLETE reply to the person: written to them, conversational, and as long as it " +
+        "needs to be. It may be multi-line and use markdown, including fenced code blocks. Put the " +
+        "reply there directly. Never echo the reply into a file to be read back, and never describe " +
+        "the answer instead of giving it.";
 
     private readonly HttpClient http;
     private readonly ModelBrainOptions options;

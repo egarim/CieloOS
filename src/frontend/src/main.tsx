@@ -9,6 +9,7 @@ type Branding = {
   companyName: string;
   supportName: string;
   agentName: string;
+  chatUrl: string;
 };
 
 type PlatformUser = { id: string; displayName: string; email: string; slug?: string };
@@ -109,7 +110,8 @@ const emptyBranding: Branding = {
   shortName: "Runtime",
   companyName: "Workspace Runtime Labs",
   supportName: "Support",
-  agentName: "Assistant"
+  agentName: "Assistant",
+  chatUrl: ""
 };
 
 const TOKEN_KEY = "runtime.token";
@@ -182,9 +184,6 @@ function App() {
   const [agentGoal, setAgentGoal] = React.useState("");
   const [agentRunning, setAgentRunning] = React.useState(false);
   const [agentRun, setAgentRun] = React.useState<AgentRunResult | null>(null);
-  const [chatLog, setChatLog] = React.useState<{ role: "you" | "agent"; text: string }[]>([]);
-  const [chatDraft, setChatDraft] = React.useState("");
-  const [chatBusy, setChatBusy] = React.useState(false);
 
   const signOut = React.useCallback(() => {
     window.localStorage.removeItem(TOKEN_KEY);
@@ -664,41 +663,6 @@ function App() {
     }
   }
 
-  // Message the agent: it reads your message, may use its tools to act, and
-  // replies through the shared workspace (~/shared/outbox.md) — the same
-  // governed loop, framed as a conversation over the shared space.
-  async function sendMessage(sessionId: string) {
-    const text = chatDraft.trim();
-    if (!text || chatBusy) return;
-    setChatLog((previous) => [...previous, { role: "you", text }]);
-    setChatDraft("");
-    setChatBusy(true);
-    try {
-      const goal = `Your owner sent you a message: "${text}". Respond helpfully — if it asks you to do something, use your tools (websearch, python3, and the files in ~ and ~/shared). When finished, write a short reply to your owner by overwriting ~/shared/outbox.md with your reply, then you are done.`;
-      const run = await api<AgentRunResult>(`/api/sessions/${encodeURIComponent(sessionId)}/agent-run`, {
-        method: "POST",
-        body: JSON.stringify({ goal, maxSteps: 8 })
-      });
-      let reply = "";
-      try {
-        reply = (await api<HomeFile>("/api/shared/read?path=outbox.md")).content.trim();
-      } catch {
-        // no outbox written; fall back to the agent's last reasoning note.
-      }
-      if (!reply) {
-        reply = [...run.steps].reverse().find((step) => step.note)?.note ?? run.stopReason;
-      }
-      setChatLog((previous) => [...previous, { role: "agent", text: reply }]);
-      await observeConsole(sessionId);
-      await refresh();
-    } catch (error) {
-      if (error instanceof UnauthorizedError) signOut();
-      else setChatLog((previous) => [...previous, { role: "agent", text: `(error: ${String(error)})` }]);
-    } finally {
-      setChatBusy(false);
-    }
-  }
-
   async function resolve(approval: ApprovalView, action: "approve" | "reject") {
     try {
       const result = await api<CommandResult>(`/api/approvals/${approval.id}/${action}`, {
@@ -812,6 +776,9 @@ function App() {
     return { slug, label, isSelf };
   });
   const desk = desks.find((candidate) => candidate.slug === selectedDesk) ?? null;
+  // /v1/agent resolves the owner's FIRST agent, so the chat link cannot follow the
+  // selected desk; only warn about that when more than one agent could be confused.
+  const agentDeskCount = desks.filter((candidate) => !candidate.isSelf).length;
   const deskSessions = sessions.filter((session) => session.owner === selectedDesk);
   const deskConsole = deskSessions.find((session) => session.kind === "console" && session.status === "running") ?? null;
   const deskAudit = auditEvents
@@ -1168,45 +1135,50 @@ function App() {
               </div>
             </div>
 
-            {deskConsole && desk && !desk.isSelf && (
+            {desk && !desk.isSelf && (
               <div className="panel chat" data-automation-id="chat">
-                <h2><Bot size={13} /> Message {desk.label}</h2>
-                <p className="muted small">Talk to your agent. It can use its tools to act, and replies through your shared workspace (<code>~/shared/outbox.md</code>).</p>
-                <div className="chatLog" data-automation-id="chat-log">
-                  {chatLog.length === 0 ? (
-                    <p className="muted small">No messages yet — say hi, or ask it to do something.</p>
-                  ) : (
-                    chatLog.map((message, index) => (
-                      <div className={`chatMsg ${message.role}`} key={index}>
-                        <span className="chatWho">{message.role === "you" ? "you" : desk.label}</span>
-                        <div className="chatBubble">{message.text}</div>
-                      </div>
-                    ))
-                  )}
-                  {chatBusy && (
-                    <div className="chatMsg agent">
-                      <span className="chatWho">{desk.label}</span>
-                      <div className="chatBubble"><Loader2 size={13} className="spin" /> thinking…</div>
-                    </div>
-                  )}
-                </div>
-                <div className="inline agentTask">
-                  <input
-                    className="agentGoal"
-                    data-automation-id="chat-input"
-                    value={chatDraft}
-                    placeholder={`Message ${desk.label}…`}
-                    disabled={chatBusy}
-                    onChange={(event) => setChatDraft(event.target.value)}
-                    onKeyDown={(event) => event.key === "Enter" && sendMessage(deskConsole.id)}
-                  />
-                  <button data-automation-id="chat-send" disabled={chatBusy || !chatDraft.trim()} onClick={() => sendMessage(deskConsole.id)}>
-                    {chatBusy ? <><Loader2 size={16} className="spin" /> …</> : <><Check size={16} /> Send</>}
-                  </button>
-                </div>
+                <h2><Bot size={13} /> Chat</h2>
+                {branding.chatUrl ? (
+                  <>
+                    <p className="muted small">
+                      The full chat runs in CieloOS Chat. Every message runs your agent's console
+                      loop — it uses its tools and operates the OS — through the same policy-checked
+                      bus as the rest of the panel.
+                    </p>
+                    {agentDeskCount > 1 && (
+                      // The chat client carries one identity and /v1/agent resolves the owner's
+                      // FIRST agent, so the link cannot follow the selected desk. Say so rather
+                      // than implying per-desk routing. Real fix tracked in #9.
+                      <p className="muted small" data-automation-id="chat-agent-caveat">
+                        Note: chat always talks to your first agent, not the desk selected here —
+                        per-agent routing needs the per-user credentials tracked in issue #9.
+                      </p>
+                    )}
+                    <a
+                      className="chatLink"
+                      data-automation-id="chat-open"
+                      href={branding.chatUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Bot size={16} /> Open CieloOS Chat
+                    </a>
+                    <p className="muted small">
+                      Opens {branding.chatUrl} in a new tab.
+                    </p>
+                  </>
+                ) : (
+                  // No chat deployed: say how to get one rather than linking nowhere.
+                  <div data-automation-id="chat-unconfigured">
+                    <p className="muted small">
+                      No chat UI is configured on this machine. CieloOS serves an OpenAI-compatible
+                      API for one at <code>/v1/agent</code>; point a client at it and set
+                      <code> Chat__Url</code> to that client's address to link it here.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
-
             {deskConsole && (
               <div className="panel console" data-automation-id="console">
                 <h2><Terminal size={13} /> Console — give the agent a task</h2>
