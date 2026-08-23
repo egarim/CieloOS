@@ -37,6 +37,11 @@ public sealed class SessionBackendOptions
     // it detached at boot and ttyd attaches to the same name, so the agent
     // (via podman exec) and any human (via ttyd) share one live screen.
     public string ConsoleTmuxSession { get; init; } = "main";
+    // Where a desktop session should point its "CieloOS Chat" launcher. This is NOT
+    // the panel's Chat:Url: from inside a rootless-podman session the host's loopback
+    // is the container's own, so the URL must name the host (podman publishes it as
+    // host.containers.internal). Empty disables the launcher.
+    public string ChatUrl { get; init; } = "";
 }
 
 // The V0.4 session backend: one podman container per desktop session, driven
@@ -545,6 +550,21 @@ fi
 sleep 3
 """;
 
+    // The chat launcher: a chromium app-mode window on the OS's chat UI. --no-sandbox
+    // is required because chromium's own sandbox cannot nest inside the rootless
+    // container; the container is the isolation boundary here.
+    private const string ChatLauncherDesktop = """
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=CieloOS Chat
+Comment=Chat with your agent
+Exec=chromium --app=CHAT_URL_PLACEHOLDER --no-sandbox --no-first-run --no-default-browser-check
+Icon=user-available
+Terminal=false
+Categories=Network;
+""";
+
     private const string MessageLauncherDesktop = """
 [Desktop Entry]
 Version=1.0
@@ -570,6 +590,18 @@ Categories=Utility;
             $"echo {launcher} | base64 -d > \"$HOME/.local/share/applications/lunos-message.desktop\"; " +
             $"echo {launcher} | base64 -d > \"$HOME/Desktop/Message-Agent.desktop\"; chmod +x \"$HOME/Desktop/Message-Agent.desktop\"";
         await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c", command }, cancellationToken);
+
+        // A desktop icon for the chat UI, when the OS knows where its chat lives.
+        if (!string.IsNullOrWhiteSpace(options.ChatUrl))
+        {
+            var chatLauncher = Convert.ToBase64String(Encoding.UTF8.GetBytes(
+                ChatLauncherDesktop.Replace("CHAT_URL_PLACEHOLDER", options.ChatUrl).ReplaceLineEndings("\n")));
+            var chatCommand =
+                $"echo {chatLauncher} | base64 -d > \"$HOME/.local/share/applications/cielo-chat.desktop\"; " +
+                $"echo {chatLauncher} | base64 -d > \"$HOME/Desktop/CieloOS-Chat.desktop\"; " +
+                "chmod +x \"$HOME/Desktop/CieloOS-Chat.desktop\"";
+            await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c", chatCommand }, cancellationToken);
+        }
     }
 
     private static string Required(ToolRequest request, string key) =>
