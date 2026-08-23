@@ -95,9 +95,7 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
         // where the host's loopback is not the host. Default: take Chat:Url and swap a
         // loopback host for podman's host alias. Override with Sessions:ChatUrl.
         ChatUrl = builder.Configuration["Sessions:ChatUrl"]
-            ?? (builder.Configuration["Chat:Url"] ?? "")
-                .Replace("//localhost", "//host.containers.internal")
-                .Replace("//127.0.0.1", "//host.containers.internal")
+            ?? SessionReachableChatUrl(builder.Configuration["Chat:Url"])
     },
     owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>())));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
@@ -1037,6 +1035,18 @@ static bool IsLoopback(IPAddress? address)
 // The user/agent a request acts as, derived from the authenticated identity:
 // an agent acts as itself; a human acts through an agent it owns (the one it
 // named, if valid, else its first).
+
+// A chat URL the PANEL uses is written from the host's point of view, where
+// loopback means the host. Inside a rootless-podman session, loopback is the
+// container itself, so any loopback host — localhost, 127.0.0.0/8, or [::1] —
+// has to become podman's host alias. Uri.IsLoopback covers all of those forms;
+// string matching on "//localhost" and "//127.0.0.1" did not.
+static string SessionReachableChatUrl(string? chatUrl)
+{
+    if (string.IsNullOrWhiteSpace(chatUrl)) return "";
+    if (!Uri.TryCreate(chatUrl, UriKind.Absolute, out var uri) || !uri.IsLoopback) return chatUrl;
+    return new UriBuilder(uri) { Host = "host.containers.internal" }.Uri.ToString();
+}
 static (Guid userId, Guid agentId) ActingAgent(RuntimePrincipal principal, Guid? requestedAgentId, IRuntimeStore store)
 {
     if (principal.Kind == PrincipalKind.Agent)
