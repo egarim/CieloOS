@@ -35,7 +35,7 @@ npm install
 npm run dev
 ```
 
-The Vite dev server proxies `/api` calls to `http://127.0.0.1:5148` by default. Set `BACKEND_PORT` before starting both processes to use another port — useful when a Lun.Os VM is running, because the VM forwards its runtime API to host port 5148:
+The Vite dev server proxies `/api` calls to `http://127.0.0.1:5148` by default. Set `BACKEND_PORT` before starting both processes to use another port — useful when a CieloOS VM is running, because the VM forwards its runtime API to host port 5148:
 
 ```bash
 BACKEND_PORT=5149 ./scripts/dev.sh

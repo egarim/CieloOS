@@ -29,7 +29,7 @@ Review conclusion: a "setup token" is ceremony. The CLI already needs local read
 
 ```text
 first boot, no owner marker
-  -> panel (served/tunneled to localhost) shows "Set up Lun.Os"
+  -> panel (served/tunneled to localhost) shows "Set up CieloOS"
   -> operator enters their name  (or runs: workspace-setup create-owner --name "…")
   -> claim (loopback only, single-winner): create owner + owner-agent + mint token
   -> owner-claimed marker persisted; owner token written 0600 + returned

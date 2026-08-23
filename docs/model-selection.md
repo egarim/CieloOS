@@ -2,7 +2,7 @@
 
 ## Model Boundary
 
-Lun.Os should not depend directly on a single model vendor. The OS owns a neutral local inference API and a provider registry. Models are replaceable profiles.
+CieloOS should not depend directly on a single model vendor. The OS owns a neutral local inference API and a provider registry. Models are replaceable profiles.
 
 ```text
 Agent Runtime
@@ -18,7 +18,7 @@ In V0.1 the stable local inference API is hosted by the ASP.NET backend at `http
 
 ## First Default
 
-The first Lun.Os local model integration should use PrismML Bonsai:
+The first CieloOS local model integration should use PrismML Bonsai:
 
 ```text
 Model: prism-ml/Ternary-Bonsai-4B-gguf
@@ -32,7 +32,7 @@ License: Apache-2.0
 
 ## Why
 
-Lun.Os needs a small model that is agentic, not merely conversational. PrismML describes Bonsai 27B as supporting multi-step reasoning, tool calling, agentic workflows, and multimodal understanding for local devices, and publishes Bonsai 4B/8B/1.7B variants for smaller footprints.
+CieloOS needs a small model that is agentic, not merely conversational. PrismML describes Bonsai 27B as supporting multi-step reasoning, tool calling, agentic workflows, and multimodal understanding for local devices, and publishes Bonsai 4B/8B/1.7B variants for smaller footprints.
 
 The 4B ternary model is the right first default:
 
@@ -101,4 +101,4 @@ For the active profile, `sudo workspace-model install` performs the one-time run
 
 ## Ownership
 
-Bonsai is PrismML's model family. Lun.Os should describe this as an integration, keep attribution clear, and verify redistribution requirements before shipping public ISO images with bundled weights.
+Bonsai is PrismML's model family. CieloOS should describe this as an integration, keep attribution clear, and verify redistribution requirements before shipping public ISO images with bundled weights.

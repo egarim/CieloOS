@@ -1,4 +1,4 @@
-# Lun.Os Architecture
+# CieloOS Architecture
 
 The whole system is one idea: **humans and agents emit the same typed commands on one bus**, and every command passes a single choke point that binds ownership, checks policy, and writes an audit event. Everything else — surfaces, sessions, brains, models — hangs off that spine.
 

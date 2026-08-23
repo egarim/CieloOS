@@ -70,7 +70,7 @@ only. Decided — recorded, not up for re-litigation.)
 - **Agent loop:** screenshot + a11y tree → element list → executor action → uinput
   → observe → repeat. A perception/action **service on the command bus**, not a
   per-app script. Natural target environment: the `agent-desktop` (webtop XFCE)
-  sessions Lun.Os already runs.
+  sessions CieloOS already runs.
 
 ### Phases
 
@@ -100,7 +100,7 @@ only. Decided — recorded, not up for re-litigation.)
    verification (re-read screen, retry/backoff, hard step cap). Acceptance task:
    *"open the file manager, create a folder named test, rename it"* end-to-end,
    no human input.
-6. **Lun.Os integration (later).** Wrap perception (`screen.read`) and action
+6. **CieloOS integration (later).** Wrap perception (`screen.read`) and action
    (`input.click`/`type`/…) as services on the command bus; the agent becomes
    just another bus client. MCP exposure after bus unification (per existing
    direction: MCP after unification).

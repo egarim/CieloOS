@@ -1,12 +1,12 @@
-# Lun.Os
+# CieloOS
 
 **An operating system built to be operated by AI.**
 
-Not by bolting automation onto a GUI, but by making automation unnecessary: humans and AI agents emit the **same typed, policy-checked commands onto one bus**, and every action — a human click, an agent's API call, a keystroke into a console, a click on a desktop — passes **one policy engine** (`Allow` / `Deny` / `RequireApproval`) and lands on **one audit trail**. The UI is a projection of that contract; software joins Lun.Os by speaking the contract, not as an opaque app.
+Not by bolting automation onto a GUI, but by making automation unnecessary: humans and AI agents emit the **same typed, policy-checked commands onto one bus**, and every action — a human click, an agent's API call, a keystroke into a console, a click on a desktop — passes **one policy engine** (`Allow` / `Deny` / `RequireApproval`) and lands on **one audit trail**. The UI is a projection of that contract; software joins CieloOS by speaking the contract, not as an opaque app.
 
 > Thesis: **typed where possible, pixels where necessary, policy everywhere.**
 
-*(“Lun.Os” is the product brand; the code uses neutral `WorkspaceRuntime` identifiers so the name can change without refactoring. Branding loads from `config/branding.json`.)*
+*(“CieloOS” is the product brand; the code uses neutral `WorkspaceRuntime` identifiers so the name can change without refactoring. Branding loads from `config/branding.json`.)*
 
 ---
 
@@ -14,7 +14,7 @@ Not by bolting automation onto a GUI, but by making automation unnecessary: huma
 
 AI agents that "use a computer" today drive it through **screenshots and guessed pixel clicks** — unreliable, ungoverned, and unauditable. You can't see what the agent is allowed to do, prove what it did, or stop it typing a command an on-screen popup told it to.
 
-Lun.Os makes an agent a **first-class, governed OS citizen**:
+CieloOS makes an agent a **first-class, governed OS citizen**:
 
 - It acts through the **same command bus** a human does — so ownership, policy, and audit apply to *every* action, not just the ones an app chose to expose.
 - It grounds on the desktop's **accessibility tree** (exact element boxes) first, using pixels only as a fallback — so clicks are precise, not guessed.

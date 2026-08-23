@@ -14,7 +14,7 @@ input goes through a `/dev/uinput` daemon so it works on X11 and Wayland.
 | 3 | `perceive/atspi_reader.py` — AT-SPI tree → numbered element list | **implemented** |
 | 4 | `perceive/screenshot.py` — mss (X11) done; Wayland portal capture is a TODO | partial |
 | 5 | `agent/loop.py` — perceive→decide→act loop; Ollama planner/executor wired, prompts first-cut | skeleton |
-| 6 | expose `screen.read` / `input.*` as Lun.Os command-bus services | later |
+| 6 | expose `screen.read` / `input.*` as CieloOS command-bus services | later |
 
 It needs the Phase-1 environment to actually run (a Linux desktop session with
 AT-SPI + `/dev/uinput`, and Ollama for the loop) — see below.

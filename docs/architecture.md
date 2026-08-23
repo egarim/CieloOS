@@ -1,6 +1,6 @@
 # Architecture
 
-The product is currently branded Lun.Os, but brand terms are treated as presentation data. Stable backend namespaces, project files, API routes, and durable identifiers use neutral `WorkspaceRuntime` naming.
+The product is currently branded CieloOS, but brand terms are treated as presentation data. Stable backend namespaces, project files, API routes, and durable identifiers use neutral `WorkspaceRuntime` naming.
 
 ## Runtime path
 
@@ -49,7 +49,7 @@ The distro layer uses a local inference registry rather than hard-coding one mod
 
 ## Bonsai
 
-Bonsai is PrismML's local inference model family. Lun.Os can integrate Bonsai as the first small offline model tier, but should not present Bonsai as a Lun.Os-owned model or couple the OS architecture to PrismML.
+Bonsai is PrismML's local inference model family. CieloOS can integrate Bonsai as the first small offline model tier, but should not present Bonsai as a CieloOS-owned model or couple the OS architecture to PrismML.
 
 The first target is `prism-ml/Ternary-Bonsai-4B-gguf` through `llama.cpp`. The reason is simple: it is very small, practical on ordinary machines, and built around intelligence density. PrismML describes Bonsai as targeting multi-step reasoning, tool calling, agentic workflows, and local-device use.
 

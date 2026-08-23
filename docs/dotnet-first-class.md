@@ -1,6 +1,6 @@
 # .NET and PowerShell First-Class Support
 
-Lun.Os should treat .NET, C# scripting, and PowerShell as native automation surfaces for office agents.
+CieloOS should treat .NET, C# scripting, and PowerShell as native automation surfaces for office agents.
 
 The goal is not just "install .NET." The goal is:
 
@@ -106,7 +106,7 @@ The executor can start simple with `podman` or `bubblewrap` and later move to st
 
 ## Developer Experience
 
-Lun.Os should feel excellent for both humans and agents:
+CieloOS should feel excellent for both humans and agents:
 
 - terminal profile with `dotnet`, `pwsh`, and common templates ready;
 - VS Code or lightweight editor support;
@@ -116,7 +116,7 @@ Lun.Os should feel excellent for both humans and agents:
 
 ## Rename Safety
 
-The tooling is branded in the UI as part of Lun.Os, but stable identifiers stay neutral:
+The tooling is branded in the UI as part of CieloOS, but stable identifiers stay neutral:
 
 ```text
 tool ids: dotnet.build, powershell.run

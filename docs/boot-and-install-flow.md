@@ -1,6 +1,6 @@
 # Boot & Install Flow
 
-How a Lun.Os machine goes from an ISO to a running command bus, and what happens on every boot. See [architecture-diagram.md](architecture-diagram.md) for the component map.
+How a CieloOS machine goes from an ISO to a running command bus, and what happens on every boot. See [architecture-diagram.md](architecture-diagram.md) for the component map.
 
 ## Install — from media to an installed system
 

@@ -1,6 +1,6 @@
-# Lun.Os live image (parked plan)
+# CieloOS live image (parked plan)
 
-Goal: a bootable Lun.Os you can put on a USB (or run in a VM) that comes up as
+Goal: a bootable CieloOS you can put on a USB (or run in a VM) that comes up as
 "the OS" — the runtime running, podman ready, session images present, and the
 panel on screen in a kiosk browser. Deferred behind the agent-console loop; this
 captures the design so the recon isn't lost.
@@ -41,7 +41,7 @@ Build in **CI on native runners**, not on the dev VM:
 - Verify each artifact **boots in QEMU** (TCG is fine for a smoke boot to the
   panel) before anyone flashes hardware.
 
-## The Lun.Os provisioning layer (arch-independent — "what makes it Lun.Os")
+## The CieloOS provisioning layer (arch-independent — "what makes it CieloOS")
 
 Reused across all three targets:
 

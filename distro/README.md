@@ -1,6 +1,6 @@
 # Distro V0.1
 
-This folder is the beginning of the actual Lun.Os Linux distribution work.
+This folder is the beginning of the actual CieloOS Linux distribution work.
 
 The distro should be Ubuntu-based, with the current target set to Ubuntu 26.04 LTS. The visible product name comes from `config/branding.json`; stable internal services use neutral names.
 
@@ -40,7 +40,7 @@ distro/
 
 ## Local Inference
 
-Lun.Os should not be married to one local model provider. The distro owns a neutral local inference contract; individual models are swappable provider profiles.
+CieloOS should not be married to one local model provider. The distro owns a neutral local inference contract; individual models are swappable provider profiles.
 
 The current default provider profile is:
 
@@ -111,10 +111,10 @@ All generated media, downloads, firmware state, logs, and virtual disks stay in 
 
 ## Build stance
 
-The first practical target is a repeatable Ubuntu installer plus a Lun.Os runtime payload. This gets us to bootable systems quickly while keeping our provisioning independent from the base ISO:
+The first practical target is a repeatable Ubuntu installer plus a CieloOS runtime payload. This gets us to bootable systems quickly while keeping our provisioning independent from the base ISO:
 
 1. Install Ubuntu.
-2. Apply the Lun.Os autoinstall seed.
+2. Apply the CieloOS autoinstall seed.
 3. Install neutral runtime services.
 4. Enable local inference through the Bonsai profile when hardware permits.
 5. Add branding assets and kiosk-console polish (see `docs/ai-native-ui.md`: no desktop environment is planned).
@@ -129,7 +129,7 @@ Plans are content-hashed. A human must approve the exact plan identifier before 
 
 ## .NET and PowerShell
 
-Lun.Os treats .NET and PowerShell as first-class automation surfaces. The distro profile in `profiles/dotnet-automation.json` installs the SDK/runtime and registers structured tools such as `dotnet.build`, `dotnet.test`, `dotnet.script`, and `powershell.run`.
+CieloOS treats .NET and PowerShell as first-class automation surfaces. The distro profile in `profiles/dotnet-automation.json` installs the SDK/runtime and registers structured tools such as `dotnet.build`, `dotnet.test`, `dotnet.script`, and `powershell.run`.
 
 Agents request these tools through policy and the sandboxed executor; they should not run arbitrary shell commands directly.
 
