@@ -831,7 +831,7 @@ app.MapPost("/api/tool-requests", async (SubmitToolRequestDto request, HttpConte
 
 // OpenAI-compatible surface for a chat UI (Open WebUI) to talk to the ACTING
 // agent: each message runs the console loop (the agent uses its tools + operates
-// the OS), and the reply is what it writes to ~/shared/outbox.md. Auth is the
+// the OS), and the reply is the note it finishes on. Auth is the
 // same bearer token — the chat UI is configured with the caller's token, so the
 // loop runs as that owner through their agent.
 var agentJson = new JsonSerializerOptions(JsonSerializerDefaults.Web);

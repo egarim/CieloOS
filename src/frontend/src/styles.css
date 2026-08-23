@@ -736,46 +736,34 @@ button.deskItem.selected {
   gap: 14px;
 }
 
-/* Chat: message the agent */
+/* Chat: the link out to the full chat UI */
 
-.chatLog {
-  display: grid;
-  gap: 10px;
-  margin: 12px 0;
-  max-height: 320px;
-  overflow-y: auto;
+.chatLink {
+  align-items: center;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: 0.02em;
+  margin: 10px 0 4px;
+  min-height: 40px;
+  padding: 0 16px;
+  text-decoration: none;
+  transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
 }
 
-.chatMsg {
-  display: grid;
-  gap: 3px;
+.chatLink:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
 }
 
-.chatMsg .chatWho {
-  color: var(--ink-soft);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.chatMsg.you {
-  justify-items: end;
-}
-
-.chatBubble {
-  background: var(--paper);
-  border: 1px solid var(--hairline);
-  border-radius: 10px;
-  font-size: 14px;
-  max-width: 82%;
-  padding: 8px 12px;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.chatMsg.you .chatBubble {
-  background: var(--accent-soft);
-  border-color: #c7d2fe;
+.chatLink:active {
+  transform: translateY(1px);
 }
 
 /* Console: give-the-agent-a-task + live screen */
