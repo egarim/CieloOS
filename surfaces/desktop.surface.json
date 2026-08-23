@@ -79,8 +79,8 @@
         "additionalProperties": false
       },
       "policy": {
-        "defaultDecision": "Allow",
-        "reason": "A principal may type into its own desktop session; each keystroke batch is audited and isolation bounds the blast radius to that session."
+        "defaultDecision": "RequireApproval",
+        "reason": "Typing is the highest-risk desktop vector: a vision agent reading untrusted on-screen content could be steered into typing a command or secret, so a human confirms each keystroke batch (design law 7). A per-session input grant is the V0.6 upgrade that restores autonomous typing under one-time consent."
       }
     },
     "key": {
@@ -95,14 +95,14 @@
         "type": "object",
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
-          "keysym": { "type": "string", "pattern": "^[A-Za-z0-9_+]{1,32}$" }
+          "keysym": { "type": "string", "pattern": "^[A-Za-z0-9_]{1,32}$" }
         },
         "required": ["id", "keysym"],
         "additionalProperties": false
       },
       "policy": {
-        "defaultDecision": "Allow",
-        "reason": "A principal may send a key to its own desktop session; each keypress is audited and isolation bounds the blast radius to that session."
+        "defaultDecision": "RequireApproval",
+        "reason": "A keypress can submit or execute (Return in a terminal, editing keys), so a human confirms it. The keysym pattern excludes modifier chords (no '+'), and the executor further restricts to a navigation/editing allowlist."
       }
     }
   }

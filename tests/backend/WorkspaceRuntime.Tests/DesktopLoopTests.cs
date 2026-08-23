@@ -87,7 +87,7 @@ public class DesktopLoopTests
             Agent(store, "joche-agent"), joche.Id, jocheAgent.Id, brain, CancellationToken.None);
 
         Assert.False(result.Completed);
-        Assert.Contains("Blocked", result.StopReason);
+        Assert.Contains("Deny", result.StopReason);
         Assert.Empty(backend.Clicks);
         Assert.Contains(result.Steps, step => step.Decision == "Deny");
     }

@@ -33,7 +33,9 @@ public sealed class DesktopAgentLoop
     {
         var steps = new List<DesktopLoopStep>();
         var history = new List<string>();
-        var recent = new List<string>();
+        // Progress is judged by OBSERVATION change, not action identity: a
+        // "(observation, action)" pair we have seen before made no progress.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
 
         for (var step = 1; step <= cap; step++)
@@ -53,25 +55,36 @@ public sealed class DesktopAgentLoop
             var action = await brain.DecideAsync(
                 goal, els, shot.Ok ? shot.Png : null, shot.Width, shot.Height, history, step, cancellationToken);
 
+            // An abort is NOT goal-complete — surface the real reason.
+            if (action.Aborted)
+            {
+                steps.Add(new DesktopLoopStep(step, els.Count, "done", null, null, null, null, null, true, action.Note, "Aborted", action.Note ?? "Aborted."));
+                return new DesktopLoopResult(sessionId, goal, false, action.Note ?? "The desktop brain aborted.", steps);
+            }
+
             if (action.Done)
             {
                 steps.Add(new DesktopLoopStep(step, els.Count, "done", null, null, null, null, null, true, action.Note, "Done", "Agent reported the goal complete."));
                 return new DesktopLoopResult(sessionId, goal, true, "Agent reported the goal complete.", steps);
             }
 
-            var (op, args, ledger, error) = Resolve(action, els, sessionId);
+            var (op, args, ledger, error) = Resolve(action, els, shot.Width, shot.Height, sessionId);
             if (error is not null)
             {
                 steps.Add(new DesktopLoopStep(step, els.Count, action.Kind, action.ElementId, action.X, action.Y, action.Text, action.Keysym, false, action.Note, "Stopped", error));
                 return new DesktopLoopResult(sessionId, goal, false, error, steps);
             }
 
-            // Anti-loop: the same resolved action twice running isn't progress.
-            if (recent.Contains(ledger))
+            // Anti-loop: trip only when the SAME action is taken on the SAME screen
+            // — real progress changes the observation, so legitimate identical
+            // repeats (Tab, Tab) on a changing screen are allowed, and longer
+            // cycles are still caught because their (observation, action) recurs.
+            var progressKey = $"{ObservationHash(els)}|{ledger}";
+            if (!seen.Add(progressKey))
             {
-                steps.Add(new DesktopLoopStep(step, els.Count, action.Kind, action.ElementId, action.X, action.Y, action.Text, action.Keysym, false, action.Note, "Stopped", "Repeated an action already taken."));
+                steps.Add(new DesktopLoopStep(step, els.Count, action.Kind, action.ElementId, action.X, action.Y, action.Text, action.Keysym, false, action.Note, "Stopped", "Repeated an action on an unchanged screen — no progress."));
                 return new DesktopLoopResult(sessionId, goal, false,
-                    "Stopped: the agent repeated an action without making progress.", steps);
+                    "Stopped: the agent repeated an action on an unchanged screen without making progress.", steps);
             }
 
             var result = await runtime.SubmitAsync(
@@ -81,15 +94,13 @@ public sealed class DesktopAgentLoop
 
             steps.Add(new DesktopLoopStep(step, els.Count, action.Kind, action.ElementId, action.X, action.Y, action.Text, action.Keysym, false, action.Note, result.Decision.ToString(), result.Reason));
             history.Add(ledger);
-            recent.Add(ledger);
-            if (recent.Count > 2)
-            {
-                recent.RemoveAt(0);
-            }
 
+            // Any non-Allow decision stops the loop: a Deny cannot be pushed past,
+            // and a RequireApproval (e.g. desktop.type/key) means the action is now
+            // waiting on the owner — the autonomous run cannot proceed through it.
             if (result.Decision != PolicyDecision.Allow)
             {
-                return new DesktopLoopResult(sessionId, goal, false, $"Blocked at step {step}: {result.Reason}", steps);
+                return new DesktopLoopResult(sessionId, goal, false, $"Stopped at step {step} ({result.Decision}): {result.Reason}", steps);
             }
         }
 
@@ -100,7 +111,7 @@ public sealed class DesktopAgentLoop
     // resolving an element id to its EXACT center. Returns an error string if it
     // cannot be resolved (e.g. the element scrolled off screen since observation).
     private static (string Op, Dictionary<string, string> Args, string Ledger, string? Error) Resolve(
-        DesktopAgentAction action, IReadOnlyList<DesktopElement> elements, string sessionId)
+        DesktopAgentAction action, IReadOnlyList<DesktopElement> elements, int screenWidth, int screenHeight, string sessionId)
     {
         switch (action.Kind)
         {
@@ -125,6 +136,12 @@ public sealed class DesktopAgentLoop
                 else
                 {
                     return ("", Empty(), "", "Click action had neither an element id nor coordinates.");
+                }
+                // The "exact center" guarantee only holds inside the screen: a
+                // partially-scrolled element or a garbage box can resolve off-screen.
+                if (screenWidth > 0 && screenHeight > 0 && (x < 0 || y < 0 || x >= screenWidth || y >= screenHeight))
+                {
+                    return ("", Empty(), "", $"Target ({x},{y}) is outside the {screenWidth}x{screenHeight} screen.");
                 }
                 return (action.Kind, new Dictionary<string, string>
                 {
@@ -158,6 +175,17 @@ public sealed class DesktopAgentLoop
     }
 
     private static Dictionary<string, string> Empty() => new();
+
+    // A cheap fingerprint of what's on screen — the set of actionable elements and
+    // their boxes. Two steps with the same fingerprint saw the same screen.
+    private static string ObservationHash(IReadOnlyList<DesktopElement> elements)
+    {
+        if (elements.Count == 0)
+        {
+            return "empty";
+        }
+        return string.Join(";", elements.Select(e => $"{e.Role}:{e.Name}:{e.X},{e.Y},{e.W},{e.H}"));
+    }
 }
 
 // Stands in when no vision-capable provider is configured: the desktop loop needs
@@ -170,5 +198,5 @@ public sealed class NoVisionDesktopBrain : IDesktopAgentBrain
         CancellationToken cancellationToken) =>
         Task.FromResult(new DesktopAgentAction(
             true, "done", null, null, null, null, null,
-            "No vision-capable provider is configured (set Inference:Azure for gpt-4.1-mini)."));
+            "No vision-capable provider is configured (set Inference:Azure for gpt-4.1-mini).", Aborted: true));
 }

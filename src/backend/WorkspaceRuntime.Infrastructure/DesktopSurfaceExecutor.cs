@@ -18,6 +18,14 @@ public sealed class DesktopSurfaceExecutor : ISurfaceExecutor
 
     public string SurfaceId => "desktop";
 
+    // The only keys the agent may press: navigation and editing, no modifier
+    // chords, no function keys. A shell/app shortcut (ctrl+c, F-keys) is not here.
+    private static readonly HashSet<string> AllowedKeys = new(StringComparer.Ordinal)
+    {
+        "Return", "Tab", "Escape", "space", "BackSpace", "Delete",
+        "Up", "Down", "Left", "Right", "Home", "End", "Page_Up", "Page_Down",
+    };
+
     public async Task<ToolExecutionResult> ExecuteAsync(ToolRequest request, CancellationToken cancellationToken)
     {
         var id = Required(request, "id");
@@ -49,6 +57,13 @@ public sealed class DesktopSurfaceExecutor : ISurfaceExecutor
             case "key":
             {
                 var keysym = Required(request, "keysym");
+                // Defense in depth (independent of the manifest): only navigation/
+                // editing keys, never modifier chords or app/function keys that could
+                // trigger destructive shortcuts.
+                if (!AllowedKeys.Contains(keysym))
+                {
+                    return new ToolExecutionResult(false, $"Keysym '{keysym}' is not in the allowed navigation/editing set.", null);
+                }
                 var result = await desktop.KeyAsync(id, keysym, cancellationToken);
                 return new ToolExecutionResult(result.Ok, result.Detail, null);
             }

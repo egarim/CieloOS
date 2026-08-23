@@ -66,7 +66,7 @@ public class DesktopTests
     }
 
     [Fact]
-    public async Task A_human_typing_on_its_agents_desktop_is_audited_with_dual_actor()
+    public async Task Typing_on_a_desktop_requires_the_owners_approval()
     {
         var store = new InMemoryRuntimeStore();
         var jocheAgent = store.Agents.Single(candidate => candidate.Slug == "joche-agent");
@@ -79,12 +79,11 @@ public class DesktopTests
             new Dictionary<string, string> { ["id"] = "joche-agent-abc", ["text"] = "hello" }),
             joche, CancellationToken.None);
 
-        Assert.Equal(PolicyDecision.Allow, result.Decision);
+        // Typing is the highest-risk vector (injected screen text -> typed commands),
+        // so it is parked for the owner's consent rather than executed.
+        Assert.Equal(PolicyDecision.RequireApproval, result.Decision);
         Assert.Contains(store.AuditEvents, auditEvent =>
-            auditEvent.Action == "desktop.type"
-            && auditEvent.Principal == "joche"
-            && auditEvent.OnBehalfOf == "joche-agent"
-            && auditEvent.Detail.Contains("hello"));
+            auditEvent.Action == "desktop.type" && auditEvent.Outcome == AuditOutcome.PendingApproval);
     }
 
     [Fact]

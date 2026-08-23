@@ -30,7 +30,8 @@ public sealed record DesktopAgentAction(
     int? X, int? Y,     // vision fallback: raw pixel target
     string? Text,       // for "type"
     string? Keysym,     // for "key"
-    string? Note);
+    string? Note,
+    bool Aborted = false); // the brain could not proceed (no vision, model error) — NOT goal-complete
 
 public sealed record DesktopLoopStep(
     int Step, int ElementCount, string Kind, int? ElementId, int? X, int? Y,

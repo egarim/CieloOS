@@ -428,7 +428,8 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         }
 
         var name = options.NamePrefix + sessionId;
-        var result = await RunPodmanAsync(new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "key", "--clearmodifiers", keysym }, cancellationToken);
+        // `--` terminates options so the backend is argv-safe regardless of the manifest.
+        var result = await RunPodmanAsync(new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "key", "--clearmodifiers", "--", keysym }, cancellationToken);
         return result.ExitCode == 0
             ? new DesktopActionResult(true, $"Pressed key '{keysym}'.")
             : new DesktopActionResult(false, $"Key failed: {result.Stderr.Trim()}");
