@@ -1168,10 +1168,32 @@ function App() {
               </div>
             </div>
 
-            {deskConsole && desk && !desk.isSelf && (
+            {desk && !desk.isSelf && (
               <div className="panel chat" data-automation-id="chat">
                 <h2><Bot size={13} /> Message {desk.label}</h2>
                 <p className="muted small">Talk to your agent. It can use its tools to act, and replies through your shared workspace (<code>~/shared/outbox.md</code>).</p>
+                {!deskConsole ? (
+                  // The chat runs over the agent's console session. Rather than hiding the
+                  // conversation entirely when there is none (which reads as "this OS has no
+                  // chat"), say so and offer to start one.
+                  <div className="chatEmpty" data-automation-id="chat-needs-session">
+                    <p className="muted small">
+                      {desk.label} has no running console session yet — that is where it runs its
+                      tools. Start one to begin the conversation.
+                    </p>
+                    <button
+                      data-automation-id="chat-start-session"
+                      disabled={!sessionsAvailable || !selectedDesk}
+                      onClick={() => selectedDesk && sessionCommand("create", { owner: selectedDesk, profile: "agent-console" })}
+                    >
+                      <Bot size={16} /> Start a session &amp; chat
+                    </button>
+                    {!sessionsAvailable && (
+                      <p className="muted small">The session surface is not available on this runtime.</p>
+                    )}
+                  </div>
+                ) : (
+                  <>
                 <div className="chatLog" data-automation-id="chat-log">
                   {chatLog.length === 0 ? (
                     <p className="muted small">No messages yet — say hi, or ask it to do something.</p>
@@ -1204,9 +1226,10 @@ function App() {
                     {chatBusy ? <><Loader2 size={16} className="spin" /> …</> : <><Check size={16} /> Send</>}
                   </button>
                 </div>
+                  </>
+                )}
               </div>
             )}
-
             {deskConsole && (
               <div className="panel console" data-automation-id="console">
                 <h2><Terminal size={13} /> Console — give the agent a task</h2>
