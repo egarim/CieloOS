@@ -2,11 +2,12 @@
 
 *Design plan — 2026-08-23, revised after adversarial review (13 findings). Closes the onboarding gap: today users are hardcoded demo seed (`joche`, `yulia`) authenticated by token files, and there is no step that creates YOUR owner or lets you run the OS with no AI provider.*
 
-> **Status: Phase A SHIPPED** (2026-08-23). Provider-free install + loopback-gated
-> single-winner claim + `UnconfiguredBrain` + the `create-owner` CLI are built and
-> tested (121 tests). See **What shipped** below for the two deviations from this
-> plan (single-owner in-process claim lock instead of a marker table; `/api/setup/status`
-> kept public). Phase B (panel wizard) is next.
+> **Status: Phases A + B SHIPPED** (2026-08-23). Provider-free install + loopback-gated
+> single-winner claim + `UnconfiguredBrain` + the `create-owner` CLI (Phase A, 121
+> tests) and the panel's first-run wizard (Phase B, verified live in the browser).
+> See **What shipped** below for the two deviations from this plan (single-owner
+> in-process claim lock instead of a marker table; `/api/setup/status` kept public).
+> Remaining: `add-user` (multi-owner) and the in-panel add-provider (models surface, Phase 3).
 
 ## Goals
 
@@ -56,13 +57,13 @@ The review verified these are load-bearing — the plan must call them out, not 
 
 - **`GET /api/setup/status`** → `{ claimed }`. Public.
 - **`POST /api/setup/claim`** → `{ name }`; loopback-only + single-winner while unclaimed; creates owner, mints + writes token, returns `{ slug, token }`; `409` once claimed. Public route, gated in-handler.
-- **Web wizard** (panel): when `!claimed`, render "create your account" (name only) instead of token-login; store the returned token.
+- **Web wizard** (panel) — ✅ built: when `!claimed`, render the claim wizard (name only) instead of token-login; store the returned token and enter the app. A loading state covers the status check so neither screen flashes first.
 - **CLI** `workspace-setup create-owner --name "…"` (+ `add-user`): on-box, claims via loopback, prints the token. Beside `workspace-installer` (which installs *Ubuntu*).
 
 ## Phasing
 
 - **A. Provider-free first-run (one releasable unit) — ✅ SHIPPED:** unconditional spreadsheet seed; `LUNOS_DEMO`-gated demo seed (both stores); `CreateOwner` + `Mint`/`IssueToken` on the interfaces + token-file write; `AccessPolicy` whitelist; loopback + single-winner `claim` + `status`; the `create-owner` CLI; **and** `local-bonsai`-optional + `UnconfiguredBrain` with the restart-based message. This is the shippable test-release core. (See **What shipped** for the two deviations.)
-- **B. Panel wizard:** the unclaimed → "create your account" screen (+ show the provider-config hint).
+- **B. Panel wizard — ✅ SHIPPED:** the panel fetches `/api/setup/status` while signed out; unclaimed renders a "Claim this machine" wizard (name → `POST /api/setup/claim` → store the returned token → straight into the app), claimed renders token login. A 403/409 from the claim maps to a clear message (loopback-only / already-claimed). Verified live: unclaimed → wizard → claim → app → sign out → login.
 - **C. (later) models surface** (model-config.md Phase 3) turns the "restart to add a key" into an in-panel add-provider; then the `UnconfiguredBrain` copy points at Settings for real.
 
 ## What shipped (Phase A)

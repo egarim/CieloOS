@@ -308,6 +308,78 @@ button.danger:hover {
   margin-bottom: 16px;
 }
 
+/* First-run wizard */
+
+.setup {
+  max-width: 480px;
+}
+
+.setup .eyebrow {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.setup h2 {
+  border-bottom: none;
+  font-size: 24px;
+  padding: 0;
+  margin: 0 0 10px;
+}
+
+.setup .lead {
+  color: var(--ink-soft);
+  line-height: 1.55;
+  margin-bottom: 20px;
+}
+
+.setup label {
+  display: block;
+}
+
+.setup input {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.setupActions {
+  margin-top: 16px;
+}
+
+.setupActions button {
+  width: 100%;
+  justify-content: center;
+}
+
+.setupNote {
+  align-items: center;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  gap: 6px;
+  line-height: 1.5;
+  margin-top: 20px;
+  padding-top: 14px;
+}
+
+.setupNote svg {
+  color: var(--allow);
+  flex-shrink: 0;
+}
+
+.setupLoading {
+  text-align: center;
+}
+
+.setupLoading .muted {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  margin: 0;
+}
+
 code {
   background: #f1f5f9;
   border: 1px solid var(--hairline);

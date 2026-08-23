@@ -40,8 +40,9 @@ multi-tenant** release. Items are marked ✅ done · 🟡 in progress · ⬜ ope
 - ✅ **First owner claim.** A fresh machine has no users; `POST /api/setup/claim`
   (loopback-only, single-winner) creates the owner + agent + token. CLI:
   `workspace-installer create-owner --name "…"`. See docs/first-run-setup.md.
-- ⬜ **Panel wizard (Phase B).** The unclaimed → "create your account" screen in the
-  panel (backend `/api/setup/*` is done; the React screen is not yet wired).
+- ✅ **Panel wizard (Phase B).** The panel checks `/api/setup/status` while signed
+  out: unclaimed → a "Claim this machine" wizard (name → claim → straight into the
+  app); claimed → token login. Verified end-to-end in the browser.
 - ⬜ **Second-tester onboarding.** Test release is **single-owner**; a second human
   needs a hand-added user (`add-user` reusing `CreateOwner`+`Mint`) — not built yet.
 

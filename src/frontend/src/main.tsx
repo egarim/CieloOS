@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { Bot, Check, Cpu, KeyRound, Loader2, ShieldCheck, Terminal, User, X } from "lucide-react";
+import { ArrowRight, Bot, Check, Cpu, KeyRound, Loader2, ShieldCheck, Terminal, User, UserPlus, X } from "lucide-react";
 import "./styles.css";
 
 type Branding = {
@@ -98,6 +98,11 @@ function App() {
   const [token, setToken] = React.useState<string | null>(readToken());
   const [tokenDraft, setTokenDraft] = React.useState("");
   const [loginError, setLoginError] = React.useState<string | null>(null);
+  // First-run setup: null while we ask the runtime whether it has an owner yet.
+  const [setupClaimed, setSetupClaimed] = React.useState<boolean | null>(null);
+  const [setupName, setSetupName] = React.useState("");
+  const [setupError, setSetupError] = React.useState<string | null>(null);
+  const [setupBusy, setSetupBusy] = React.useState(false);
   const [agents, setAgents] = React.useState<AgentProfile[]>([]);
   const [approvals, setApprovals] = React.useState<ApprovalView[]>([]);
   const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
@@ -186,6 +191,23 @@ function App() {
   React.useEffect(() => {
     api<Branding>("/api/branding").then(setBranding).catch(() => undefined);
   }, []);
+
+  // While signed out, ask whether this machine has an owner yet. Unclaimed →
+  // show the first-run wizard instead of the token-login screen. Public route,
+  // no token required.
+  React.useEffect(() => {
+    if (token) return;
+    let alive = true;
+    fetch("/api/setup/status")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { claimed: boolean } | null) => {
+        if (alive && data) setSetupClaimed(Boolean(data.claimed));
+      })
+      .catch(() => alive && setSetupClaimed(true)); // unreachable → fall back to login
+    return () => {
+      alive = false;
+    };
+  }, [token]);
 
   React.useEffect(() => {
     if (!token) return;
@@ -278,6 +300,47 @@ function App() {
     } catch (error) {
       window.localStorage.removeItem(TOKEN_KEY);
       setLoginError(error instanceof UnauthorizedError ? "That token was rejected." : "The runtime is unreachable.");
+    }
+  }
+
+  // First-run claim: create THIS machine's owner. On success the returned bearer
+  // token is stored and we drop straight into the signed-in app (no separate
+  // login step). Loopback-only and single-winner are enforced by the runtime.
+  async function createOwner() {
+    const name = setupName.trim();
+    if (!name || setupBusy) return;
+    setSetupBusy(true);
+    setSetupError(null);
+    try {
+      const response = await fetch("/api/setup/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      if (response.ok) {
+        const data = (await response.json()) as { slug: string; token: string };
+        window.localStorage.setItem(TOKEN_KEY, data.token);
+        setToken(data.token);
+        return;
+      }
+      if (response.status === 403) {
+        setSetupError("Setup can only run on the machine itself. Open this panel on the box, or over your SSH tunnel.");
+      } else if (response.status === 409) {
+        setSetupClaimed(true); // someone else just claimed it — fall back to login
+        setSetupError("This machine already has an owner. Sign in with a token instead.");
+      } else {
+        let message = "Could not create the account.";
+        try {
+          message = ((await response.json()) as { error?: string }).error ?? message;
+        } catch {
+          // non-JSON error body; keep the default
+        }
+        setSetupError(message);
+      }
+    } catch {
+      setSetupError("The runtime is unreachable.");
+    } finally {
+      setSetupBusy(false);
     }
   }
 
@@ -470,19 +533,75 @@ function App() {
   }
 
   if (!token) {
+    const topbar = (
+      <header className="topbar">
+        <div>
+          <h1>{branding.productName}</h1>
+          <p>{branding.companyName}</p>
+        </div>
+      </header>
+    );
+
+    // Still asking the runtime whether it has an owner — avoid flashing the wrong screen.
+    if (setupClaimed === null) {
+      return (
+        <main>
+          {topbar}
+          <section className="login panel setupLoading" data-automation-id="setup-loading">
+            <p className="muted"><Loader2 size={14} className="spin" /> Connecting to the runtime…</p>
+          </section>
+        </main>
+      );
+    }
+
+    // Fresh machine, no owner yet → the first-run wizard.
+    if (setupClaimed === false) {
+      return (
+        <main>
+          {topbar}
+          <section className="login panel setup" data-automation-id="setup">
+            <p className="eyebrow">First run</p>
+            <h2>Claim this machine</h2>
+            <p className="lead">
+              This machine has no owner yet. Create yours — it becomes the first account, with its
+              own agent and workspace. You can add an AI provider later; the OS runs without one.
+            </p>
+            <label>
+              Your name
+              <input
+                data-automation-id="setup-name"
+                autoFocus
+                value={setupName}
+                placeholder="e.g. Joche Ojeda"
+                disabled={setupBusy}
+                onChange={(event) => setSetupName(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && createOwner()}
+              />
+            </label>
+            <div className="setupActions">
+              <button data-automation-id="setup-create" disabled={setupBusy || !setupName.trim()} onClick={createOwner}>
+                {setupBusy ? <><Loader2 size={16} className="spin" /> Creating…</> : <><UserPlus size={16} /> Create account & enter <ArrowRight size={16} /></>}
+              </button>
+            </div>
+            {setupError && <p className="decision deny" data-automation-id="setup-error">{setupError}</p>}
+            <p className="muted small setupNote">
+              <ShieldCheck size={12} /> Setup only accepts requests from the machine itself
+              (localhost or your SSH tunnel), and only until the first owner is created.
+            </p>
+          </section>
+        </main>
+      );
+    }
+
+    // Claimed machine → sign in with a token.
     return (
       <main>
-        <header className="topbar">
-          <div>
-            <h1>{branding.productName}</h1>
-            <p>{branding.companyName}</p>
-          </div>
-        </header>
+        {topbar}
         <section className="login panel" data-automation-id="login">
           <h2>Session</h2>
           <p className="muted">
-            Paste a session token. Local development prints joche's when the runtime starts; each identity has its own at{" "}
-            <code>.data/secrets/&lt;slug&gt;.token</code> (joche, yulia, …).
+            Paste your session token. The runtime writes each identity's token to{" "}
+            <code>.data/secrets/&lt;slug&gt;.token</code>; the <code>create-owner</code> CLI also prints it on claim.
           </p>
           <div className="inline">
             <label>
