@@ -1,61 +1,70 @@
 using Microsoft.Extensions.Logging;
 using WorkspaceRuntime.Application;
+using WorkspaceRuntime.Domain;
 
 namespace WorkspaceRuntime.Infrastructure;
 
-// The brain chosen for a given agent's InferenceProvider.
+// The chat brain chosen for an agent, and the provider id behind it.
 public sealed record BrainSelection(string Provider, IConsoleAgentBrain Brain);
 
-// Resolves an agent's InferenceProvider string to a console brain, so different
-// agents can be driven by different model providers (e.g. DeepSeek or Azure
-// OpenAI gpt-4.1-mini) on the same runtime. Unknown/unset providers fall back to
-// the configured default provider, then to the deterministic recipe brain.
+// Resolves an agent's CHAT brain through the layered model registry (agent ->
+// user -> OS), caching one ModelConsoleBrain per chat-capable provider. This is
+// the console/`/v1/agent` half of the capability-based provider system; the
+// desktop vision path resolves the same registry for the "vision" capability.
 public interface IConsoleBrainRegistry
 {
-    BrainSelection Resolve(string? providerName);
-    IReadOnlyCollection<string> ProviderNames { get; }
+    BrainSelection Resolve(AgentProfile agent);
+    BrainSelection ResolveDefault();
 }
 
 public sealed class ConsoleBrainRegistry : IConsoleBrainRegistry
 {
+    private readonly IModelRegistry models;
     private readonly IReadOnlyDictionary<string, IConsoleAgentBrain> brains;
     private readonly IConsoleAgentBrain fallback;
-    private readonly string defaultProvider;
     private readonly ILogger<ConsoleBrainRegistry> logger;
 
-    public ConsoleBrainRegistry(
-        IReadOnlyDictionary<string, IConsoleAgentBrain> brains,
-        IConsoleAgentBrain fallback,
-        string defaultProvider,
-        ILogger<ConsoleBrainRegistry> logger)
+    public ConsoleBrainRegistry(IModelRegistry models, IConsoleAgentBrain fallback, ILogger<ConsoleBrainRegistry> logger)
     {
-        this.brains = brains;
+        this.models = models;
         this.fallback = fallback;
-        this.defaultProvider = defaultProvider;
         this.logger = logger;
+
+        var built = new Dictionary<string, IConsoleAgentBrain>(StringComparer.OrdinalIgnoreCase);
+        foreach (var provider in models.Providers.Where(provider => provider.Serves("chat")))
+        {
+            built[provider.Id] = new ModelConsoleBrain(
+                new HttpClient { Timeout = TimeSpan.FromSeconds(60) },
+                new ModelBrainOptions { BaseUrl = provider.BaseUrl, Model = provider.Model, ApiKey = provider.ApiKey ?? "" });
+        }
+        brains = built;
     }
 
-    public IReadOnlyCollection<string> ProviderNames => brains.Keys.ToArray();
-
-    public BrainSelection Resolve(string? providerName)
+    public BrainSelection Resolve(AgentProfile agent)
     {
-        var requested = string.IsNullOrWhiteSpace(providerName) ? "" : providerName.Trim();
-
-        if (brains.TryGetValue(requested, out var direct))
+        var resolved = models.Resolve("chat", agent);
+        if (resolved is not null && brains.TryGetValue(resolved.Profile.Id, out var brain))
         {
-            logger.LogInformation("Console brain: using provider '{Provider}'.", requested);
-            return new BrainSelection(requested, direct);
+            logger.LogInformation("Console brain: agent '{Agent}' -> chat provider '{Provider}' ({Scope}).",
+                agent.Slug, resolved.Profile.Id, resolved.Scope);
+            return new BrainSelection(resolved.Profile.Id, brain);
         }
 
-        if (!string.IsNullOrEmpty(defaultProvider) && brains.TryGetValue(defaultProvider, out var def))
-        {
-            logger.LogInformation(
-                "Console brain: provider '{Requested}' not configured; using default '{Default}'.",
-                requested, defaultProvider);
-            return new BrainSelection(defaultProvider, def);
-        }
+        logger.LogInformation("Console brain: no chat provider for agent '{Agent}'; using the recipe fallback.", agent.Slug);
+        return new BrainSelection("recipe", fallback);
+    }
 
-        logger.LogInformation("Console brain: no model provider for '{Requested}'; using the recipe fallback.", requested);
+    public BrainSelection ResolveDefault()
+    {
+        var osId = models.OsDefault("chat");
+        if (osId is not null && brains.TryGetValue(osId, out var brain))
+        {
+            return new BrainSelection(osId, brain);
+        }
+        foreach (var pair in brains)
+        {
+            return new BrainSelection(pair.Key, pair.Value);
+        }
         return new BrainSelection("recipe", fallback);
     }
 }

@@ -99,62 +99,69 @@ builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequi
 builder.Services.AddSingleton<AgentRuntime>();
 builder.Services.AddSingleton<ConsoleAgentLoop>();
 
-// The console loop's brain(s). Each configured model provider (OpenAI-compatible)
-// becomes a named brain; an agent's InferenceProvider selects which one drives it,
-// so DeepSeek and Azure OpenAI (gpt-4.1-mini) can run side by side on one runtime.
-// With no key configured, a deterministic recipe brain stands in so the loop still
-// works end-to-end. Keys are read from config/env and never logged.
-var brainProviders = new Dictionary<string, ModelBrainOptions>(StringComparer.OrdinalIgnoreCase);
+// Model providers, tagged by capability (chat / vision) and locality, resolved
+// through a layered registry: agent -> user -> OS (see docs/model-config.md).
+// Keys are read from config/env and never logged. gpt-4.1-mini serves BOTH chat
+// and vision. The local Bonsai provider is keyless and on-box.
+var providerProfiles = new List<ProviderProfile>();
 
 var deepseekKey = builder.Configuration["Inference:Deepseek:ApiKey"]
     ?? Environment.GetEnvironmentVariable("DEEPSEEK_API_KEY");
 if (!string.IsNullOrWhiteSpace(deepseekKey))
 {
-    brainProviders["deepseek"] = new ModelBrainOptions
-    {
-        BaseUrl = builder.Configuration["Inference:Deepseek:BaseUrl"] ?? "https://api.deepseek.com",
-        Model = builder.Configuration["Inference:Deepseek:Model"] ?? "deepseek-chat",
-        ApiKey = deepseekKey
-    };
+    providerProfiles.Add(new ProviderProfile(
+        "deepseek", "DeepSeek", "openai-compatible",
+        builder.Configuration["Inference:Deepseek:BaseUrl"] ?? "https://api.deepseek.com",
+        builder.Configuration["Inference:Deepseek:Model"] ?? "deepseek-chat",
+        new HashSet<string> { "chat" }, "cloud", deepseekKey));
 }
 
 var azureKey = builder.Configuration["Inference:Azure:ApiKey"]
     ?? Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY");
 if (!string.IsNullOrWhiteSpace(azureKey))
 {
-    // Azure OpenAI's OpenAI-compatible /openai/v1 endpoint speaks the same chat API
-    // (Bearer auth, model = deployment name in the body), so the same
-    // ModelConsoleBrain drives it with no code change — only config differs.
-    var azureProvider = builder.Configuration["Inference:Azure:Provider"] ?? "gpt-4.1-mini";
-    brainProviders[azureProvider] = new ModelBrainOptions
-    {
-        BaseUrl = builder.Configuration["Inference:Azure:BaseUrl"]
-            ?? "https://sivar-aoai-eus.openai.azure.com/openai/v1",
-        Model = builder.Configuration["Inference:Azure:Model"] ?? "gpt-4.1-mini",
-        ApiKey = azureKey
-    };
+    providerProfiles.Add(new ProviderProfile(
+        builder.Configuration["Inference:Azure:Provider"] ?? "gpt-4.1-mini",
+        "Azure OpenAI gpt-4.1-mini", "azure-openai",
+        builder.Configuration["Inference:Azure:BaseUrl"] ?? "https://sivar-aoai-eus.openai.azure.com/openai/v1",
+        builder.Configuration["Inference:Azure:Model"] ?? "gpt-4.1-mini",
+        new HashSet<string> { "chat", "vision" }, "cloud", azureKey));
 }
 
-var defaultBrainProvider = brainProviders.ContainsKey("deepseek")
-    ? "deepseek"
-    : brainProviders.Keys.FirstOrDefault() ?? "";
+// The on-box default: local Bonsai over llama.cpp (keyless). Always present so a
+// no-cloud machine still has a chat provider.
+providerProfiles.Add(new ProviderProfile(
+    "local-bonsai", "PrismML Bonsai 4B", "local-llamacpp",
+    builder.Configuration["Inference:Local:BaseUrl"] ?? "http://127.0.0.1:8080/v1",
+    builder.Configuration["Inference:Local:Model"] ?? "bonsai",
+    new HashSet<string> { "chat" }, "on-box", null));
 
-builder.Services.AddSingleton<IConsoleBrainRegistry>(sp =>
+// OS defaults per capability. Behavior-neutral for now: prefer DeepSeek if
+// configured (today's effective default); a shipped no-cloud image sets
+// Inference:DefaultChatProvider=local-bonsai instead.
+var osModelDefaults = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
 {
-    var brains = new Dictionary<string, IConsoleAgentBrain>(StringComparer.OrdinalIgnoreCase);
-    foreach (var (name, options) in brainProviders)
-    {
-        brains[name] = new ModelConsoleBrain(new HttpClient { Timeout = TimeSpan.FromSeconds(60) }, options);
-    }
-    return new ConsoleBrainRegistry(
-        brains,
-        new RecipeConsoleBrain(),
-        defaultBrainProvider,
-        sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>());
-});
+    ["chat"] = builder.Configuration["Inference:DefaultChatProvider"]
+        ?? (providerProfiles.Any(profile => profile.Id == "deepseek") ? "deepseek" : "local-bonsai"),
+};
+var visionDefault = builder.Configuration["Inference:DefaultVisionProvider"]
+    ?? providerProfiles.FirstOrDefault(profile => profile.Serves("vision"))?.Id;
+if (visionDefault is not null)
+{
+    osModelDefaults["vision"] = visionDefault;
+}
+
+builder.Services.AddSingleton<IUserModelConfig, EmptyUserModelConfig>();
+builder.Services.AddSingleton<IModelRegistry>(sp =>
+    new ModelRegistry(providerProfiles, osModelDefaults, sp.GetRequiredService<IUserModelConfig>()));
+
+builder.Services.AddSingleton<IConsoleBrainRegistry>(sp => new ConsoleBrainRegistry(
+    sp.GetRequiredService<IModelRegistry>(),
+    new RecipeConsoleBrain(),
+    sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>()));
 // A default single brain for any injection site that does not select per-agent.
 builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
-    sp.GetRequiredService<IConsoleBrainRegistry>().Resolve(null).Brain);
+    sp.GetRequiredService<IConsoleBrainRegistry>().ResolveDefault().Brain);
 
 // The desktop loop needs a VISION-capable brain (it grounds on the AT-SPI element
 // list + a screenshot). Azure OpenAI gpt-4.1-mini provides it; without a vision
@@ -198,10 +205,11 @@ _ = app.Services.GetRequiredService<IRuntimeStore>().Users;
 _ = app.Services.GetRequiredService<ITokenAuthenticator>();
 _ = app.Services.GetRequiredService<ISurfaceRegistry>();
 
-var brainRegistry = app.Services.GetRequiredService<IConsoleBrainRegistry>();
+var modelRegistry = app.Services.GetRequiredService<IModelRegistry>();
 app.Logger.LogInformation(
-    "Console brains registered: [{Providers}]; default '{Default}'.",
-    string.Join(", ", brainRegistry.ProviderNames), defaultBrainProvider);
+    "Model providers: [{Providers}]; defaults chat='{Chat}', vision='{Vision}'.",
+    string.Join(", ", modelRegistry.Providers.Select(p => $"{p.Id}[{string.Join('/', p.Capabilities)}]")),
+    modelRegistry.OsDefault("chat") ?? "none", modelRegistry.OsDefault("vision") ?? "none");
 
 app.UseCors();
 
@@ -384,7 +392,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
-    var brain = brains.Resolve(store.GetAgent(agentId).InferenceProvider).Brain;
+    var brain = brains.Resolve(store.GetAgent(agentId)).Brain;
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, brain, cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
@@ -651,7 +659,7 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     var caller = Caller(context);
     var (userId, agentId) = ActingAgent(caller, null, store);
     var agent = store.GetAgent(agentId);
-    var brain = brains.Resolve(agent.InferenceProvider).Brain;
+    var brain = brains.Resolve(agent).Brain;
     var userMessage = request.Messages?.LastOrDefault(message => message.Role == "user")?.Content ?? "";
 
     var session = (await sessions.ListAsync(cancellationToken))

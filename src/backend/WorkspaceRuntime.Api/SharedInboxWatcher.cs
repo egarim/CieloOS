@@ -133,7 +133,7 @@ public sealed class SharedInboxWatcher : BackgroundService
             "finished, write a short reply to your owner by overwriting ~/shared/outbox.md, then you are done.";
 
         logger.LogInformation("Dispatching inbox message from {User} to {Agent}.", user.Slug, agent.Slug);
-        var brain = brains.Resolve(agent.InferenceProvider).Brain;
+        var brain = brains.Resolve(agent).Brain;
         await loop.RunAsync(session.Id, goal, 8, principal, user.Id, agent.Id, brain, cancellationToken);
     }
 }
