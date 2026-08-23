@@ -30,15 +30,24 @@ if [[ "$ARCH" != "$HOST_ARCH" ]]; then
 fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-command -v docker >/dev/null || { echo "docker not found (start colima?)" >&2; exit 1; }
-docker info >/dev/null 2>&1 || { echo "docker daemon not reachable (run: colima start)" >&2; exit 1; }
+# Docker or podman: this runs the same either way, and a CieloOS host already has
+# podman (it is what sessions use), so requiring Docker kept the test from ever
+# running on the machine it was meant to validate.
+if command -v docker >/dev/null && docker info >/dev/null 2>&1; then
+  ENGINE=docker
+elif command -v podman >/dev/null && podman info >/dev/null 2>&1; then
+  ENGINE=podman
+else
+  echo "neither docker nor podman is usable (start colima, or install podman)" >&2; exit 1
+fi
+echo "==> container engine: $ENGINE"
 
 echo "==> Building bundle ($ARCH)"
 bash "$ROOT/distro/scripts/build-release.sh" "$ARCH" >/dev/null
 STAGE="$ROOT/release/cielo"
 
 echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
-docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   cp -r /bundle /work && cd /work
   bash ./install.sh --ci --mode headless
@@ -68,7 +77,7 @@ echo "==> run.sh (foreground, non-root, no systemd) in ubuntu:24.04 ($PLATFORM)"
 # The install.sh path above launches bin/WorkspaceRuntime.Api directly, so it never
 # exercises the staged launcher. Run it the way a WSL2/laptop user does: unprivileged,
 # straight from the bundle dir, and check the panel comes up and state lands in .data.
-docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y >/dev/null && apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
   useradd --create-home --home-dir /home/app app
@@ -99,5 +108,33 @@ docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash 
   kill "$RUN_PID" 2>/dev/null
   echo "  run.sh OK (non-root, panel served, state in .data)"
 '
+
+echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
+# The autoinstall path installs into a system that is not running, so nothing can be
+# started or verified there. What CAN be checked is that it left the right things
+# behind for first boot — this is where the image build and the restart policy are
+# deferred to, so a regression here is silent until someone reboots a real machine.
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+  export DEBIAN_FRONTEND=noninteractive
+  cp -r /bundle /work && cd /work
+  bash ./install.sh --offline --mode headless >/dev/null 2>&1
+
+  test -x /usr/local/bin/cielo-build-session-images || { echo "no first-boot image builder"; exit 1; }
+  test -L /etc/systemd/system/multi-user.target.wants/cielo-session-images.service \
+    || { echo "image builder not enabled for first boot"; exit 1; }
+  test -L /etc/systemd/system/multi-user.target.wants/cielo-runtime.service \
+    || { echo "runtime not enabled for first boot"; exit 1; }
+  test -L /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service \
+    || { echo "podman-restart not enabled for cielo: sessions would not survive a reboot"; exit 1; }
+  test -f /var/lib/systemd/linger/cielo || { echo "no linger marker"; exit 1; }
+
+  # The ONLYOFFICE package must match the target, not the Containerfile default.
+  want=amd64; [ "$(dpkg --print-architecture)" = arm64 ] && want=arm64
+  grep -q "onlyoffice-desktopeditors_${want}.deb" /usr/local/bin/cielo-build-session-images \
+    || { echo "image builder would install the wrong ONLYOFFICE architecture"; exit 1; }
+
+  echo "  offline install OK (image build + restart policy deferred to first boot)"
+'
+
 
 echo "==> PASS: install + run.sh + first-run verified on Linux ($ARCH)"

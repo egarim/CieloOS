@@ -38,6 +38,17 @@ model story is provider-free (add your own key in the Models tab, no restart).
   itself is fine on arm64/WSL (no systemd, no XDG_RUNTIME_DIR needed); with
   `Sessions__Image=lscr.io/linuxserver/webtop:ubuntu-xfce Sessions__ViewportPort=3000` a
   `human-desktop` session starts and serves. Pick a multi-arch default and align the port.
+- ✅ **Installer verified on a clean machine (2026-08-24).** Built a bundle from main
+  and ran `install.sh` in throwaway `ubuntu:24.04` containers on arm64:
+  `--ci` completes all 8 stages, stages the first-boot image builder and correctly
+  leaves it disabled; `--offline` defers the image build, writes the `podman-restart`
+  wants-symlink for `cielo`, the linger marker, and enables runtime/kiosk/image units;
+  the ONLYOFFICE package is selected from the target architecture. An installed runtime
+  then booted and passed `cielo-selftest --claim` **10/10** (claim, token auth, add a
+  provider, provider becomes the chat default, key never returned).
+  Still unverified: the image build itself under `install.sh` (it was exercised by hand
+  via `podman build`, not through the installer), and `cielo-session-images.service`
+  actually firing on a real first boot.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 10/10 pass on native Linux.
   `distro/scripts/test-install-vm.sh` runs the x86-64 bundle in a full-system qemu
