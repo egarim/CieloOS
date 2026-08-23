@@ -863,18 +863,35 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
         "If you can answer from what you already know, just answer — do not touch the console. " +
         "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
         "~/shared), then give the answer. Put your full reply in the note when you finish.";
-
     // The reply travels as JSON on the finishing step, so newlines, quotes and code
-    // blocks survive. outbox.md remains a fallback for agents that still write it.
-    async Task<string> ReplyOfAsync(ConsoleLoopResult run)
+    // blocks survive. outbox.md stays a fallback for agents that still write it — but
+    // ONLY if this run actually changed it. The current prompt tells the agent not to
+    // write the file, so a run that fails or hits the step limit would otherwise reply
+    // with a leftover answer from an earlier conversation.
+    async Task<string?> ReadOutboxAsync()
     {
         var owner = Ownership.RootUserSlug(caller.Slug, store);
-        var outbox = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
+        var file = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
+        return file?.Content;
+    }
+
+    var outboxBefore = await ReadOutboxAsync();
+
+    async Task<string> ReplyOfAsync(ConsoleLoopResult run)
+    {
         var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
-        return finished?.Note?.Trim()
-            ?? (outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content) ? outbox.Content.Trim() : null)
-            ?? run.Steps.LastOrDefault(step => step.Note is not null)?.Note
-            ?? run.StopReason;
+        if (finished?.Note is { } note && !string.IsNullOrWhiteSpace(note))
+        {
+            return note.Trim();
+        }
+
+        var outboxAfter = await ReadOutboxAsync();
+        if (!string.IsNullOrWhiteSpace(outboxAfter) && !string.Equals(outboxAfter, outboxBefore, StringComparison.Ordinal))
+        {
+            return outboxAfter.Trim();
+        }
+
+        return run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
     }
 
     if (request.Stream == true)
