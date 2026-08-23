@@ -28,8 +28,8 @@ wsl -l -v
 
 The bundle is self-contained — **no .NET needed inside WSL**. Any one of:
 
-- **Build it** on a machine with the dev prerequisites (.NET 10 SDK + Node) and copy
-  it in:
+- **Build it** on a machine with the dev prerequisites (.NET 10 SDK + Node **20.19+**;
+  Ubuntu 24.04's stock Node 18 is too old for the panel's Vite 7) and copy it in:
   ```bash
   bash distro/scripts/build-release.sh linux-arm64   # → release/cielo-linux-arm64.tar.gz
   ```
@@ -117,6 +117,8 @@ root nor systemd, which is why it exists as a separate script rather than a flag
 
 | Symptom | Fix |
 |---|---|
+| `wsl` fails with `Wsl/CallMsi/Install/REGDB_E_CLASSNOTREG` | The WSL runtime is not really installed (an old Store package can mask this). Enable the features from an **admin** shell — `dism /online /enable-feature /featurename:Microsoft-Windows-Subsystem-Linux /all /norestart` and the same for `VirtualMachinePlatform` — **reboot**, then `winget install --id Microsoft.WSL` **elevated**. |
+| `WslRegisterDistribution failed with error: 0x8007019e` | Same cause: the WSL feature/runtime is missing. Fix as above, then `ubuntu.exe install --root` registers the distro without the interactive user prompt. |
 | `wsl -l -v` shows version 1 | `wsl --set-version Ubuntu-24.04 2` |
 | `run.sh: cannot execute: required file not found` | The file has CRLF endings (copied through Windows tooling): `sed -i 's/\r$//' cielo/run.sh` |
 | `Exec format error` | Wrong arch bundle. Check `uname -m`: `aarch64` → `linux-arm64`, `x86_64` → `linux-x64`. |
@@ -125,10 +127,13 @@ root nor systemd, which is why it exists as a separate script rather than a flag
 
 ## Status
 
-The arm64 runtime is verified on arm64 Linux by the automated install test
-(`distro/scripts/test-install.sh linux-arm64`). WSL runs that same binary, but the
-WSL path itself has not yet had a real smoke test on a Surface — if you run it,
-please report what happened.
+**Verified end-to-end on a real Windows-on-ARM Surface (2026-08-23)** — Windows 11
+26200, WSL 2.7.12 (kernel 6.18.33.2), Ubuntu 24.04 on WSL 2, `aarch64`. Built the
+`linux-arm64` bundle in WSL (.NET SDK 10.0.400, Node 22), ran `./cielo/run.sh` as a
+non-root user with no systemd, and reached the claim wizard from the Windows browser
+at `http://localhost:5148/`. `cielo-selftest.sh` passed 4/4.
+
+Sessions (podman) were not exercised in that run.
 
 ## See also
 
