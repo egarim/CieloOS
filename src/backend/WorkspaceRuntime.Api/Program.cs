@@ -89,6 +89,10 @@ builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequired
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceExecutor(provider.GetRequiredService<IDesktopBackend>()));
+// V0.6 per-session input grant: a time-boxed lease that upgrades desktop
+// typing/keys to Allow (in-memory: a restart drops all input authority).
+builder.Services.AddSingleton<ISessionInputGrants, InMemorySessionInputGrants>();
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new SessionInputExecutor(provider.GetRequiredService<ISessionInputGrants>()));
 builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExecutorRouter(provider.GetServices<ISurfaceExecutor>()));
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());

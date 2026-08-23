@@ -58,18 +58,20 @@ public sealed class AgentRuntime
     private readonly ISandboxedToolExecutor executor;
     private readonly ISurfaceRegistry surfaces;
     private readonly ISessionBackend? sessions;
+    private readonly ISessionInputGrants? inputGrants;
 
     // Serializes every mutating operation in this single-process runtime, so
     // revision checks, approval resolution, and execution are atomic together.
     private readonly SemaphoreSlim mutationGate = new(1, 1);
 
-    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces, ISessionBackend? sessions = null)
+    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces, ISessionBackend? sessions = null, ISessionInputGrants? inputGrants = null)
     {
         this.store = store;
         this.policyEngine = policyEngine;
         this.executor = executor;
         this.surfaces = surfaces;
         this.sessions = sessions;
+        this.inputGrants = inputGrants;
     }
 
     public Task<ToolRequestResultDto> SubmitAsync(SubmitToolRequestDto dto, RuntimePrincipal principal, CancellationToken cancellationToken) =>
@@ -158,7 +160,7 @@ public sealed class AgentRuntime
         // session cannot be resolved, deny rather than let an unowned action slip
         // through — a desktop click on someone else's screen is as owned as a
         // keystroke into their console.
-        if ((dto.ToolName == "console" || dto.ToolName == "desktop") && dto.Arguments.TryGetValue("id", out var sessionTarget))
+        if ((dto.ToolName is "console" or "desktop" or "session-input") && dto.Arguments.TryGetValue("id", out var sessionTarget))
         {
             if (sessions is null)
             {
@@ -178,6 +180,19 @@ public sealed class AgentRuntime
         }
 
         var evaluation = policyEngine.Evaluate(user, agent, request);
+
+        // V0.6 per-session input grant: a live, human-issued lease upgrades desktop
+        // typing/keys from RequireApproval to Allow — one-time consent, time-boxed,
+        // instead of approving every keystroke. Ownership is still enforced above.
+        if (evaluation.Decision == PolicyDecision.RequireApproval
+            && dto.ToolName == "desktop" && dto.Operation is "type" or "key"
+            && inputGrants is not null
+            && dto.Arguments.TryGetValue("id", out var grantSession)
+            && inputGrants.IsActive(grantSession, DateTimeOffset.UtcNow))
+        {
+            evaluation = new PolicyEvaluation(PolicyDecision.Allow,
+                "Covered by an active per-session input grant.", evaluation.Evidence);
+        }
 
         await mutationGate.WaitAsync(cancellationToken);
         try

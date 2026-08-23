@@ -1,0 +1,57 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "session-input",
+  "displayName": "Session Input Grant",
+  "executor": "session-input",
+  "state": {
+    "document": "surface:session-input",
+    "revisioned": false,
+    "shape": { "type": "object", "properties": {} }
+  },
+  "commands": {
+    "grant": {
+      "displayName": "Grant desktop input to the agent",
+      "exposedToAgent": false,
+      "requiresHuman": true,
+      "mutatesState": true,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "minutes": { "type": "string", "pattern": "^[0-9]{1,3}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "The session owner may lease pointer/keyboard input on a session it owns: the grant is time-boxed and audited, only a human can issue it (requiresHuman), and while it is live desktop typing/keys become Allow — one-time consent instead of per-keystroke approval."
+      }
+    },
+    "revoke": {
+      "displayName": "Revoke desktop input",
+      "exposedToAgent": false,
+      "requiresHuman": true,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "The session owner may revoke an input lease at any time."
+      }
+    }
+  }
+}
