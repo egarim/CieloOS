@@ -153,7 +153,12 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         // A missing image is the expected state right after an --offline/--skip-images
         // install, while cielo-session-images.service is still building. Say that,
         // rather than surfacing raw podman stderr about an unknown image.
-        var imagePresent = await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken);
+        // Only for localhost/ tags: those can never be pulled, so a miss is fatal and
+        // worth explaining. A remote reference is left to podman, which pulls it on run.
+        var localOnlyImage = image.StartsWith("localhost/", StringComparison.Ordinal);
+        var imagePresent = localOnlyImage
+            ? await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken)
+            : (ExitCode: 0, Stdout: "", Stderr: "");
         if (imagePresent.ExitCode != 0)
         {
             return new ToolExecutionResult(false,

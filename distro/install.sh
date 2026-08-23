@@ -132,7 +132,8 @@ for img in console desktop; do
 done
 SCRIPT
   chmod +x /usr/local/bin/cielo-build-session-images
-  enable_unit cielo-session-images.service || true
+  # Not under --ci: that mode installs no podman, so the unit could only fail.
+  [[ "$CI" -eq 1 ]] || enable_unit cielo-session-images.service || true
 fi
 
 if [[ "$CI" -eq 1 ]]; then
