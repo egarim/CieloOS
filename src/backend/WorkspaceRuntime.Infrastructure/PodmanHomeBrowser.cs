@@ -60,6 +60,15 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
                 continue;
             }
 
+            // Hide dot-entries. A home is full of session plumbing (.ICEauthority,
+            // .Xresources, .dbus, .cache, .config) and credential stores (.ssh, .gnupg)
+            // that an office user should never be shown, let alone be able to open or
+            // delete by accident. The shared workspace and Desktop are what matter.
+            if (columns[3].StartsWith('.'))
+            {
+                continue;
+            }
+
             var kind = columns[0] switch { "d" => "directory", "l" => "link", _ => "file" };
             _ = long.TryParse(columns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
             var epoch = columns[2].Split('.', 2)[0];

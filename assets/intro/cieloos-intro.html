@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CieloOS — Intro</title>
+<style>
+  html,body{margin:0;height:100%;background:#080e1c;overflow:hidden;
+    font-family:"Trebuchet MS","Segoe UI",Helvetica,Arial,sans-serif}
+  canvas{display:block;width:100vw;height:100vh}
+  .layer{position:fixed;inset:0;pointer-events:none}
+  #white{background:#fcfcfd;opacity:0}
+  #final{display:grid;place-content:center;text-align:center;opacity:0}
+  #final h1{margin:0;font-weight:700;line-height:1;
+    font-size:clamp(38px,12.5vw,150px);letter-spacing:.055em;
+    background:linear-gradient(180deg,#5f79b8 0%,#1d2a55 45%,#33477f 55%,#7387b9 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #final .sub{margin-top:.55em;font-size:clamp(9px,1.9vw,22px);letter-spacing:.34em;
+    color:#5b6480;font-family:"Segoe UI",Helvetica,Arial,sans-serif}
+  #final .rule{margin:.7em auto 0;height:1px;background:rgba(60,72,110,.45);width:0}
+  #replay{position:fixed;right:14px;bottom:14px;z-index:9;opacity:0;
+    border:1px solid rgba(128,128,128,.45);background:rgba(128,128,128,.12);
+    color:#888;font:600 12px/1 system-ui,sans-serif;letter-spacing:.08em;
+    padding:9px 14px;border-radius:999px;cursor:pointer;
+    text-transform:uppercase;transition:opacity .4s}
+  #replay:hover{color:#bbb;border-color:rgba(160,160,160,.7)}
+  #err{position:fixed;inset:0;display:none;place-content:center;color:#889;
+    font:14px/1.6 system-ui,sans-serif;text-align:center;padding:2rem}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div class="layer" id="white"></div>
+<div class="layer" id="final"><div>
+  <h1 id="finalText">CieloOS</h1>
+  <div class="sub" id="finalSub"></div>
+  <div class="rule" id="finalRule"></div>
+</div></div>
+<button id="replay">Replay</button>
+<div id="err">WebGL isn't available here — use <b>cieloos-intro.html</b> (the canvas 2D version) instead.</div>
+<script src="three.min.js"></script>
+<script>
+(() => {
+const Q      = new URLSearchParams(location.search);
+const TEXT   = Q.get('text') || 'CieloOS';
+const SUB    = Q.get('sub')  || '';
+const AT     = parseFloat(Q.get('at') || '0');    // ?at=4.5 jumps to a beat
+const FREEZE = Q.has('freeze');                   // ?at=4.5&freeze holds it
+const SPEED  = parseFloat(Q.get('speed') || '1'); // ?speed=0.6 to slow the drift further
+
+// ---- beat sheet (seconds) ----------------------------------------------
+// A calm, slow drift through the cloud deck; the light builds; it washes to
+// white; CieloOS resolves on the white. No impact, no shake, nothing sudden.
+const LIGHT0  = 2.60;   // light begins building ahead of us
+const WHT0    = 4.10;   // the wash to white begins
+const WHT1    = 5.60;   // fully white
+const RESOLVE = 6.60;   // CieloOS has settled
+const END     = 8.60;   // replay button appears
+
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const sstep = (a,b,x) => { const p = clamp((x-a)/(b-a),0,1); return p*p*(3-2*p); };
+const rnd   = (a,b) => a + Math.random()*(b-a);
+
+if (typeof THREE === 'undefined'){ document.getElementById('err').style.display='grid'; return; }
+
+// ---- seeded tileable fBm -> cloud billboard texture ----------------------
+let _s = (parseInt(Q.get('seed') || '20260823', 10) >>> 0) || 1;
+function srand(){
+  _s |= 0; _s = (_s + 0x6D2B79F5) | 0;
+  let x = Math.imul(_s ^ (_s >>> 15), 1 | _s);
+  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+  return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+}
+function cloudCanvas(size, contrast, bias){
+  const oct = [[4,0.50],[8,0.25],[16,0.14],[32,0.08],[64,0.05]];
+  const acc = new Float32Array(size*size);
+  for (const o of oct){
+    const g = o[0], amp = o[1], cell = size/g;
+    const grid = new Float32Array(g*g);
+    for (let i=0;i<g*g;i++) grid[i] = srand();
+    for (let y=0;y<size;y++){
+      const gy=y/cell, iy=Math.floor(gy), y0=iy%g, y1=(y0+1)%g, fy=gy-iy, sy=fy*fy*(3-2*fy);
+      for (let x=0;x<size;x++){
+        const gx=x/cell, ix=Math.floor(gx), x0=ix%g, x1=(x0+1)%g, fx=gx-ix, sx=fx*fx*(3-2*fx);
+        const a=grid[y0*g+x0], b=grid[y0*g+x1], c=grid[y1*g+x0], d=grid[y1*g+x1];
+        const tp=a+(b-a)*sx, bt=c+(d-c)*sx;
+        acc[y*size+x] += amp*(tp+(bt-tp)*sy);
+      }
+    }
+  }
+  let mn=1e9,mx=-1e9;
+  for (let i=0;i<acc.length;i++){ const v=acc[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+  const k = 1/(mx-mn);
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  const g2 = cv.getContext('2d'), im = g2.createImageData(size,size), d = im.data;
+  const half = size/2;
+  for (let y=0;y<size;y++){
+    for (let x=0;x<size;x++){
+      const i = y*size+x;
+      let v = clamp(((acc[i]-mn)*k - bias)*contrast, 0, 1);
+      v = v*v*(3-2*v);
+      const dx = (x-half)/half, dy = (y-half)/half;  // feather: billboards never show an edge
+      v *= clamp(1.35 - Math.sqrt(dx*dx+dy*dy)*1.5, 0, 1);
+      const o = i*4;
+      d[o] = d[o+1] = d[o+2] = 255; d[o+3] = v*255;
+    }
+  }
+  g2.putImageData(im,0,0);
+  return cv;
+}
+
+// ---- renderer / scene ----------------------------------------------------
+const canvas = document.getElementById('gl');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true}); }
+catch(e){ document.getElementById('err').style.display='grid'; return; }
+renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+renderer.autoClear = false;
+
+const scene = new THREE.Scene();
+const FOV = 58;
+const cam = new THREE.PerspectiveCamera(FOV, 1, 0.1, 4000);
+cam.position.set(0,0,0);
+
+// sky backdrop: deep evening blue that lifts toward daylight as the light builds
+const bgMat = new THREE.ShaderMaterial({
+  depthWrite:false, depthTest:false,
+  uniforms:{ top:{value:new THREE.Color()}, bot:{value:new THREE.Color()} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.999,1.0); }',
+  fragmentShader:'varying vec2 vUv; uniform vec3 top; uniform vec3 bot;' +
+    'void main(){ gl_FragColor = vec4(mix(bot, top, smoothstep(0.0,1.0,vUv.y)), 1.0); }'
+});
+const bg = new THREE.Mesh(new THREE.PlaneGeometry(2,2), bgMat);
+bg.frustumCulled = false; bg.renderOrder = -10; scene.add(bg);
+
+// the cloud deck we drift through
+const texA = new THREE.CanvasTexture(cloudCanvas(256, 2.4, 0.44));
+const texB = new THREE.CanvasTexture(cloudCanvas(256, 2.0, 0.40));
+const CLOUD_FAR = -1500, CLOUD_NEAR = 30;
+const cloudMats = [
+  new THREE.MeshBasicMaterial({map:texA, transparent:true, depthWrite:false, opacity:0.40}),
+  new THREE.MeshBasicMaterial({map:texB, transparent:true, depthWrite:false, opacity:0.28}),
+  new THREE.MeshBasicMaterial({map:texA, transparent:true, depthWrite:false, opacity:0.18}),
+];
+const quad = new THREE.PlaneGeometry(1,1);
+const clouds = [];
+for (let i=0;i<190;i++){
+  const m = new THREE.Mesh(quad, cloudMats[i%3]);
+  const s = rnd(140,460);
+  m.scale.set(s, s*rnd(0.55,0.9), 1);
+  m.position.set(rnd(-520,520), rnd(-330,330), rnd(CLOUD_FAR, CLOUD_NEAR));
+  m.rotation.z = rnd(0, Math.PI*2);
+  clouds.push(m); scene.add(m);
+}
+const BASE = new THREE.Color(0xcfdcf6), LIT = new THREE.Color(0xffffff);
+
+// a soft light that grows ahead of us and becomes the white
+const glowMat = new THREE.ShaderMaterial({
+  transparent:true, depthTest:false, depthWrite:false, blending:THREE.AdditiveBlending,
+  uniforms:{ uAmt:{value:0}, uAspect:{value:1} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
+  fragmentShader: [
+  'precision highp float; varying vec2 vUv;',
+  'uniform float uAmt, uAspect;',
+  'void main(){',
+  '  vec2 c = (vUv-0.5)*vec2(uAspect,1.0);',
+  '  float d = length(c);',
+  // broad and soft, with no hard core: this must read as daylight, not a blast
+  '  float g = exp(-d*d*3.4)*uAmt + exp(-d*d*0.7)*uAmt*0.45;',
+  '  gl_FragColor = vec4(vec3(1.0,0.99,0.97)*g, clamp(g*0.95, 0.0, 1.0));',
+  '}'].join('\n')
+});
+const glowScene = new THREE.Scene();
+const glowCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const glowQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), glowMat);
+glowQuad.frustumCulled = false; glowScene.add(glowQuad);
+
+// ---- layout --------------------------------------------------------------
+let W = 0, H = 0;
+function resize(){
+  W = innerWidth; H = innerHeight;
+  renderer.setSize(W,H,false);
+  cam.aspect = W/H; cam.updateProjectionMatrix();
+  glowMat.uniforms.uAspect.value = W/H;
+}
+addEventListener('resize', resize);
+
+// ---- overlays ------------------------------------------------------------
+const elWhite = document.getElementById('white');
+const elFinal = document.getElementById('final');
+const elRule  = document.getElementById('finalRule');
+const btn     = document.getElementById('replay');
+document.getElementById('finalText').textContent = TEXT;
+document.getElementById('finalSub').textContent = SUB;
+
+// ---- loop ----------------------------------------------------------------
+let t0 = performance.now(), lastMs = t0;
+function play(){
+  t0 = performance.now() - AT*1000; lastMs = t0;
+  for (const c of clouds) c.position.z = rnd(CLOUD_FAR, CLOUD_NEAR);
+}
+btn.onclick = play;
+
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.033, (now-lastMs)/1000); lastMs = now;
+  const t  = FREEZE ? AT : (now-t0)/1000;
+
+  const light = sstep(LIGHT0, WHT1, t);
+  const white = sstep(WHT0, WHT1, t);
+
+  // A slow, steady drift — this is the whole feel of the piece. 46 units/s
+  // against a 1500-deep field means a cloud takes ~33s to cross it, so nothing
+  // ever rushes the camera.
+  const fly = 46 * SPEED;
+  for (const m of clouds){
+    m.position.z += fly*dt;
+    m.position.y += fly*dt*0.05;            // barely-there vertical drift
+    if (m.position.z > CLOUD_NEAR){
+      m.position.z = CLOUD_FAR + rnd(0,120);
+      m.position.x = rnd(-520,520); m.position.y = rnd(-330,330);
+    }
+  }
+  for (let i=0;i<cloudMats.length;i++) cloudMats[i].color.copy(BASE).lerp(LIT, light*0.85);
+
+  bgMat.uniforms.top.value.setRGB(0.05+0.55*light, 0.08+0.55*light, 0.17+0.50*light);
+  bgMat.uniforms.bot.value.setRGB(0.03+0.60*light, 0.05+0.58*light, 0.11+0.55*light);
+  glowMat.uniforms.uAmt.value = Math.pow(light, 1.6) * 0.85;
+
+  renderer.clear();
+  renderer.render(scene, cam);
+  if (glowMat.uniforms.uAmt.value > 0.001) renderer.render(glowScene, glowCam);
+
+  elWhite.style.opacity = white.toFixed(3);
+  const k = sstep(WHT1, RESOLVE, t);
+  elFinal.style.opacity = k.toFixed(3);
+  elRule.style.width = (k*Math.min(W*0.42, 420)) + 'px';
+  btn.style.opacity = t > END ? '1' : '0';
+}
+
+resize(); play(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
