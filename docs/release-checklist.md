@@ -24,6 +24,12 @@ model story is provider-free (add your own key in the Models tab, no restart).
   + `--ci` (container tests) + `--offline` (autoinstall in-target). Creates the
   `cielo` service user (rootless-podman prereqs), runs `cielo-runtime.service`,
   drops `cielo-claim`/`cielo-add-user`/`cielo-selftest`.
+- 🟡 **Run-as-an-app / WSL2 path.** `run.sh` ships in the bundle: foreground, no root,
+  no systemd, state in `<bundle>/.data`. Lets a Windows-on-ARM machine (Surface) run
+  the `linux-arm64` bundle under WSL2 and reach the panel at `http://localhost:5148/`
+  in the Windows browser (WSL forwards loopback, so the claim gate is satisfied).
+  See docs/wsl-quickstart.md. Not yet smoke-tested on real WSL — same binary the
+  arm64 Docker test covers.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 10/10 pass on native Linux.
   `distro/scripts/test-install-vm.sh` runs the x86-64 bundle in a full-system qemu

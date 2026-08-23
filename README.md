@@ -63,6 +63,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 
 **To run the OS (installed / appliance):**
 - Ubuntu 24.04+ (amd64 or arm64), **podman**. **No .NET** — the release bundle is self-contained.
+- Or **Windows via WSL2** (including Windows-on-ARM) — see [docs/wsl-quickstart.md](docs/wsl-quickstart.md).
 - **Provider-free by default** — bring your own model key and add it from the panel's Models tab.
 - **~4 GB RAM** and up (more only if you run a local model, e.g. Bonsai). CPU-only is fine (no GPU required).
 - Optional: cloud model keys (DeepSeek / Azure OpenAI) for stronger reasoning/vision — or run **fully local** with Bonsai.
@@ -96,6 +97,15 @@ sudo ./cielo/install.sh --mode app               # app | headless | kiosk
 - **headless** — a VPS / old box; binds all interfaces, reach it with a token.
 - **kiosk** — boots into a fullscreen panel browser.
 
+**Run it as an app, no root and no systemd** — the same bundle, foreground, state in `cielo/.data`. This is the WSL2 path (including Windows-on-ARM: build `linux-arm64`):
+
+```bash
+tar xzf cielo-linux-arm64.tar.gz
+./cielo/run.sh                                   # → http://localhost:5148/
+```
+
+See [docs/wsl-quickstart.md](docs/wsl-quickstart.md) to go from a stock Windows machine to the claim wizard.
+
 **Autoinstall USB** — a bare-metal appliance that installs Ubuntu + CieloOS unattended (**erases the target disk**):
 
 ```bash
@@ -123,4 +133,5 @@ Design laws, decisions, and the milestone roadmap live in [docs/ai-native-ui.md]
 | [model-config.md](docs/model-config.md) | Layered, capability-based model configuration |
 | [ai-native-ui.md](docs/ai-native-ui.md) | Design laws, decisions, roadmap |
 | [architecture.md](docs/architecture.md) · [local-dev.md](docs/local-dev.md) | Runtime internals · running & auth |
+| [wsl-quickstart.md](docs/wsl-quickstart.md) | Run it as an app on Windows (incl. ARM) via WSL2 |
 | [hands-and-eyes.md](docs/hands-and-eyes.md) · [model-selection.md](docs/model-selection.md) | Desktop control · model/provider profiles |
