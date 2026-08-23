@@ -96,16 +96,16 @@ QEMU_PID=$!
 
 echo "==> Waiting for the verdict (timeout ${TIMEOUT}s, qemu pid $QEMU_PID)"
 deadline=$((SECONDS + TIMEOUT))
-result=""
 while [[ $SECONDS -lt $deadline ]]; do
-  if ! kill -0 "$QEMU_PID" 2>/dev/null; then break; fi
-  if grep -q 'CIELO_VM_RESULT:' "$SERIAL" 2>/dev/null; then
-    result="$(grep -o 'CIELO_VM_RESULT:[0-9]*' "$SERIAL" | tail -1 | cut -d: -f2)"
-    break
-  fi
+  # Check for the verdict FIRST: the guest powers off the instant it prints it, so
+  # qemu can exit in the same tick — read the result before deciding qemu is gone.
+  grep -aq 'CIELO_VM_RESULT:' "$SERIAL" 2>/dev/null && break
+  kill -0 "$QEMU_PID" 2>/dev/null || break
   sleep 5
 done
 kill "$QEMU_PID" 2>/dev/null || true; wait "$QEMU_PID" 2>/dev/null || true
+# Read the verdict from the (binary-ish) serial log after cleanup, unconditionally.
+result="$(grep -ao 'CIELO_VM_RESULT:[0-9]*' "$SERIAL" 2>/dev/null | tail -1 | cut -d: -f2)"
 
 echo "---- self-test output ----"
 grep -E 'PASS|FAIL|CIELO_VM|RUNTIME EXITED|All checks|check\(s\) failed' "$SERIAL" || tail -30 "$SERIAL"

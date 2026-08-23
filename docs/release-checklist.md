@@ -4,24 +4,36 @@ What must be true before shipping, split by how far the release goes. A **test
 release** (trusted testers, disposable VMs) has a lighter bar than a **public /
 multi-tenant** release. Items are marked ✅ done · 🟡 in progress · ⬜ open.
 
-## Chosen target for the FIRST release (2026-08-23)
+## Chosen target for the FIRST release — CieloOS (2026-08-23)
 
-**Dogfood · prebuilt VM image · provider-free.** Audience is just the author, so the
-Security items below are documented limitations, not blockers. Delivery is a
-bootable VM image; the model story is provider-free (add your own key in the Models
-tab on first run). Remaining work is therefore the **image bake**, not hardening:
+**Dogfood · bare-metal USB · provider-free.** Audience is just the author, so the
+Security items below are documented limitations, not blockers. The product is
+**CieloOS**; the runtime is identical across three deploy shapes and only the
+"presentation mode" differs — `app` (localhost browser), `headless` (VPS/old
+machine, browser + token), `kiosk` (boots into a fullscreen panel browser). The
+model story is provider-free (add your own key in the Models tab, no restart).
 
-- ✅ **Runtime self-serves the panel.** The API serves the built panel (`Panel:Path`,
-  default `<root>/panel`) as static files ahead of the auth gate, so a booted image
-  lands straight on the first-run wizard with no Vite/dev machine. Verified: `GET /`
-  → SPA, assets load unauthenticated, API unaffected. (Dev without a build falls
-  back to the `/api/branding` redirect + Vite; CORS stays for the Vite origin.)
-- ⬜ **Package the LATEST runtime into the image.** The autoinstall currently bakes
-  the old 5148 API; the image must install this build (Phases A–C) + the built
-  panel, and run it as a real service (see Ops).
-- ⬜ **Provider-free image defaults.** `Runtime:SeedDemo` off, no provider keys, and
-  `local-inference.service` disabled (no Bonsai — provider-free by choice).
-- ⬜ **Sessions on first boot.** Console + desktop images available (see Ops bake).
+- ✅ **Runtime self-serves the panel.** `Panel:Path` (default `<root>/panel`) served
+  ahead of the auth gate, so a booted machine lands on the first-run wizard with no
+  dev machine. Verified: `GET /` → SPA, assets load unauthenticated, API unaffected.
+- ✅ **Self-contained release bundle.** `distro/scripts/build-release.sh
+  [linux-x64|linux-arm64]` → a ~50M tarball (runtime + panel + surfaces + config;
+  no .NET on the target, `InvariantGlobalization` so no libicu). Provider-free,
+  SQLite. Verified: real ELF x86-64 output.
+- ✅ **Mode-aware installer.** `distro/install.sh --mode <app|headless|kiosk>` (live)
+  + `--ci` (container tests) + `--offline` (autoinstall in-target). Creates the
+  `cielo` service user (rootless-podman prereqs), runs `cielo-runtime.service`,
+  drops `cielo-claim`/`cielo-add-user`/`cielo-selftest`.
+- ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
+  full first-run self-test in `ubuntu:24.04` — 10/10 pass on native Linux.
+  `distro/scripts/test-install-vm.sh` runs the x86-64 bundle in a full-system qemu
+  VM (definitive amd64; Docker's user-mode emulation FailFasts in .NET EH, a QEMU
+  artifact — not a defect).
+- 🟡 **Autoinstall USB (end goal).** `distro/scripts/build-usb.sh --iso <live-server>`
+  remasters the ISO to install Ubuntu + CieloOS unattended (`install.sh --offline`).
+  Config + GRUB patch validated; a full install-boot is the heavy end-to-end check.
+- ⬜ **Sessions on first boot.** Console + desktop podman images build on first use;
+  prebuild/bake still open (rootless-podman-under-systemd validated only on the target).
 
 ## Security — MUST close before a public release
 
