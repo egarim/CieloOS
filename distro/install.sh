@@ -19,16 +19,36 @@ set -euo pipefail
 
 MODE="headless"
 PORT="5148"
-CI=0   # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
+CI=0        # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
+OFFLINE=0   # --offline: install into a not-yet-running system (autoinstall in-target/chroot):
+            # enable units + linger via files, never start/daemon-reload — first boot activates.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="${2:?}"; shift 2 ;;
     --port) PORT="${2:?}"; shift 2 ;;
     --ci) CI=1; shift ;;
+    --offline) OFFLINE=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
 case "$MODE" in headless|app|kiosk) ;; *) echo "--mode must be headless|app|kiosk" >&2; exit 2 ;; esac
+# LIVE = a running system where we can start/verify services now.
+LIVE=1; { [[ "$CI" -eq 1 ]] || [[ "$OFFLINE" -eq 1 ]]; } && LIVE=0
+
+# Enable a systemd unit whether the system is running (systemctl) or not (symlink,
+# searching the vendor unit dirs for package-provided units like seatd).
+enable_unit() {
+  local unit="$1"
+  if [[ "$LIVE" -eq 1 ]]; then
+    systemctl enable "$unit"
+    return
+  fi
+  local src="/etc/systemd/system/$unit"
+  [[ -f "$src" ]] || src="/lib/systemd/system/$unit"
+  [[ -f "$src" ]] || src="/usr/lib/systemd/system/$unit"
+  install -d /etc/systemd/system/multi-user.target.wants
+  ln -sf "$src" "/etc/systemd/system/multi-user.target.wants/$unit"
+}
 
 if [[ "$(id -u)" -ne 0 ]]; then echo "Run as root (sudo)." >&2; exit 1; fi
 BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,8 +74,13 @@ if ! id -u cielo >/dev/null 2>&1; then
 fi
 grep -q '^cielo:' /etc/subuid || usermod --add-subuids 100000-165535 cielo
 grep -q '^cielo:' /etc/subgid || usermod --add-subgids 100000-165535 cielo
-# linger (so /run/user/<uid> exists for rootless podman) needs systemd — skip in CI.
-[[ "$CI" -eq 1 ]] || loginctl enable-linger cielo
+# linger (so /run/user/<uid> exists for rootless podman): loginctl on a live system,
+# a marker file when installing offline; skipped entirely in CI.
+if [[ "$LIVE" -eq 1 ]]; then
+  loginctl enable-linger cielo
+elif [[ "$OFFLINE" -eq 1 ]]; then
+  install -d /var/lib/systemd/linger && : > /var/lib/systemd/linger/cielo
+fi
 CIELO_UID="$(id -u cielo)"
 
 echo "==> [3/6] Install to /opt/cielo"
@@ -76,8 +101,13 @@ cp "$BUNDLE/systemd/cielo-runtime.service" /etc/systemd/system/cielo-runtime.ser
 if [[ "$CI" -eq 1 ]]; then
   echo "    (--ci: service file installed but not started; the harness runs the binary directly)"
 else
-  systemctl daemon-reload
-  systemctl enable --now cielo-runtime.service
+  enable_unit cielo-runtime.service
+  if [[ "$LIVE" -eq 1 ]]; then
+    systemctl daemon-reload
+    systemctl restart cielo-runtime.service
+  else
+    echo "    (--offline: enabled; starts on first boot)"
+  fi
 fi
 
 # On-box claim + add-user helpers (curl to loopback — no extra binary needed).
@@ -110,7 +140,7 @@ if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
   # (Least-packages GUI; shake this out on the actual hardware/GPU.)
   apt-get install -y --no-install-recommends cage seatd chromium-browser || \
     apt-get install -y --no-install-recommends cage seatd chromium || true
-  systemctl enable seatd || true
+  enable_unit seatd.service || true
   cat > /etc/systemd/system/cielo-kiosk.service <<EOF
 [Unit]
 Description=CieloOS kiosk browser
@@ -130,14 +160,14 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-  systemctl daemon-reload
-  systemctl enable cielo-kiosk.service || true
+  enable_unit cielo-kiosk.service || true
+  [[ "$LIVE" -eq 1 ]] && systemctl daemon-reload
   echo "    Kiosk service installed. It opens the panel on tty1 at boot."
 fi
 
 echo
 echo "================ CieloOS installed ($MODE) ================"
-if [[ "$CI" -eq 0 ]]; then
+if [[ "$LIVE" -eq 1 ]]; then
   systemctl --no-pager --lines=0 status cielo-runtime.service || true
 fi
 echo
