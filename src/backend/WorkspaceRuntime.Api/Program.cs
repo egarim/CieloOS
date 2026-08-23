@@ -873,11 +873,35 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     const string noSession =
         "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
 
+    // The agent should know where it is. Without this it does not know it has a
+    // Linux user, a home, a desktop of its own, or that ~/shared is the one place
+    // its owner can see - so it invents paths and tells the owner about files they
+    // cannot reach.
+    var ownerSlug = Ownership.RootUserSlug(caller.Slug, store);
+    var ownerName = store.Users.FirstOrDefault(u => u.Slug == ownerSlug)?.DisplayName ?? ownerSlug;
+    var hasDesktop = (await sessions.ListAsync(cancellationToken))
+        .Any(s => string.Equals(s.Owner, agent.Slug, StringComparison.Ordinal) && s.Kind == "desktop" && s.Status == "running");
+
+    var whereYouAre =
+        $"You are {agent.Name}, an agent running inside CieloOS. Your owner is {ownerName}. " +
+        $"You act in your own console session as the Linux user 'root' in the home directory /root, " +
+        "which persists across sessions. " +
+        "~/shared is a workspace you SHARE with your owner: anything you put there they can see and " +
+        "open from their panel, and anything they leave there you can read. Files you write anywhere " +
+        "else are private to you and your owner cannot get at them, so put deliverables in ~/shared " +
+        "and say so by name. " +
+        (hasDesktop
+            ? "You also have a graphical desktop session of your own, where the same shared folder is mounted. "
+            : "") +
+        "\n\n";
+
+
     var history = priorTurns.Count == 0
         ? ""
         : "Earlier in this conversation:\n" + string.Join("\n", priorTurns) + "\n\n";
 
     var goal =
+        whereYouAre +
         history +
         $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
         "If you can answer from what you already know, just answer — do not touch the console. " +

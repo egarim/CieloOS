@@ -150,12 +150,11 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
 
         if (!isConsole)
         {
-            // Give the desktop a "Message Agent" shortcut (menu + desktop icon)
-            // that drops a note in ~/shared/inbox.md. Best-effort: never fail the
-            // session over the launcher.
+            // Give the desktop its launchers (menu + desktop icon) and the shared
+            // workspace directory. Best-effort: never fail the session over a launcher.
             try
             {
-                await ProvisionMessageLauncherAsync(name, cancellationToken);
+                await ProvisionDesktopLaunchersAsync(name, cancellationToken);
             }
             catch
             {
@@ -533,23 +532,6 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         return (process.ExitCode, await stdoutTask, await stderrTask);
     }
 
-    // A tiny terminal prompt that appends the typed message to ~/shared/inbox.md;
-    // the runtime's inbox watcher picks it up and the agent replies in outbox.md.
-    private const string MessageLauncherScript = """
-#!/bin/bash
-mkdir -p "$HOME/shared" 2>/dev/null
-echo "Message your agent — it will reply in ~/shared/outbox.md"
-read -rp "> " MSG
-if [ -n "$MSG" ]; then
-  printf '%s\t%s\n' "$(date -Iseconds)" "$MSG" >> "$HOME/shared/inbox.md"
-  echo
-  echo "Sent. Watch ~/shared/outbox.md for the reply."
-else
-  echo "Nothing sent."
-fi
-sleep 3
-""";
-
     // The chat launcher: a chromium app-mode window on the OS's chat UI. --no-sandbox
     // is required because chromium's own sandbox cannot nest inside the rootless
     // container; the container is the isolation boundary here.
@@ -565,31 +547,15 @@ Terminal=false
 Categories=Network;
 """;
 
-    private const string MessageLauncherDesktop = """
-[Desktop Entry]
-Version=1.0
-Type=Application
-Name=Message Agent
-Comment=Send a message to your agent
-Exec=xfce4-terminal --title=Message-Agent --geometry=78x12 -x bash /config/.local/bin/lunos-message
-Icon=mail-message-new
-Terminal=false
-Categories=Utility;
-""";
-
     // Writes the launcher into the desktop's home (base64 to sidestep all shell
     // quoting) as the container user, so it shows in the Applications menu and on
     // the Desktop.
-    private async Task ProvisionMessageLauncherAsync(string name, CancellationToken cancellationToken)
+    private async Task ProvisionDesktopLaunchersAsync(string name, CancellationToken cancellationToken)
     {
-        var script = Convert.ToBase64String(Encoding.UTF8.GetBytes(MessageLauncherScript.ReplaceLineEndings("\n")));
-        var launcher = Convert.ToBase64String(Encoding.UTF8.GetBytes(MessageLauncherDesktop.ReplaceLineEndings("\n")));
-        var command =
-            "mkdir -p \"$HOME/.local/bin\" \"$HOME/.local/share/applications\" \"$HOME/Desktop\" \"$HOME/shared\"; " +
-            $"echo {script} | base64 -d > \"$HOME/.local/bin/lunos-message\"; chmod +x \"$HOME/.local/bin/lunos-message\"; " +
-            $"echo {launcher} | base64 -d > \"$HOME/.local/share/applications/lunos-message.desktop\"; " +
-            $"echo {launcher} | base64 -d > \"$HOME/Desktop/Message-Agent.desktop\"; chmod +x \"$HOME/Desktop/Message-Agent.desktop\"";
-        await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c", command }, cancellationToken);
+        // The shared workspace must exist even with no launchers: it is how the
+        // owner and the agent exchange files.
+        await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c",
+            "mkdir -p \"$HOME/.local/share/applications\" \"$HOME/Desktop\" \"$HOME/shared\"" }, cancellationToken);
 
         // A desktop icon for the chat UI, when the OS knows where its chat lives.
         if (!string.IsNullOrWhiteSpace(options.ChatUrl))
