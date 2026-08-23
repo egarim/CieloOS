@@ -559,7 +559,7 @@ Version=1.0
 Type=Application
 Name=CieloOS Chat
 Comment=Chat with your agent
-Exec=chromium --app=CHAT_URL_PLACEHOLDER --no-sandbox --no-first-run --no-default-browser-check
+Exec=chromium "--app=CHAT_URL_PLACEHOLDER" --no-sandbox --no-first-run --no-default-browser-check
 Icon=user-available
 Terminal=false
 Categories=Network;
@@ -595,7 +595,7 @@ Categories=Utility;
         if (!string.IsNullOrWhiteSpace(options.ChatUrl))
         {
             var chatLauncher = Convert.ToBase64String(Encoding.UTF8.GetBytes(
-                ChatLauncherDesktop.Replace("CHAT_URL_PLACEHOLDER", options.ChatUrl).ReplaceLineEndings("\n")));
+                ChatLauncherDesktop.Replace("CHAT_URL_PLACEHOLDER", EscapeExecArgument(options.ChatUrl)).ReplaceLineEndings("\n")));
             var chatCommand =
                 $"echo {chatLauncher} | base64 -d > \"$HOME/.local/share/applications/cielo-chat.desktop\"; " +
                 $"echo {chatLauncher} | base64 -d > \"$HOME/Desktop/CieloOS-Chat.desktop\"; " +
@@ -603,6 +603,17 @@ Categories=Utility;
             await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "bash", "-c", chatCommand }, cancellationToken);
         }
     }
+
+    // Desktop Entry Exec quoting: the URL sits inside a double-quoted argument, so a
+    // backslash, quote, dollar or backtick has to be escaped there, and a literal percent
+    // must be doubled because % introduces a field code. Without this, a URL carrying
+    // ?, &, a space or a percent escape splits the argument or is silently rewritten.
+    private static string EscapeExecArgument(string value) => value
+        .Replace("\\", "\\\\")
+        .Replace("\"", "\\\"")
+        .Replace("$", "\\$")
+        .Replace("`", "\\`")
+        .Replace("%", "%%");
 
     private static string Required(ToolRequest request, string key) =>
         request.Arguments.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
