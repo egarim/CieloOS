@@ -4,6 +4,25 @@ What must be true before shipping, split by how far the release goes. A **test
 release** (trusted testers, disposable VMs) has a lighter bar than a **public /
 multi-tenant** release. Items are marked ✅ done · 🟡 in progress · ⬜ open.
 
+## Chosen target for the FIRST release (2026-08-23)
+
+**Dogfood · prebuilt VM image · provider-free.** Audience is just the author, so the
+Security items below are documented limitations, not blockers. Delivery is a
+bootable VM image; the model story is provider-free (add your own key in the Models
+tab on first run). Remaining work is therefore the **image bake**, not hardening:
+
+- ✅ **Runtime self-serves the panel.** The API serves the built panel (`Panel:Path`,
+  default `<root>/panel`) as static files ahead of the auth gate, so a booted image
+  lands straight on the first-run wizard with no Vite/dev machine. Verified: `GET /`
+  → SPA, assets load unauthenticated, API unaffected. (Dev without a build falls
+  back to the `/api/branding` redirect + Vite; CORS stays for the Vite origin.)
+- ⬜ **Package the LATEST runtime into the image.** The autoinstall currently bakes
+  the old 5148 API; the image must install this build (Phases A–C) + the built
+  panel, and run it as a real service (see Ops).
+- ⬜ **Provider-free image defaults.** `Runtime:SeedDemo` off, no provider keys, and
+  `local-inference.service` disabled (no Bonsai — provider-free by choice).
+- ⬜ **Sessions on first boot.** Console + desktop images available (see Ops bake).
+
 ## Security — MUST close before a public release
 
 - ⬜ **Default VM credentials.** `distro/autoinstall/user-data` ships

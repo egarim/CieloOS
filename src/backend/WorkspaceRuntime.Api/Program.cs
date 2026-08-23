@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
 using WorkspaceRuntime.Infrastructure;
@@ -238,6 +239,25 @@ app.Logger.LogInformation(
 
 app.UseCors();
 
+// Serve the built panel (a self-contained image boots straight to it, no Vite).
+// The static assets are public and served BEFORE the auth middleware, so a fresh
+// machine can load the first-run wizard with no token; the API calls the panel
+// then makes still pass the bearer/loopback gates. Absent (dev without a build),
+// this is skipped and "/" falls through to the /api/branding redirect + Vite.
+var panelPath = builder.Configuration["Panel:Path"];
+if (string.IsNullOrWhiteSpace(panelPath))
+{
+    panelPath = Path.Combine(repositoryRoot, "panel");
+}
+var panelServed = Directory.Exists(panelPath) && File.Exists(Path.Combine(panelPath, "index.html"));
+if (panelServed)
+{
+    var panelFiles = new PhysicalFileProvider(Path.GetFullPath(panelPath));
+    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = panelFiles });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = panelFiles });
+    app.Logger.LogInformation("Serving panel from {PanelPath}.", panelPath);
+}
+
 // Principal resolution: every route not explicitly public requires a bearer
 // token; approval verbs additionally require the human principal.
 app.Use(async (context, next) =>
@@ -271,7 +291,13 @@ app.Use(async (context, next) =>
     await next();
 });
 
-app.MapGet("/", () => Results.Redirect("/api/branding"));
+// When the panel is served, "/" is index.html (via UseDefaultFiles) — registering
+// a "/" endpoint here would make routing claim it and skip the static file. Only
+// map the dev redirect when there is no panel to serve.
+if (!panelServed)
+{
+    app.MapGet("/", () => Results.Redirect("/api/branding"));
+}
 
 app.MapGet("/api/branding", (IConfiguration configuration) =>
 {
