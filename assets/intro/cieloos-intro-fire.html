@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CieloOS — Intro</title>
+<style>
+  html,body{margin:0;height:100%;background:#02030a;overflow:hidden;
+    font-family:"Trebuchet MS","Segoe UI",Helvetica,Arial,sans-serif}
+  canvas{display:block;width:100vw;height:100vh}
+  .layer{position:fixed;inset:0;pointer-events:none}
+  #black{background:#030305;opacity:0}
+  #white{background:#fcfcfd;opacity:0}
+  #final{display:grid;place-content:center;text-align:center;opacity:0}
+  #final h1{margin:0;font-weight:700;line-height:1;
+    font-size:clamp(38px,12.5vw,150px);letter-spacing:.055em;
+    background:linear-gradient(180deg,#5f79b8 0%,#1d2a55 45%,#33477f 55%,#7387b9 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  #final .sub{margin-top:.55em;font-size:clamp(9px,1.9vw,22px);letter-spacing:.34em;
+    color:#5b6480;font-family:"Segoe UI",Helvetica,Arial,sans-serif}
+  #final .rule{margin:.7em auto 0;height:1px;background:rgba(60,72,110,.45);width:0}
+  #replay{position:fixed;right:14px;bottom:14px;z-index:9;opacity:0;
+    border:1px solid rgba(128,128,128,.45);background:rgba(128,128,128,.12);
+    color:#888;font:600 12px/1 system-ui,sans-serif;letter-spacing:.08em;
+    padding:9px 14px;border-radius:999px;cursor:pointer;
+    text-transform:uppercase;transition:opacity .4s}
+  #replay:hover{color:#bbb;border-color:rgba(160,160,160,.7)}
+  #err{position:fixed;inset:0;display:none;place-content:center;color:#889;
+    font:14px/1.6 system-ui,sans-serif;text-align:center;padding:2rem}
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div class="layer" id="black"></div>
+<div class="layer" id="white"></div>
+<div class="layer" id="final"><div>
+  <h1 id="finalText">CieloOS</h1>
+  <div class="sub" id="finalSub"></div>
+  <div class="rule" id="finalRule"></div>
+</div></div>
+<button id="replay">Replay</button>
+<div id="err">WebGL isn't available in this browser — use <b>cieloos-intro.html</b> (the canvas 2D version) instead.</div>
+<script src="three.min.js"></script>
+<script>
+(() => {
+const Q      = new URLSearchParams(location.search);
+const TEXT   = Q.get('text') || 'CieloOS';
+const SUB    = Q.get('sub')  || '';
+const AT     = parseFloat(Q.get('at') || '0');   // ?at=3.6 jumps to a beat
+const FREEZE = Q.has('freeze');                  // ?at=3.6&freeze holds it
+
+// ---- beat sheet ---------------------------------------------------------
+const ENTER   = 0.30;   // wordmark visible far above, in the thin upper air
+const ARRIVE  = 2.15;   // it brakes into place, igniting the cloud deck
+const SETTLE  = 0.55;   // how long the wordmark rings before it stops dead
+const PEAK    = 3.70;   // brightest frame + light streak
+const DIM0    = 4.25, DIM1 = 5.05;   // world falls away, logo holds
+const WHT0    = 5.30, WHT1 = 5.80;   // white-out, only once everything is at rest
+const RESOLVE = 6.60;
+const END     = 8.60;
+
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const sstep = (a,b,x) => { const p = clamp((x-a)/(b-a),0,1); return p*p*(3-2*p); };
+const rnd   = (a,b) => a + Math.random()*(b-a);
+
+if (typeof THREE === 'undefined'){ document.getElementById('err').style.display='grid'; return; }
+
+// ---- seeded fBm, reused for cloud + text textures ------------------------
+let _s = (parseInt(Q.get('seed') || '20260823', 10) >>> 0) || 1;
+function srand(){
+  _s |= 0; _s = (_s + 0x6D2B79F5) | 0;
+  let x = Math.imul(_s ^ (_s >>> 15), 1 | _s);
+  x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+  return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+}
+function cloudCanvas(size, contrast, bias, feather){
+  const oct = [[4,0.50],[8,0.25],[16,0.14],[32,0.08],[64,0.05]];
+  const acc = new Float32Array(size*size);
+  for (const o of oct){
+    const g = o[0], amp = o[1], cell = size/g;
+    const grid = new Float32Array(g*g);
+    for (let i=0;i<g*g;i++) grid[i] = srand();
+    for (let y=0;y<size;y++){
+      const gy=y/cell, iy=Math.floor(gy), y0=iy%g, y1=(y0+1)%g, fy=gy-iy, sy=fy*fy*(3-2*fy);
+      for (let x=0;x<size;x++){
+        const gx=x/cell, ix=Math.floor(gx), x0=ix%g, x1=(x0+1)%g, fx=gx-ix, sx=fx*fx*(3-2*fx);
+        const a=grid[y0*g+x0], b=grid[y0*g+x1], c=grid[y1*g+x0], d=grid[y1*g+x1];
+        const tp=a+(b-a)*sx, bt=c+(d-c)*sx;
+        acc[y*size+x] += amp*(tp+(bt-tp)*sy);
+      }
+    }
+  }
+  let mn=1e9,mx=-1e9;
+  for (let i=0;i<acc.length;i++){ const v=acc[i]; if(v<mn)mn=v; if(v>mx)mx=v; }
+  const k = 1/(mx-mn);
+  const cv = document.createElement('canvas'); cv.width = cv.height = size;
+  const g2 = cv.getContext('2d'), im = g2.createImageData(size,size), d = im.data;
+  const half = size/2;
+  for (let y=0;y<size;y++){
+    for (let x=0;x<size;x++){
+      const i = y*size+x;
+      let v = clamp(((acc[i]-mn)*k - bias)*contrast, 0, 1);
+      v = v*v*(3-2*v);
+      if (feather){   // fade the billboard edges so tiles never show a seam
+        const dx = (x-half)/half, dy = (y-half)/half;
+        v *= clamp(1.35 - Math.sqrt(dx*dx+dy*dy)*1.5, 0, 1);
+      }
+      const o = i*4;
+      d[o] = d[o+1] = d[o+2] = 255; d[o+3] = v*255;
+    }
+  }
+  g2.putImageData(im,0,0);
+  return cv;
+}
+
+// ---- wordmark textures ---------------------------------------------------
+const TW = 2048, TH = 768;   // vertical room so the hot halo is never clipped
+function wordCanvas(mode){
+  const c = document.createElement('canvas'); c.width = TW; c.height = TH;
+  const g = c.getContext('2d');
+  let fs = 300;
+  const setF = () => { try { g.letterSpacing = (fs*0.055)+'px'; } catch(e){}
+                       g.font = '700 '+fs+'px "Trebuchet MS","Segoe UI",Helvetica,Arial,sans-serif'; };
+  setF();
+  while (g.measureText(TEXT).width > TW*0.86 && fs > 40){ fs -= 6; setF(); }
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const cxp = TW/2, cyp = TH/2;
+  if (mode === 'hot'){
+    // mostly halo, only a little solid fill: this is ADDED on top of the metal,
+    // so a solid white pass would erase the gradient instead of heating it
+    g.shadowColor = 'rgba(255,170,70,1)'; g.shadowBlur = 85;
+    g.fillStyle = 'rgba(255,255,255,0.30)';
+    g.fillText(TEXT, cxp, cyp); g.fillText(TEXT, cxp, cyp);
+    g.shadowBlur = 45; g.fillStyle = 'rgba(255,240,215,0.34)';
+    g.fillText(TEXT, cxp, cyp);
+  } else {
+    g.strokeStyle = 'rgba(30,14,6,0.5)'; g.lineWidth = fs*0.05; g.lineJoin = 'round';
+    g.strokeText(TEXT, cxp, cyp);
+    const grd = g.createLinearGradient(0, cyp-fs*0.5, 0, cyp+fs*0.5);
+    grd.addColorStop(0,'#ffffff'); grd.addColorStop(0.42,'#e9edf6');
+    grd.addColorStop(0.52,'#a9b3c6'); grd.addColorStop(0.62,'#ffffff');
+    grd.addColorStop(1,'#c9d2e2');
+    g.fillStyle = grd; g.fillText(TEXT, cxp, cyp);
+  }
+  // Zero the outer border. CanvasTexture clamps at the edge, so any glow alpha
+  // left touching the border gets smeared across the plane as a straight streak.
+  g.clearRect(0, 0, TW, 4); g.clearRect(0, TH-4, TW, 4);
+  g.clearRect(0, 0, 4, TH); g.clearRect(TW-4, 0, 4, TH);
+  return c;
+}
+
+// ---- renderer / scene ----------------------------------------------------
+const canvas = document.getElementById('gl');
+let renderer;
+try { renderer = new THREE.WebGLRenderer({canvas:canvas, antialias:true}); }
+catch(e){ document.getElementById('err').style.display='grid'; return; }
+renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+renderer.autoClear = false;
+
+const scene = new THREE.Scene();
+const FOV = 62;
+const cam = new THREE.PerspectiveCamera(FOV, 1, 0.1, 4000);
+cam.position.set(0,0,0);
+
+// backdrop: sky gradient that darkens toward space at altitude
+const bgMat = new THREE.ShaderMaterial({
+  depthWrite:false, depthTest:false,
+  uniforms:{ top:{value:new THREE.Color()}, bot:{value:new THREE.Color()} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.999,1.0); }',
+  fragmentShader:'varying vec2 vUv; uniform vec3 top; uniform vec3 bot;' +
+    'void main(){ gl_FragColor = vec4(mix(bot, top, smoothstep(0.0,1.0,vUv.y)), 1.0); }'
+});
+const bg = new THREE.Mesh(new THREE.PlaneGeometry(2,2), bgMat);
+bg.frustumCulled = false; bg.renderOrder = -10; scene.add(bg);
+
+// cloud field: billboards through the volume we fly down through
+const cloudTexA = new THREE.CanvasTexture(cloudCanvas(256, 2.4, 0.44, true));
+const cloudTexB = new THREE.CanvasTexture(cloudCanvas(256, 2.0, 0.40, true));
+const CLOUD_FAR = -1500, CLOUD_NEAR = 30;
+const cloudMats = [
+  new THREE.MeshBasicMaterial({map:cloudTexA, transparent:true, depthWrite:false, opacity:0.42}),
+  new THREE.MeshBasicMaterial({map:cloudTexB, transparent:true, depthWrite:false, opacity:0.30}),
+  new THREE.MeshBasicMaterial({map:cloudTexA, transparent:true, depthWrite:false, opacity:0.20}),
+];
+const quad = new THREE.PlaneGeometry(1,1);
+const clouds = [];
+for (let i=0;i<190;i++){
+  const m = new THREE.Mesh(quad, cloudMats[i%3]);
+  const s = rnd(120,420);
+  m.scale.set(s, s*rnd(0.55,0.9), 1);
+  m.position.set(rnd(-500,500), rnd(-320,320), rnd(CLOUD_FAR, CLOUD_NEAR));
+  m.rotation.z = rnd(0, Math.PI*2);
+
+  clouds.push(m); scene.add(m);
+}
+const COOL = new THREE.Color(0xd8e4ff), HOT = new THREE.Color(0xff7a24);
+
+// wordmark: a plane that actually flies toward the camera
+const wordTex = new THREE.CanvasTexture(wordCanvas('cool'));
+const hotTex  = new THREE.CanvasTexture(wordCanvas('hot'));
+wordTex.anisotropy = hotTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+const wordMat = new THREE.MeshBasicMaterial({map:wordTex, transparent:true, depthWrite:false});
+const hotMat  = new THREE.MeshBasicMaterial({map:hotTex,  transparent:true, depthWrite:false,
+                                             blending:THREE.AdditiveBlending, opacity:0});
+// While descending the wordmark lives in the main scene, so clouds in front of it
+// occlude it. Once the deck ignites it moves to a scene drawn after the fire pass,
+// so the flames never paint over the logo.
+const frontScene = new THREE.Scene();
+let inFront = false;
+function setFront(f){
+  if (f === inFront) return;
+  inFront = f;
+  const from = f ? scene : frontScene, to = f ? frontScene : scene;
+  from.remove(word); from.remove(hot); to.add(word); to.add(hot);
+}
+const word = new THREE.Mesh(quad, wordMat);
+const hot  = new THREE.Mesh(quad, hotMat);
+scene.add(word); scene.add(hot);
+const ECHOES = 7, echoes = [];
+for (let i=0;i<ECHOES;i++){
+  const m = new THREE.Mesh(quad, new THREE.MeshBasicMaterial({
+    map:hotTex, transparent:true, depthWrite:false,
+    blending:THREE.AdditiveBlending, opacity:0}));
+  echoes.push(m); scene.add(m);
+}
+const FINAL_Z = -26;
+
+// fire: full-screen turbulent flame, revealed radially from the impact
+const fireScene = new THREE.Scene();
+const fireCam = new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const fireMat = new THREE.ShaderMaterial({
+  transparent:true, depthTest:false, depthWrite:false,
+  uniforms:{ uTime:{value:0}, uRadius:{value:0}, uAmt:{value:0}, uAspect:{value:1} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
+  fragmentShader: [
+  'precision highp float;',
+  'varying vec2 vUv;',
+  'uniform float uTime, uRadius, uAmt, uAspect;',
+  'float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123); }',
+  'float vnoise(vec2 p){',
+  '  vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);',
+  '  return mix(mix(hash(i),hash(i+vec2(1,0)),u.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);',
+  '}',
+  'float fbm(vec2 p){',
+  '  float v=0.0, a=0.5;',
+  '  for(int i=0;i<6;i++){ v += a*vnoise(p); p*=2.03; a*=0.5; }',
+  '  return v;',
+  '}',
+  'void main(){',
+  '  vec2 uv = vUv;',
+  '  vec2 c  = (uv-0.5)*vec2(uAspect,1.0);',
+  '  float d = length(c);',
+  '  float ang = atan(c.y, c.x);',
+  // domain-warped turbulence, drifting outward from the impact point
+  // cartesian turbulence drifting outward: billowing, not spoked
+  '  vec2 out1 = c * (1.0 + uTime*0.16);',
+  '  float w = fbm(out1*2.6 + vec2(uTime*0.20, -uTime*0.32));',
+  '  float n = fbm(out1*4.4 + w*1.30 + vec2(ang*0.45, -uTime*0.45));',
+  '  float front = smoothstep(uRadius, uRadius*0.10, d);',
+  '  float f = clamp(n*1.25*front*uAmt - (1.0-front)*0.22, 0.0, 1.0);',
+  '  f *= smoothstep(0.0, 0.22, uAmt);',
+  // the core runs hotter, but only slightly — it must not blow out to white
+  '  float core = smoothstep(uRadius*0.55, 0.0, d)*uAmt;',
+  '  f = clamp(f + core*0.16, 0.0, 1.0);',
+  '  vec3 col = mix(vec3(0.42,0.05,0.01), vec3(1.0,0.35,0.04), smoothstep(0.12,0.45,f));',
+  '  col = mix(col, vec3(1.0,0.72,0.20), smoothstep(0.42,0.72,f));',
+  '  col = mix(col, vec3(1.0,0.96,0.86), smoothstep(0.82,1.00,f));',
+  '  gl_FragColor = vec4(col, smoothstep(0.06,0.30,f));',
+  '}'].join('\n')
+});
+const fireQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), fireMat);
+fireQuad.frustumCulled = false; fireScene.add(fireQuad);
+
+// Re-entry: the plasma sheath burning around the wordmark as it comes down through
+// the air. The elliptical distance ed==1.0 sits exactly on the wordmark outline at
+// any range, so the fire hugs the letters instead of being a circle inside them.
+const entryMat = new THREE.ShaderMaterial({
+  transparent:true, depthTest:false, depthWrite:false, blending:THREE.AdditiveBlending,
+  uniforms:{ uTime:{value:0}, uSpeed:{value:0}, uAspect:{value:1}, uExt:{value:new THREE.Vector2(0.4,0.1)} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
+  fragmentShader: [
+  'precision highp float; varying vec2 vUv;',
+  'uniform float uTime, uSpeed, uAspect; uniform vec2 uExt;',
+  'float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453123); }',
+  'float vnoise(vec2 p){',
+  '  vec2 i=floor(p), f=fract(p); vec2 u=f*f*(3.0-2.0*f);',
+  '  return mix(mix(hash(i),hash(i+vec2(1,0)),u.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),u.x), u.y);',
+  '}',
+  'float fbm(vec2 p){ float v=0.0,a=0.5; for(int i=0;i<5;i++){ v+=a*vnoise(p); p*=2.05; a*=0.5; } return v; }',
+  'void main(){',
+  '  vec2 c = (vUv-0.5)*vec2(uAspect,1.0);',
+  '  float ang = atan(c.y, c.x);',
+  '  float ed = length(c / max(uExt, vec2(0.004)));',
+  '  float n1 = fbm(vec2(ang*7.0,  ed*0.9 - uTime*2.6));',
+  '  float n2 = fbm(vec2(ang*13.0, ed*1.6 - uTime*4.1));',
+  '  float streak = pow(n1*0.60 + n2*0.45, 2.3);',
+  '  float ring = smoothstep(0.85, 1.25, ed) * smoothstep(5.0, 1.4, ed);',
+  '  float f = streak * ring * uSpeed * 1.05;',
+  '  float cap = exp(-pow((ed-1.02)/0.42, 2.0)) * uSpeed * (0.45 + 0.55*fbm(vec2(ang*5.0, uTime*3.0)));',
+  '  f = clamp(f + cap*0.95, 0.0, 1.2);',
+  '  vec3 col = mix(vec3(1.00,0.30,0.04), vec3(1.00,0.72,0.34), smoothstep(0.15,0.70,f));',
+  '  col = mix(col, vec3(1.00,0.95,0.86), smoothstep(0.75,1.15,f));',
+  '  gl_FragColor = vec4(col*1.15, clamp(f*1.10, 0.0, 1.0));',
+  '}'].join('\n')
+});
+const entryScene = new THREE.Scene();
+const entryQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), entryMat);
+entryQuad.frustumCulled = false; entryScene.add(entryQuad);
+
+// glow + light streak, drawn as additive overlay sprites
+const glowMat = new THREE.ShaderMaterial({
+  transparent:true, depthTest:false, depthWrite:false, blending:THREE.AdditiveBlending,
+  uniforms:{ uBloom:{value:0}, uSpike:{value:0}, uAspect:{value:1} },
+  vertexShader:'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.0,1.0); }',
+  fragmentShader: [
+  'precision highp float; varying vec2 vUv;',
+  'uniform float uBloom, uSpike, uAspect;',
+  'void main(){',
+  '  vec2 c = (vUv-0.5)*vec2(uAspect,1.0);',
+  '  float d = length(c);',
+  '  float ball = exp(-d*d*16.0)*uBloom;',
+  '  float bar  = exp(-pow(c.y/0.055,2.0))*uSpike;',
+  '  float thin = exp(-pow(c.y/0.010,2.0))*uSpike;',
+  '  vec3 col = vec3(1.0,0.80,0.46)*ball + vec3(1.0,0.97,0.90)*(bar*0.55+thin*0.75);',
+  '  gl_FragColor = vec4(col, clamp(ball*0.9 + bar*0.5 + thin*0.8, 0.0, 1.0));',
+  '}'].join('\n')
+});
+const glowScene = new THREE.Scene();
+const glowQuad = new THREE.Mesh(new THREE.PlaneGeometry(2,2), glowMat);
+glowQuad.frustumCulled = false; glowScene.add(glowQuad);
+
+// ---- layout --------------------------------------------------------------
+let W = 0, H = 0;
+function resize(){
+  W = innerWidth; H = innerHeight;
+  renderer.setSize(W,H,false);
+  cam.aspect = W/H; cam.updateProjectionMatrix();
+  fireMat.uniforms.uAspect.value = W/H;
+  glowMat.uniforms.uAspect.value = W/H;
+  entryMat.uniforms.uAspect.value = W/H;
+  const visH = 2*Math.abs(FINAL_Z)*Math.tan(FOV*Math.PI/360);
+  const w = Math.min(0.74*visH*cam.aspect, visH*2.4);
+  const h = w*(TH/TW);
+  for (const m of [word, hot].concat(echoes)) m.scale.set(w,h,1);
+}
+addEventListener('resize', resize);
+
+// ---- DOM overlays --------------------------------------------------------
+const elBlack = document.getElementById('black'), elWhite = document.getElementById('white');
+const elFinal = document.getElementById('final'), elRule = document.getElementById('finalRule');
+const btn = document.getElementById('replay');
+document.getElementById('finalText').textContent = TEXT;
+document.getElementById('finalSub').textContent = SUB;
+
+// ---- loop ----------------------------------------------------------------
+let t0 = performance.now(), lastMs = t0;
+function play(){ t0 = performance.now() - AT*1000; lastMs = t0;
+  for (const c of clouds) c.position.z = rnd(CLOUD_FAR, CLOUD_NEAR); }
+btn.onclick = play;
+
+function loop(now){
+  requestAnimationFrame(loop);
+  const dt = Math.min(0.033, (now-lastMs)/1000); lastMs = now;
+  const t  = FREEZE ? AT : (now-t0)/1000;
+
+  const dp = clamp((t-ENTER)/(ARRIVE-ENTER), 0, 1);
+  const de = 1 - Math.pow(1-dp, 3.4);           // rushes in, brakes hard
+  const speed = Math.pow(1-dp, 2.0);            // still-travelling factor
+  const descending = t > ENTER && t < ARRIVE;
+
+  const spread = Math.pow(sstep(ARRIVE, ARRIVE+0.95, t), 0.62);  // violent bloom, then growth
+  const bloom  = sstep(ARRIVE-0.1, PEAK, t);
+  const spike  = Math.exp(-Math.pow((t-PEAK)/0.17, 2));
+  const cooled = sstep(ARRIVE+0.15, ARRIVE+1.35, t);
+  const dim    = sstep(DIM0, DIM1, t);
+  const white  = sstep(WHT0, WHT1, t);
+  const heat   = descending ? 0.55 + 0.45*speed : Math.max(0, 0.9*(1-cooled));
+
+  // fly the cloud field past the camera; it slows as we settle
+  // the cloud field brakes hard on touchdown so the world comes to rest
+  const fly = (t < ARRIVE ? 260 + 1450*speed : 150*Math.exp(-(t-ARRIVE)*3.4));
+  if (t > ARRIVE){                                   // touchdown jolt
+    const s3 = t - ARRIVE, k3 = Math.exp(-s3*7.0);
+    cam.position.set(Math.sin(s3*58)*0.42*k3, Math.cos(s3*44)*0.34*k3, 0);
+  } else cam.position.set(0,0,0);
+  const burn = Math.max(spread, 0) * (1-dim*0.6);
+  for (const m of clouds){
+    m.position.z += fly*dt;
+    m.position.y += fly*dt*0.10;               // the deck rises past us: we are falling
+    if (m.position.z > CLOUD_NEAR){
+      m.position.z = CLOUD_FAR + rnd(0,120);
+      m.position.x = rnd(-500,500); m.position.y = rnd(-320,320);
+    }
+  }
+  const worldDim = 1 - dim;
+  for (let i=0;i<cloudMats.length;i++){
+    cloudMats[i].color.copy(COOL).lerp(HOT, clamp(spread*1.5,0,1)).multiplyScalar(worldDim);
+  }
+
+  // altitude tint: near-space at the top of the dive, warm sky at the deck
+  const alt = 1-de;
+  bgMat.uniforms.top.value.setRGB(0.02+0.03*(1-alt), 0.03+0.05*(1-alt), 0.09+0.09*(1-alt)).multiplyScalar(worldDim);
+  bgMat.uniforms.bot.value.setRGB(0.01+0.03*(1-alt), 0.02+0.05*(1-alt), 0.05+0.10*(1-alt)).multiplyScalar(worldDim);
+
+  // the wordmark's flight
+  // the landing: it overshoots a hair and rings to a stop, so the motion visibly
+  // RESOLVES instead of being cut off mid-flight by the white
+  let z, wobble = 0;
+  if (t < ARRIVE){ z = -760 + (760+FINAL_Z)*de; }
+  else {
+    const s2 = t - ARRIVE;
+    wobble = Math.exp(-s2/(SETTLE*0.42)) * Math.sin(s2*13.5) * 1.9;
+    z = FINAL_Z + wobble;
+  }
+  word.position.set(0, (1-de)*10 + wobble*0.12, z);
+  hot.position.copy(word.position);
+  hot.position.z += 0.01;
+  word.visible = hot.visible = t > ENTER;
+  wordMat.opacity = sstep(ENTER, ENTER+0.35, t) * (1 - white);
+  hotMat.opacity  = heat * 0.55 * (1 - white);   // keep the metal readable, don't blow it out
+  for (let i=0;i<ECHOES;i++){
+    const k = (i+1)/ECHOES;
+    const e = echoes[i];
+    e.visible = descending;
+    e.position.set(0, word.position.y + k*6*speed, z - k*46*speed - 2);
+    e.material.opacity = descending ? 0.16*(1-k)*speed : 0;
+  }
+
+  // fire + glow uniforms
+  fireMat.uniforms.uTime.value = t;
+  fireMat.uniforms.uRadius.value = 0.06 + spread*1.75;
+  // the blackout is applied to the WORLD, not to the logo: the fire, clouds and sky
+  // fall away while the wordmark keeps its sheen (this is the beat the reference nails)
+  fireMat.uniforms.uAmt.value = clamp(spread*(1.0+bloom*0.35)*Math.pow(1-dim,1.6), 0, 1.5);
+  glowMat.uniforms.uBloom.value = bloom*0.42*(1-dim)*(1-white);
+  glowMat.uniforms.uSpike.value = spike*(1-white);
+  entryMat.uniforms.uTime.value = t;
+  // the air thickens all the way down, so the sheath INTENSIFIES during the
+  // descent rather than fading, then hands off to the impact fire
+  entryMat.uniforms.uSpeed.value = descending
+    ? sstep(ENTER, ENTER+0.40, t) * (0.30 + 0.70*Math.pow(dp,0.8)) * 0.85
+    : Math.max(0, 0.85*Math.exp(-(t-ARRIVE)*5.0));
+  { const visH = 2*Math.abs(word.position.z)*Math.tan(FOV*Math.PI/360);
+    entryMat.uniforms.uExt.value.set((word.scale.x*0.46)/visH, (word.scale.y*0.21)/visH); }
+
+  // --- render ---
+  renderer.clear();
+  setFront(t >= ARRIVE);
+  renderer.render(scene, cam);                       // sky, clouds, (descending wordmark)
+  if (entryMat.uniforms.uSpeed.value > 0.001) renderer.render(entryScene, fireCam);
+  if (fireMat.uniforms.uAmt.value > 0.001) renderer.render(fireScene, fireCam);
+  renderer.render(glowScene, fireCam);               // bloom + light streak
+  if (inFront){ renderer.clearDepth(); renderer.render(frontScene, cam); }
+
+  elBlack.style.opacity = '0';   // the blackout now happens in the 3D world, above
+  elWhite.style.opacity = white.toFixed(3);
+  const k = sstep(WHT1, RESOLVE, t);
+  elFinal.style.opacity = k.toFixed(3);
+  elRule.style.width = (k*Math.min(W*0.42, 420)) + 'px';
+  btn.style.opacity = t > END ? '1' : '0';
+}
+
+resize(); play(); requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
