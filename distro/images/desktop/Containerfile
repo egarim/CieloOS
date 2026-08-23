@@ -10,8 +10,10 @@ ARG ONLYOFFICE_DEB=https://download.onlyoffice.com/install/desktop/editors/linux
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Check-Date/Valid-Until are relaxed because trial VMs can have a skewed clock.
+# xdotool + scrot are the agent's "hands and eyes" on the X11 desktop: the
+# `desktop` surface drives xdotool (click/type/key) and captures with scrot.
 RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
-    && apt-get install -y --no-install-recommends curl ca-certificates \
+    && apt-get install -y --no-install-recommends curl ca-certificates xdotool scrot \
     && curl -fsSL -o /tmp/onlyoffice.deb "$ONLYOFFICE_DEB" \
     && (dpkg -i /tmp/onlyoffice.deb || apt-get install -y -f --no-install-recommends) \
     && rm -f /tmp/onlyoffice.deb \

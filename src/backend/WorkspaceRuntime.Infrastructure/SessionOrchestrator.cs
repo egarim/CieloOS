@@ -43,7 +43,7 @@ public sealed class SessionBackendOptions
 // through the same policy-checked bus as every other command. The production
 // target (docs/ai-native-ui.md D3) swaps podman for Incus system containers;
 // the command shape and policy path are identical, so only this executor moves.
-public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend
+public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend, IDesktopBackend
 {
     private readonly SessionBackendOptions options;
 
@@ -318,6 +318,120 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             detail += $" (screen readback unavailable: {readbackFailed})";
         }
         return new ConsoleActionResult(true, screen, detail);
+    }
+
+    // --- Desktop backend: observe with scrot, act with xdotool, over podman exec.
+    // The desktop containers run an X server on :1; input/keys cross to podman as
+    // single argv entries (no host shell), so there is no host-side injection, and
+    // the blast radius is that session's container + home. ---
+    private const string DesktopDisplayEnv = "DISPLAY=:1";
+
+    public async Task<DesktopShot> ScreenshotAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)
+        {
+            return new DesktopShot(sessionId, Array.Empty<byte>(), 0, 0, false, bad.Detail);
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var capture = await RunPodmanAsync(new[] { "exec", "-e", DesktopDisplayEnv, name, "scrot", "-o", "/tmp/_wr_shot.png" }, cancellationToken);
+        if (capture.ExitCode != 0)
+        {
+            return new DesktopShot(sessionId, Array.Empty<byte>(), 0, 0, false, $"Could not capture screen: {capture.Stderr.Trim()}");
+        }
+
+        // Read the PNG back as base64 so it survives the text stdout pipe intact.
+        var encoded = await RunPodmanAsync(new[] { "exec", name, "base64", "-w0", "/tmp/_wr_shot.png" }, cancellationToken);
+        if (encoded.ExitCode != 0)
+        {
+            return new DesktopShot(sessionId, Array.Empty<byte>(), 0, 0, false, $"Could not read screenshot: {encoded.Stderr.Trim()}");
+        }
+
+        byte[] png;
+        try
+        {
+            png = Convert.FromBase64String(encoded.Stdout.Trim());
+        }
+        catch (FormatException)
+        {
+            return new DesktopShot(sessionId, Array.Empty<byte>(), 0, 0, false, "Screenshot was not valid image data.");
+        }
+
+        var (width, height) = PngSize(png);
+        return new DesktopShot(sessionId, png, width, height, true, null);
+    }
+
+    public async Task<DesktopActionResult> ClickAsync(string sessionId, int x, int y, int button, int repeat, CancellationToken cancellationToken)
+    {
+        if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)
+        {
+            return bad;
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var args = repeat > 1
+            ? new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "mousemove", x.ToString(), y.ToString(), "click", "--repeat", repeat.ToString(), button.ToString() }
+            : new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "mousemove", x.ToString(), y.ToString(), "click", button.ToString() };
+        var result = await RunPodmanAsync(args, cancellationToken);
+        return result.ExitCode == 0
+            ? new DesktopActionResult(true, $"Clicked ({x}, {y}) button {button}{(repeat > 1 ? $" x{repeat}" : "")}.")
+            : new DesktopActionResult(false, $"Click failed: {result.Stderr.Trim()}");
+    }
+
+    public async Task<DesktopActionResult> TypeTextAsync(string sessionId, string text, CancellationToken cancellationToken)
+    {
+        if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)
+        {
+            return bad;
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var result = await RunPodmanAsync(new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "type", "--clearmodifiers", "--", text }, cancellationToken);
+        return result.ExitCode == 0
+            ? new DesktopActionResult(true, $"Typed {text.Length} character(s).")
+            : new DesktopActionResult(false, $"Type failed: {result.Stderr.Trim()}");
+    }
+
+    public async Task<DesktopActionResult> KeyAsync(string sessionId, string keysym, CancellationToken cancellationToken)
+    {
+        if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)
+        {
+            return bad;
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var result = await RunPodmanAsync(new[] { "exec", "-e", DesktopDisplayEnv, name, "xdotool", "key", "--clearmodifiers", keysym }, cancellationToken);
+        return result.ExitCode == 0
+            ? new DesktopActionResult(true, $"Pressed key '{keysym}'.")
+            : new DesktopActionResult(false, $"Key failed: {result.Stderr.Trim()}");
+    }
+
+    // Returns a failure result if the session is missing or not a desktop; null when OK.
+    private async Task<DesktopActionResult?> NotDesktopAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == sessionId);
+        if (session is null)
+        {
+            return new DesktopActionResult(false, "Session not found.");
+        }
+        if (!string.Equals(session.Kind, "desktop", StringComparison.Ordinal))
+        {
+            return new DesktopActionResult(false, "Only desktop sessions accept pointer/keyboard input.");
+        }
+        return null;
+    }
+
+    // Width/height live big-endian in the PNG IHDR: 8-byte signature, then
+    // length(4)+"IHDR"(4), then width at offset 16, height at offset 20.
+    private static (int Width, int Height) PngSize(byte[] png)
+    {
+        if (png.Length < 24)
+        {
+            return (0, 0);
+        }
+        var width = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+        var height = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+        return (width, height);
     }
 
     private static string LabelOrDefault(JsonElement labels, string key, string fallback) =>

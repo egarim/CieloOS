@@ -151,27 +151,29 @@ public sealed class AgentRuntime
             }
         }
 
-        // Console I/O targets a live session; gate it on that session's owner at
-        // the same choke point, so an agent can only observe/act on its own
-        // console and a human only on a session it or its agents own. Console
-        // ops fail CLOSED: if the backend is missing or the session cannot be
-        // resolved, deny rather than let an unowned action slip through.
-        if (dto.ToolName == "console" && dto.Arguments.TryGetValue("id", out var consoleTarget))
+        // Console AND desktop I/O target a live session; gate them on that
+        // session's owner at the same choke point, so an agent can only
+        // observe/act on its own session and a human only on a session it or its
+        // agents own. These ops fail CLOSED: if the backend is missing or the
+        // session cannot be resolved, deny rather than let an unowned action slip
+        // through — a desktop click on someone else's screen is as owned as a
+        // keystroke into their console.
+        if ((dto.ToolName == "console" || dto.ToolName == "desktop") && dto.Arguments.TryGetValue("id", out var sessionTarget))
         {
             if (sessions is null)
             {
-                return Denied(request, user.Id, agent.Id, actor, "Console operations are unavailable: no session backend is configured.");
+                return Denied(request, user.Id, agent.Id, actor, $"{dto.ToolName} operations are unavailable: no session backend is configured.");
             }
 
             var target = (await sessions.ListAsync(cancellationToken))
-                .FirstOrDefault(session => string.Equals(session.Id, consoleTarget, StringComparison.Ordinal));
+                .FirstOrDefault(session => string.Equals(session.Id, sessionTarget, StringComparison.Ordinal));
             if (target is null)
             {
-                return Denied(request, user.Id, agent.Id, actor, $"Console session '{consoleTarget}' was not found.");
+                return Denied(request, user.Id, agent.Id, actor, $"Session '{sessionTarget}' was not found.");
             }
             if (!Ownership.CanAccessHome(principal, target.Owner, store))
             {
-                return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not operate the console of a session owned by '{target.Owner}'.");
+                return Denied(request, user.Id, agent.Id, actor, $"'{principal.Slug}' may not operate the {dto.ToolName} of a session owned by '{target.Owner}'.");
             }
         }
 
@@ -198,11 +200,18 @@ public sealed class AgentRuntime
                         return Denied(request, user.Id, agent.Id, actor, $"Executor rejected the request: {exception.Message}");
                     }
 
-                    // A real input ledger: for console typing, record the exact
-                    // text (truncated) the principal sent, not just "type happened".
-                    var successDetail = dto.ToolName == "console" && dto.Operation == "type"
-                        ? $"input: {Truncate(dto.Arguments.GetValueOrDefault("text", ""))}"
-                        : evaluation.Reason;
+                    // A real input ledger: record the exact input the principal
+                    // sent (console text, or desktop click coords / keystrokes),
+                    // not just "an action happened".
+                    var successDetail = evaluation.Reason;
+                    if (dto.ToolName == "console" && dto.Operation == "type")
+                    {
+                        successDetail = $"input: {Truncate(dto.Arguments.GetValueOrDefault("text", ""))}";
+                    }
+                    else if (dto.ToolName == "desktop")
+                    {
+                        successDetail = DesktopLedger(dto);
+                    }
                     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, successDetail, request.Id, actor, onBehalfOf));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, result, null, store.AuditEvents);
 
@@ -290,6 +299,16 @@ public sealed class AgentRuntime
 
     private static string Truncate(string value, int max = 200) =>
         value.Length <= max ? value : value[..max] + "…";
+
+    // The desktop input ledger: what the principal actually did on the screen.
+    private static string DesktopLedger(SubmitToolRequestDto dto) => dto.Operation switch
+    {
+        "click" or "double_click" =>
+            $"{dto.Operation} ({dto.Arguments.GetValueOrDefault("x")}, {dto.Arguments.GetValueOrDefault("y")}) button {dto.Arguments.GetValueOrDefault("button", "1")}",
+        "type" => $"type: {Truncate(dto.Arguments.GetValueOrDefault("text", ""))}",
+        "key" => $"key: {dto.Arguments.GetValueOrDefault("keysym", "")}",
+        _ => dto.Operation,
+    };
 
     private ToolRequestResultDto Denied(ToolRequest request, Guid userId, Guid agentId, string principal, string reason)
     {

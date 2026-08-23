@@ -1,0 +1,109 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "desktop",
+  "displayName": "Agent Desktop",
+  "executor": "desktop",
+  "state": {
+    "document": "surface:desktop",
+    "revisioned": false,
+    "shape": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  "commands": {
+    "click": {
+      "displayName": "Click on the desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "x": { "type": "string", "pattern": "^[0-9]{1,5}$" },
+          "y": { "type": "string", "pattern": "^[0-9]{1,5}$" },
+          "button": { "type": "string", "enum": ["1", "2", "3"] }
+        },
+        "required": ["id", "x", "y"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "A principal may drive its own desktop session; each pointer action is audited and isolation bounds the blast radius to that session. (A per-session input grant is the V0.6 hardening.)"
+      }
+    },
+    "double_click": {
+      "displayName": "Double-click on the desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "x": { "type": "string", "pattern": "^[0-9]{1,5}$" },
+          "y": { "type": "string", "pattern": "^[0-9]{1,5}$" },
+          "button": { "type": "string", "enum": ["1", "2", "3"] }
+        },
+        "required": ["id", "x", "y"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "A principal may drive its own desktop session; each pointer action is audited and isolation bounds the blast radius to that session."
+      }
+    },
+    "type": {
+      "displayName": "Type on the desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "text": { "type": "string", "maxLength": 4096 }
+        },
+        "required": ["id", "text"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "A principal may type into its own desktop session; each keystroke batch is audited and isolation bounds the blast radius to that session."
+      }
+    },
+    "key": {
+      "displayName": "Press a key on the desktop",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "keysym": { "type": "string", "pattern": "^[A-Za-z0-9_+]{1,32}$" }
+        },
+        "required": ["id", "keysym"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "A principal may send a key to its own desktop session; each keypress is audited and isolation bounds the blast radius to that session."
+      }
+    }
+  }
+}

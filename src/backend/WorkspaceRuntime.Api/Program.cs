@@ -80,6 +80,7 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
     owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>())));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<IDesktopBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
 {
     PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman"
@@ -87,6 +88,7 @@ builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(ne
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SpreadsheetSandboxExecutor>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceExecutor(provider.GetRequiredService<IDesktopBackend>()));
 builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExecutorRouter(provider.GetServices<ISurfaceExecutor>()));
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
@@ -294,6 +296,30 @@ app.MapGet("/api/sessions/{id}/console", async (string id, HttpContext context, 
         return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
     }
     return Results.Ok(await console.CaptureAsync(id, cancellationToken));
+});
+
+// Observe a DESKTOP session as a PNG screenshot — the gated read that pairs with
+// the `desktop` input surface (same ownership rule as console observe).
+app.MapGet("/api/sessions/{id}/screenshot", async (string id, HttpContext context, IDesktopBackend desktop, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var shot = await desktop.ScreenshotAsync(id, cancellationToken);
+    if (!shot.Ok)
+    {
+        return Results.Json(new { error = shot.Error }, statusCode: StatusCodes.Status409Conflict);
+    }
+    context.Response.Headers["X-Screen-Width"] = shot.Width.ToString();
+    context.Response.Headers["X-Screen-Height"] = shot.Height.ToString();
+    return Results.File(shot.Png, "image/png");
 });
 
 // Drive a console session toward a goal: the loop observes the screen, asks the
