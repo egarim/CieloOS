@@ -361,6 +361,34 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         return new DesktopShot(sessionId, png, width, height, true, null);
     }
 
+    // AT-SPI-first perception: run the in-container accessibility reader (lunos-atspi,
+    // as the desktop user so it reaches the session a11y bus) and parse its JSON.
+    public async Task<DesktopElements> ElementsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)
+        {
+            return new DesktopElements(sessionId, Array.Empty<DesktopElement>(), false, bad.Detail);
+        }
+
+        var name = options.NamePrefix + sessionId;
+        var read = await RunPodmanAsync(new[] { "exec", "-u", "abc", name, "lunos-atspi", "all" }, cancellationToken);
+        if (read.ExitCode != 0)
+        {
+            return new DesktopElements(sessionId, Array.Empty<DesktopElement>(), false, $"Accessibility read failed: {read.Stderr.Trim()}");
+        }
+
+        try
+        {
+            var elements = JsonSerializer.Deserialize<List<DesktopElement>>(
+                read.Stdout, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? new List<DesktopElement>();
+            return new DesktopElements(sessionId, elements, true, null);
+        }
+        catch (JsonException)
+        {
+            return new DesktopElements(sessionId, Array.Empty<DesktopElement>(), false, "Accessibility output was not valid JSON.");
+        }
+    }
+
     public async Task<DesktopActionResult> ClickAsync(string sessionId, int x, int y, int button, int repeat, CancellationToken cancellationToken)
     {
         if (await NotDesktopAsync(sessionId, cancellationToken) is { } bad)

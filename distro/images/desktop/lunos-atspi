@@ -1,0 +1,10 @@
+#!/bin/bash
+# Read the desktop's AT-SPI element tree as JSON. Finds the running XFCE session's
+# D-Bus so the reader can reach the accessibility bus, then runs the GI reader with
+# the SYSTEM python (the webtop's /lsiopy python cannot see apt's gi bindings).
+# Invoked by the runtime as: podman exec -u abc <container> lunos-atspi [all|active]
+P=$(pgrep -u abc -x xfce4-session | head -1)
+if [ -n "$P" ]; then
+  export $(tr '\0' '\n' < "/proc/$P/environ" | grep -E '^DBUS_SESSION_BUS_ADDRESS=')
+fi
+exec /usr/bin/python3 /usr/local/lib/lunos/atspi_gi.py "${1:-all}"

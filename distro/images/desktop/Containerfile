@@ -12,9 +12,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Check-Date/Valid-Until are relaxed because trial VMs can have a skewed clock.
 # xdotool + scrot are the agent's "hands and eyes" on the X11 desktop: the
 # `desktop` surface drives xdotool (click/type/key) and captures with scrot.
+# python3-gi + gir1.2-atspi-2.0 power AT-SPI-first grounding (the `lunos-atspi`
+# reader) — exact element boxes from the accessibility tree, so the agent clicks
+# element centers instead of guessed pixels.
 RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
     && apt-get install -y --no-install-recommends curl ca-certificates xdotool scrot \
+        python3-gi gir1.2-atspi-2.0 at-spi2-core \
     && curl -fsSL -o /tmp/onlyoffice.deb "$ONLYOFFICE_DEB" \
     && (dpkg -i /tmp/onlyoffice.deb || apt-get install -y -f --no-install-recommends) \
     && rm -f /tmp/onlyoffice.deb \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The AT-SPI grounding reader + its session-D-Bus wrapper.
+COPY atspi_gi.py /usr/local/lib/lunos/atspi_gi.py
+COPY lunos-atspi /usr/local/bin/lunos-atspi
+RUN chmod +x /usr/local/bin/lunos-atspi

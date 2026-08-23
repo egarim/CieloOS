@@ -322,6 +322,26 @@ app.MapGet("/api/sessions/{id}/screenshot", async (string id, HttpContext contex
     return Results.File(shot.Png, "image/png");
 });
 
+// AT-SPI-first observation: the desktop's actionable elements with EXACT boxes,
+// so the agent grounds on element ids, not guessed pixels (same ownership rule).
+app.MapGet("/api/sessions/{id}/elements", async (string id, HttpContext context, IDesktopBackend desktop, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var elements = await desktop.ElementsAsync(id, cancellationToken);
+    return elements.Ok
+        ? Results.Ok(new { elements.SessionId, count = elements.Elements.Count, elements.Elements })
+        : Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
+});
+
 // Drive a console session toward a goal: the loop observes the screen, asks the
 // brain (model or recipe) for the next action, and submits each keystroke batch
 // as a policy-checked, audited `console.type`. Gated on the session owner, like
