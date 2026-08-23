@@ -40,14 +40,20 @@ elif command -v podman >/dev/null && podman info >/dev/null 2>&1; then
 else
   echo "neither docker nor podman is usable (start colima, or install podman)" >&2; exit 1
 fi
-echo "==> container engine: $ENGINE"
+# Podman on an SELinux-enforcing host cannot read a bind mount without a relabel,
+# so the bundle copy fails with permission denied. Lowercase z is the shared label:
+# the same bundle is mounted into several containers here, and Z (exclusive) would
+# relabel it per container and break the next one.
+MOUNT_OPTS="ro"
+if [ "$ENGINE" = podman ]; then MOUNT_OPTS="ro,z"; fi
+echo "==> container engine: $ENGINE (mount opts: $MOUNT_OPTS)"
 
 echo "==> Building bundle ($ARCH)"
 bash "$ROOT/distro/scripts/build-release.sh" "$ARCH" >/dev/null
 STAGE="$ROOT/release/cielo"
 
 echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
-"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:$MOUNT_OPTS ubuntu:24.04 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   cp -r /bundle /work && cd /work
   bash ./install.sh --ci --mode headless
@@ -77,7 +83,7 @@ echo "==> run.sh (foreground, non-root, no systemd) in ubuntu:24.04 ($PLATFORM)"
 # The install.sh path above launches bin/WorkspaceRuntime.Api directly, so it never
 # exercises the staged launcher. Run it the way a WSL2/laptop user does: unprivileged,
 # straight from the bundle dir, and check the panel comes up and state lands in .data.
-"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:$MOUNT_OPTS ubuntu:24.04 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y >/dev/null && apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
   useradd --create-home --home-dir /home/app app
@@ -114,7 +120,7 @@ echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
 # started or verified there. What CAN be checked is that it left the right things
 # behind for first boot — this is where the image build and the restart policy are
 # deferred to, so a regression here is silent until someone reboots a real machine.
-"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+"$ENGINE" run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:$MOUNT_OPTS ubuntu:24.04 bash -euo pipefail -c '
   export DEBIAN_FRONTEND=noninteractive
   cp -r /bundle /work && cd /work
   bash ./install.sh --offline --mode headless >/dev/null 2>&1
