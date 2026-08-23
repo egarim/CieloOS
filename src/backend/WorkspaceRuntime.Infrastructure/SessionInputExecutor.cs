@@ -14,10 +14,12 @@ public sealed class SessionInputExecutor : ISurfaceExecutor
     private const int MaxMinutes = 120;
 
     private readonly ISessionInputGrants grants;
+    private readonly ISessionVisionConsent visionConsent;
 
-    public SessionInputExecutor(ISessionInputGrants grants)
+    public SessionInputExecutor(ISessionInputGrants grants, ISessionVisionConsent visionConsent)
     {
         this.grants = grants;
+        this.visionConsent = visionConsent;
     }
 
     public string SurfaceId => "session-input";
@@ -28,24 +30,34 @@ public sealed class SessionInputExecutor : ISurfaceExecutor
         switch (request.Operation)
         {
             case "grant":
-                var minutes = DefaultMinutes;
-                if (request.Arguments.TryGetValue("minutes", out var raw) && int.TryParse(raw, out var parsed))
-                {
-                    minutes = Math.Clamp(parsed, 1, MaxMinutes);
-                }
-                var grant = grants.Grant(sessionId, request.UserId, TimeSpan.FromMinutes(minutes), DateTimeOffset.UtcNow);
+                var grant = grants.Grant(sessionId, request.UserId, TimeSpan.FromMinutes(Minutes(request)), DateTimeOffset.UtcNow);
                 return Task.FromResult(new ToolExecutionResult(true,
-                    $"Input on session '{sessionId}' granted for {minutes} minute(s), until {grant.ExpiresAt:u}.", null));
+                    $"Input on session '{sessionId}' granted for {Minutes(request)} minute(s), until {grant.ExpiresAt:u}.", null));
 
             case "revoke":
                 var removed = grants.Revoke(sessionId);
                 return Task.FromResult(new ToolExecutionResult(true,
                     removed > 0 ? $"Input grant on '{sessionId}' revoked." : $"No active input grant on '{sessionId}'.", null));
 
+            case "grant-vision":
+                var consent = visionConsent.Grant(sessionId, request.UserId, TimeSpan.FromMinutes(Minutes(request)), DateTimeOffset.UtcNow);
+                return Task.FromResult(new ToolExecutionResult(true,
+                    $"Cloud vision (screenshots may leave the machine) allowed for session '{sessionId}' for {Minutes(request)} minute(s), until {consent.ExpiresAt:u}.", null));
+
+            case "revoke-vision":
+                var revokedVision = visionConsent.Revoke(sessionId);
+                return Task.FromResult(new ToolExecutionResult(true,
+                    revokedVision > 0 ? $"Cloud vision consent on '{sessionId}' revoked." : $"No active cloud vision consent on '{sessionId}'.", null));
+
             default:
                 return Task.FromResult(new ToolExecutionResult(false, $"Session-input executor rejected unknown operation '{request.Operation}'.", null));
         }
     }
+
+    private static int Minutes(ToolRequest request) =>
+        request.Arguments.TryGetValue("minutes", out var raw) && int.TryParse(raw, out var parsed)
+            ? Math.Clamp(parsed, 1, MaxMinutes)
+            : DefaultMinutes;
 
     public Task<EffectPreview> PreviewAsync(ToolRequest request, CancellationToken cancellationToken) =>
         Task.FromResult(new EffectPreview(true,

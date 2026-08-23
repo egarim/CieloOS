@@ -92,7 +92,10 @@ builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceEx
 // V0.6 per-session input grant: a time-boxed lease that upgrades desktop
 // typing/keys to Allow (in-memory: a restart drops all input authority).
 builder.Services.AddSingleton<ISessionInputGrants, InMemorySessionInputGrants>();
-builder.Services.AddSingleton<ISurfaceExecutor>(provider => new SessionInputExecutor(provider.GetRequiredService<ISessionInputGrants>()));
+builder.Services.AddSingleton<ISessionVisionConsent, InMemorySessionVisionConsent>();
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new SessionInputExecutor(
+    provider.GetRequiredService<ISessionInputGrants>(),
+    provider.GetRequiredService<ISessionVisionConsent>()));
 builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExecutorRouter(provider.GetServices<ISurfaceExecutor>()));
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
@@ -391,7 +394,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
 // + a screenshot, asks the vision brain for the next action, and submits each
 // click/keystroke as a policy-checked, audited `desktop.*` command. Gated on the
 // session owner like the console loop; per-action ownership/policy still apply.
-app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionVisionConsent visionConsent, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -405,7 +408,8 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
-    var brain = desktopBrains.Resolve(store.GetAgent(agentId));
+    var cloudVisionAllowed = visionConsent.IsAllowed(id, DateTimeOffset.UtcNow);
+    var brain = desktopBrains.Resolve(store.GetAgent(agentId), cloudVisionAllowed);
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);

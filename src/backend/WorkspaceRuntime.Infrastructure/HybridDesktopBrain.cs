@@ -44,8 +44,10 @@ public sealed class HybridDesktopBrain : IDesktopAgentBrain
             return await vision.DecideAsync(goal, elements, screenshotPng, screenWidth, screenHeight, history, step, cancellationToken);
         }
 
-        // No vision, and the target is not in the tree: stop cleanly (NOT success).
+        // No vision fallback (none configured, or a cloud one without screenshot-
+        // egress consent), and the target is not in the tree: stop cleanly.
         return new DesktopAgentAction(true, "done", null, null, null, null, null,
-            "Target not found in the accessibility tree and no vision provider is configured.", Aborted: true);
+            "Target not found in the accessibility tree and no vision fallback is available " +
+            "(grant screenshot-egress consent via session-input.grant-vision to enable cloud vision).", Aborted: true);
     }
 }

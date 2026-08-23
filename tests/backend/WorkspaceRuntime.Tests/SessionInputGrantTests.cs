@@ -99,6 +99,22 @@ public class SessionInputGrantTests
         Assert.False(grants.IsActive("s1", now));                // revoked
     }
 
+    [Fact]
+    public void Vision_consent_is_time_boxed_and_revocable()
+    {
+        var consent = new InMemorySessionVisionConsent();
+        var now = DateTimeOffset.UtcNow;
+        var user = Guid.NewGuid();
+
+        consent.Grant("s1", user, TimeSpan.FromMinutes(10), now);
+        Assert.True(consent.IsAllowed("s1", now));
+        Assert.False(consent.IsAllowed("s1", now.AddMinutes(11))); // expired
+        Assert.False(consent.IsAllowed("other", now));             // scoped to the session
+
+        Assert.Equal(1, consent.Revoke("s1"));
+        Assert.False(consent.IsAllowed("s1", now));                // revoked
+    }
+
     private sealed class NoopExecutor : ISandboxedToolExecutor
     {
         public Task<ToolExecutionResult> ExecuteAsync(ToolRequest request, CancellationToken cancellationToken) =>

@@ -12,7 +12,10 @@ namespace WorkspaceRuntime.Infrastructure;
 // the tree can't locate the target). Cached per (chat, vision) provider pair.
 public interface IDesktopBrainRegistry
 {
-    IDesktopAgentBrain Resolve(AgentProfile agent);
+    // cloudVisionAllowed reflects the session's "screenshot leaves the machine"
+    // consent; a CLOUD vision provider is only wired as the fallback when it is
+    // true (on-box vision needs no consent).
+    IDesktopAgentBrain Resolve(AgentProfile agent, bool cloudVisionAllowed);
 }
 
 public sealed class DesktopBrainRegistry : IDesktopBrainRegistry
@@ -27,10 +30,21 @@ public sealed class DesktopBrainRegistry : IDesktopBrainRegistry
         this.loggers = loggers;
     }
 
-    public IDesktopAgentBrain Resolve(AgentProfile agent)
+    public IDesktopAgentBrain Resolve(AgentProfile agent, bool cloudVisionAllowed)
     {
         var chat = models.Resolve("chat", agent);
         var vision = models.Resolve("vision", agent);
+
+        // "Screenshot leaves the machine" gate: a CLOUD vision provider is only
+        // wired when the session has consented. Without consent the brain stays
+        // AT-SPI-only, so nothing leaves the box by default.
+        if (vision is not null
+            && string.Equals(vision.Profile.Locality, "cloud", StringComparison.OrdinalIgnoreCase)
+            && !cloudVisionAllowed)
+        {
+            vision = null;
+        }
+
         var key = $"{chat?.Profile.Id ?? "none"}|{vision?.Profile.Id ?? "none"}";
         return cache.GetOrAdd(key, _ =>
         {
