@@ -71,43 +71,93 @@ workspace-agent
 
 For an AI-ready ISO, model weights should be bundled so the system can act locally on first boot. For a smaller Core ISO, the same profile can be installed without weights and pull the selected model later.
 
-## Apple Silicon VM milestone
+## Getting started (develop from source)
 
-The first bootable target is an ARM64 VM on Apple Silicon. QEMU uses macOS Hypervisor.framework acceleration and a standard UEFI boot path, so the guest architecture matches the M2 instead of slowly emulating an Intel machine.
-
-The VM opens full-screen with QEMU zoom-to-fit enabled. Leaving full-screen from QEMU's View menu produces a resizable window whose guest display scales with it. A large Terminus console font is installed for the text-only setup and recovery screens.
+Running from source needs the .NET 10 SDK and Node on your machine.
 
 ```bash
-./distro/scripts/vm-prepare.sh
-./distro/scripts/vm-run.sh --install
+./scripts/dev.sh
 ```
 
-The first command downloads and verifies Ubuntu's official ARM64 installer, caches a checksum-pinned PowerShell ARM64 archive, creates an expandable 64 GB VM disk, publishes the backend for Linux ARM64, and builds two companion ISOs: the autoinstall seed and the runtime profile. The second command opens a visible VM window.
+This starts the backend API on `http://127.0.0.1:5148` and the Vite panel on `http://127.0.0.1:5173` (the panel proxies `/api` to the backend). If a VM is already forwarding its API to 5148, pick another port: `BACKEND_PORT=5149 ./scripts/dev.sh`.
 
-The Ubuntu installer may ask for confirmation before starting unattended installation. This is intentional for the first observable setup milestone. The development username and password are both `workspace`.
+The first run is a clean, provider-free machine: open the panel and the "Claim this machine" wizard creates the first owner — there are no hardcoded users. To boot the demo identities instead, set the demo seed: `LUNOS_DEMO=1 ./scripts/dev.sh` (the script then prints their session tokens).
 
-Once installation finishes and the VM closes, boot the installed disk without setup media:
+Run the tests:
 
 ```bash
-./distro/scripts/vm-run.sh --installed
+./scripts/test.sh
 ```
 
-To evaluate the prepared reference system without retaining changes:
+That runs `dotnet test`, then the panel's vitest suite.
+
+## Deploying a release bundle (Ubuntu 24.04+)
+
+The shipping path is a self-contained bundle: build it once on a machine that has the .NET SDK + Node, then carry the tarball to any Ubuntu box (VPS, spare machine, appliance) and install it with no .NET on the target.
+
+Build:
 
 ```bash
-./distro/scripts/vm-run.sh --try
+bash distro/scripts/build-release.sh linux-x64      # or: linux-arm64
 ```
 
-Try mode uses QEMU's temporary snapshot support. The reference system disk is not modified.
+This publishes the self-contained runtime, builds the panel, stages surfaces + config + the installer + service unit + self-test, and writes `release/cielo-linux-x64.tar.gz` (or `release/cielo-linux-arm64.tar.gz`).
 
-Host connections are forwarded to:
+Install on the target:
 
-```text
-SSH: ssh -p 2222 workspace@127.0.0.1
-API: http://127.0.0.1:5148
+```bash
+tar xzf cielo-linux-x64.tar.gz
+sudo ./cielo/install.sh --mode headless             # or: app | kiosk
 ```
 
-All generated media, downloads, firmware state, logs, and virtual disks stay in `distro/.vm/` and are not committed.
+The three modes share one runtime and differ only in bind address and whether a kiosk browser is installed:
+
+| Mode | For | Binds |
+|------|-----|-------|
+| `app` | your own machine — a local browser at `http://127.0.0.1:5148/` | loopback |
+| `headless` | a VPS / LAN box — your browser + a token, over the network | all interfaces |
+| `kiosk` | an appliance that boots into a fullscreen panel browser | loopback |
+
+Options: `--mode <headless|app|kiosk>` (default `headless`), `--port <5148>`, `--ci` (container-safe install for automated tests — no systemd/linger), and `--offline` (install into a not-yet-running system, e.g. an autoinstall in-target chroot; units are enabled to start on first boot rather than started now).
+
+The first-owner claim is loopback-only by design — nobody on the network can claim your box:
+
+- **app / kiosk:** open `http://127.0.0.1:5148/` on the box; the claim wizard creates the owner (or run `cielo-claim "Your Name"`).
+- **headless:** `ssh` in and run `cielo-claim "Your Name"` — it prints your bearer token; then open `http://<host-ip>:5148/` from your laptop and sign in with that token.
+
+Add an AI provider from the panel's **Models** tab (works immediately, no restart), or set a key in `/etc/cielo/cielo.env` and restart. Add a teammate with `cielo-add-user "Their Name" <owner-token>` or the panel's add-teammate control.
+
+Verify a running system anytime (non-destructive):
+
+```bash
+cielo-selftest
+```
+
+`cielo-selftest --claim` also exercises the full first-run flow, so only point that at a throwaway or CI machine. The installer lands the runtime under `/opt/cielo` (single SQLite DB in `/opt/cielo/.data`) as the `cielo` service user; console/desktop sessions run as rootless podman containers whose images build on first use.
+
+## Autoinstall USB appliance (bare metal)
+
+To turn a spare machine into a CieloOS appliance, remaster an Ubuntu 24.04 live-server ISO into an unattended installer. On a build machine with `xorriso` and `openssl`:
+
+```bash
+bash distro/scripts/build-usb.sh --iso ubuntu-24.04-live-server-amd64.iso --mode kiosk
+```
+
+Options: `--mode <kiosk|app|headless>` (default `kiosk`), `--password <admin-pw>` (default `cielo`), and `--out <path>` (default `release/cieloos-usb.iso`). It builds the amd64 bundle, writes the autoinstall seed, and produces `release/cieloos-usb.iso`.
+
+Flash it to a USB stick — **this ERASES the stick**:
+
+```bash
+sudo dd if=release/cieloos-usb.iso of=/dev/rdiskN bs=4m
+```
+
+Boot the target from the USB. **This ERASES the target's disk**, installs Ubuntu + CieloOS unattended (`install.sh --offline`), reboots, and in kiosk mode opens the panel. The Ubuntu maintenance login is `cielo-admin` / your `--password` — distinct from the CieloOS owner you claim in the panel on first boot.
+
+## Requirements
+
+- **Install target:** Ubuntu 24.04+ (amd64 or arm64) with `podman`. No .NET needed — the runtime is self-contained. Provider-free by default; add your own key from the Models tab. Budget ~4 GB RAM and up (more only if you run a local model).
+- **Develop from source:** .NET 10 SDK + Node.
+- **Build a USB appliance:** `xorriso` + `openssl` on the build machine.
 
 ## Build stance
 
@@ -121,9 +171,11 @@ The first practical target is a repeatable Ubuntu installer plus a CieloOS runti
 
 After that works reliably, the same answers and payload become a remastered, branded ISO with a custom graphical setup experience.
 
-## Agent-guided installation
+## Agent-guided installation (superseded)
 
-The setup payload includes a neutral `workspace-installer` .NET CLI. The installation agent can directly call its JSON-only `defaults`, `probe`, `plan`, and `validate` commands; MCP is an optional future adapter rather than a requirement. The `approve` command is reserved for the trusted onboarding UI or an authenticated human console session.
+> The shipping installers are the scripts above: `build-release.sh` + `install.sh` for a bundle, and `build-usb.sh` for a bare-metal appliance. The earlier `workspace-installer` .NET CLI — together with the `vm-prepare.sh` and `vm-run.sh --install` VM flow — is superseded by them.
+
+The neutral setup-payload design still stands as future direction. The idea is that an installation agent calls JSON-only `defaults`, `probe`, `plan`, and `validate` commands, with MCP an optional adapter rather than a requirement, while the `approve` command is reserved for the trusted onboarding UI or an authenticated human console session.
 
 Plans are content-hashed. A human must approve the exact plan identifier before a separate trusted worker can perform destructive installation. The hash binds the approval to the plan but is not an authorization secret. The CLI never exposes arbitrary shell execution, and policy denies the approval operation to the agent principal.
 

@@ -40,7 +40,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 ## Features (what works today)
 
 **Identity, policy, audit**
-- Distinct human identities (joche, yulia), each **owning** an agent. The acting user/agent is derived from a per-identity bearer token, never the request body. An agent may only act as itself; a human only through agents it owns; approvals are human-only.
+- Human identities each **own** an agent — you **claim** the first owner on the box (provider-free, no hardcoded users). The acting user/agent is derived from a per-identity bearer token, never the request body. An agent may only act as itself; a human only through agents it owns; approvals are human-only.
 - **Surfaces** (schema-2 manifests in `surfaces/`): `spreadsheet`, `session`, `console`, `desktop`, `session-input`. One `ManifestPolicyEngine` is the sole policy source; mutating commands are `RequireApproval`, bound to a **hash of the exact previewed request**.
 - A full **audit log** with **dual-actor** attribution (`joche → joche-agent`) and an **input ledger** (exact console text, desktop click coordinates, keystrokes).
 
@@ -61,17 +61,18 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 
 ## Requirements
 
-**To run the OS (installed / VM):**
-- Ubuntu ARM64 or x86-64 (the dev VM is Ubuntu on QEMU/HVF), **podman**, **.NET 10** runtime.
-- **~8 GB RAM** minimum; **16 GB recommended** if running the local Bonsai model. CPU-only is fine (no GPU required).
+**To run the OS (installed / appliance):**
+- Ubuntu 24.04+ (amd64 or arm64), **podman**. **No .NET** — the release bundle is self-contained.
+- **Provider-free by default** — bring your own model key and add it from the panel's Models tab.
+- **~4 GB RAM** and up (more only if you run a local model, e.g. Bonsai). CPU-only is fine (no GPU required).
 - Optional: cloud model keys (DeepSeek / Azure OpenAI) for stronger reasoning/vision — or run **fully local** with Bonsai.
 
-**To develop:**
-- macOS (Apple Silicon) or Linux, **.NET 10 SDK**, **Node** (for the Vite panel), and for the VM workflow: **QEMU**, `xorriso`, `jq` (see `distro/scripts/check-host.sh`).
+**To develop (or to build a bundle / USB):**
+- macOS (Apple Silicon) or Linux, **.NET 10 SDK**, **Node** (for the Vite panel), and for the USB/VM tooling: **QEMU**, `xorriso` (see `distro/scripts/check-host.sh`).
 
 ## Run it
 
-Local dev (backend + panel on your machine):
+**Develop** — backend + panel from source on your machine:
 
 ```bash
 ./scripts/dev.sh
@@ -82,7 +83,32 @@ Local dev (backend + panel on your machine):
 
 `dev.sh` prints joche's token; each identity has one at `.data/secrets/<slug>.token`. Tests: `./scripts/test.sh`.
 
-Build & run the VM image: `./distro/scripts/vm-prepare.sh` then `./distro/scripts/vm-run.sh --install` (see [docs/boot-and-install-flow.md](docs/boot-and-install-flow.md)).
+**Install the release bundle** — self-contained, so the target needs no .NET. Build it on a machine with the dev prerequisites, carry the tarball to any Ubuntu 24.04+ box, then run the bundled `install.sh`:
+
+```bash
+bash distro/scripts/build-release.sh linux-x64   # or linux-arm64 → release/cielo-<arch>.tar.gz
+# on the target:
+tar xzf cielo-linux-x64.tar.gz
+sudo ./cielo/install.sh --mode app               # app | headless | kiosk
+```
+
+- **app** — your own machine; panel on loopback only.
+- **headless** — a VPS / old box; binds all interfaces, reach it with a token.
+- **kiosk** — boots into a fullscreen panel browser.
+
+**Autoinstall USB** — a bare-metal appliance that installs Ubuntu + CieloOS unattended (**erases the target disk**):
+
+```bash
+bash distro/scripts/build-usb.sh --iso ubuntu-24.04-live-server-amd64.iso --mode kiosk
+# → release/cieloos-usb.iso ; flash to USB with dd, boot the target
+```
+
+**First run — claim your machine, then add a provider.** CieloOS ships provider-free with no hardcoded users, and the first-owner claim is loopback-only (nobody on the network can claim your box):
+
+- **app / kiosk:** open http://127.0.0.1:5148/ on the box → the claim wizard.
+- **headless:** `ssh` in and run `cielo-claim "Your Name"` — it prints your bearer token; then open http://<host-ip>:5148/ from your laptop and sign in with it.
+
+Then add an AI provider from the panel's **Models** tab (works immediately, no restart). Verify anytime with `cielo-selftest` (non-destructive). Full detail: [distro/RELEASE-README.md](distro/RELEASE-README.md).
 
 ## Where it's going
 
