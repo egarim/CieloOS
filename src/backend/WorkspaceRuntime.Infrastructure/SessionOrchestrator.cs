@@ -9,8 +9,13 @@ namespace WorkspaceRuntime.Infrastructure;
 public sealed class SessionBackendOptions
 {
     public string PodmanPath { get; init; } = "podman";
-    public string Image { get; init; } = "docker.io/accetto/ubuntu-vnc-xfce-g3:latest";
-    public int ViewportPort { get; init; } = 6901;
+    // The desktop image the distro builds for THIS machine's architecture
+    // (distro/images/desktop/Containerfile). The old default,
+    // docker.io/accetto/ubuntu-vnc-xfce-g3, is published for amd64 only, so it could
+    // never start on arm64; it also served noVNC on 6901 while the image we actually
+    // build serves Selkies on 3000.
+    public string Image { get; init; } = "localhost/lunos-desktop:latest";
+    public int ViewportPort { get; init; } = 3000;
     public string NamePrefix { get; init; } = "lunos-session-";
     public string SessionLabel { get; init; } = "lunos.session=1";
 
@@ -117,6 +122,10 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         var runArguments = new List<string>
         {
             "run", "-d",
+            // Survive a host reboot: podman-restart.service brings back anything with a
+            // restart policy, and "unless-stopped" means a session the owner explicitly
+            // destroyed stays destroyed.
+            "--restart", "unless-stopped",
             "--name", name,
             "--label", options.SessionLabel,
             "--label", $"lunos.owner={owner}",
