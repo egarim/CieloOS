@@ -1,0 +1,20 @@
+[Unit]
+Description=Lun.Os runtime + panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lunos
+Group=lunos
+WorkingDirectory=/opt/lunos
+EnvironmentFile=/etc/lunos/lunos.env
+ExecStart=/opt/lunos/bin/WorkspaceRuntime.Api
+Restart=on-failure
+RestartSec=3
+# Sessions are rootless podman containers the runtime shells out to; that needs
+# the service user's runtime dir. install.sh enables linger for `lunos` (so
+# /run/user/<uid> exists) and writes XDG_RUNTIME_DIR into the EnvironmentFile.
+
+[Install]
+WantedBy=multi-user.target

@@ -10,3 +10,4 @@ dist/
 distro/.vm/
 .data/
 *.iso
+release/
