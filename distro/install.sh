@@ -20,6 +20,8 @@ set -euo pipefail
 MODE="headless"
 PORT="5148"
 CI=0        # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
+SKIP_IMAGES=0 # --skip-images: do not build the session images (faster install; sessions
+            # will not start until someone builds them)
 OFFLINE=0   # --offline: install into a not-yet-running system (autoinstall in-target/chroot):
             # enable units + linger via files, never start/daemon-reload — first boot activates.
 while [[ $# -gt 0 ]]; do
@@ -28,6 +30,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="${2:?}"; shift 2 ;;
     --ci) CI=1; shift ;;
     --offline) OFFLINE=1; shift ;;
+    --skip-images) SKIP_IMAGES=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -57,7 +60,7 @@ test -x "$BUNDLE/bin/WorkspaceRuntime.Api" || { echo "Run this from the unpacked
 # app/kiosk are single-machine → bind loopback; headless → bind all interfaces.
 if [[ "$MODE" == "headless" ]]; then BIND="http://0.0.0.0:$PORT"; else BIND="http://127.0.0.1:$PORT"; fi
 
-echo "==> [1/6] Dependencies"
+echo "==> [1/8] Dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 if [[ "$CI" -eq 1 ]]; then
@@ -68,7 +71,7 @@ else
   apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
 fi
 
-echo "==> [2/6] Service user 'cielo' + rootless podman prerequisites"
+echo "==> [2/8] Service user 'cielo' + rootless podman prerequisites"
 if ! id -u cielo >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/cielo --shell /bin/bash cielo
 fi
@@ -83,20 +86,105 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
 fi
 CIELO_UID="$(id -u cielo)"
 
-echo "==> [3/6] Install to /opt/cielo"
+echo "==> [3/8] Session images (built here so they match this machine's architecture)"
+# The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
+# to arm64; on an x64 target that would install a foreign-architecture .deb, which
+# either fails or gets masked by apt-get -f and silently ships no editor.
+case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+  arm64|aarch64) OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_arm64.deb" ;;
+  *)             OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb" ;;
+esac
+
+# The runtime now defaults to these local tags, so an install that cannot build them
+# has no working sessions at all. Stage the sources and a first-boot unit that builds
+# whatever is missing: that covers --offline (chroot, no podman yet) and recovers from
+# a build that failed here.
+if [[ -d "$BUNDLE/images" ]]; then
+  install -d -o cielo -g cielo /var/lib/cielo/images
+  cp -a "$BUNDLE/images/." /var/lib/cielo/images/
+  chown -R cielo:cielo /var/lib/cielo/images
+  cat > /etc/systemd/system/cielo-session-images.service <<UNIT
+[Unit]
+Description=Build the CieloOS session images if they are missing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cielo
+Environment=XDG_RUNTIME_DIR=/run/user/${CIELO_UID}
+ExecStart=/usr/local/bin/cielo-build-session-images
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  cat > /usr/local/bin/cielo-build-session-images <<SCRIPT
+#!/usr/bin/env bash
+# Builds any missing session image. Safe to re-run: present images are left alone.
+set -euo pipefail
+OO_DEB="${OO_DEB}"
+for img in console desktop; do
+  if podman image exists "localhost/lunos-\$img:latest"; then continue; fi
+  args=(build -t "localhost/lunos-\$img:latest")
+  if [[ "\$img" == "desktop" ]]; then args+=(--build-arg "ONLYOFFICE_DEB=\${OO_DEB}"); fi
+  podman "\${args[@]}" "/var/lib/cielo/images/\$img"
+done
+SCRIPT
+  chmod +x /usr/local/bin/cielo-build-session-images
+  # Not under --ci: that mode installs no podman, so the unit could only fail.
+  [[ "$CI" -eq 1 ]] || enable_unit cielo-session-images.service || true
+fi
+
+if [[ "$CI" -eq 1 ]]; then
+  echo "    (skipped: --ci)"
+elif [[ "$OFFLINE" -eq 1 ]]; then
+  echo "    (deferred: --offline; cielo-session-images.service builds them on first boot)"
+elif [[ "$SKIP_IMAGES" -eq 1 ]]; then
+  echo "    (skipped: --skip-images; cielo-session-images.service will build them at next boot)"
+elif [[ ! -d "$BUNDLE/images" ]]; then
+  echo "    (no images/ in this bundle - skipping)"
+else
+  echo "    building now (this takes a while); first boot would otherwise do it"
+  runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    /usr/local/bin/cielo-build-session-images >/dev/null || {
+      echo "    WARNING: image build failed here; cielo-session-images.service retries at boot." >&2; }
+fi
+
+echo "==> [4/8] Session restart policy"
+# Sessions are created with --restart=unless-stopped; podman-restart.service is what
+# acts on that after a reboot. Without it the runtime comes back and every session is
+# dead. This is a USER unit for cielo, so offline installs get the wants-symlink
+# written directly rather than being skipped: systemctl cannot run in a chroot.
+if [[ "$CI" -eq 1 ]]; then
+  echo "    (skipped: --ci)"
+elif [[ "$OFFLINE" -eq 1 ]]; then
+  install -d -o cielo -g cielo /var/lib/cielo/.config/systemd/user/default.target.wants
+  ln -sf /usr/lib/systemd/user/podman-restart.service \
+    /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
+  chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
+  echo "    podman-restart linked for cielo (activates on first boot)"
+else
+  runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    systemctl --user enable podman-restart.service >/dev/null 2>&1 \
+    && echo "    podman-restart enabled for cielo" \
+    || echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
+fi
+
+echo "==> [5/8] Install to /opt/cielo"
 install -d /opt/cielo
 cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cielo/
 install -d -o cielo -g cielo /opt/cielo/.data
 chown -R cielo:cielo /opt/cielo
 
-echo "==> [4/6] Environment ($MODE, $BIND)"
+echo "==> [6/8] Environment ($MODE, $BIND)"
 install -d /etc/cielo
 sed -e "s#UID_PLACEHOLDER#${CIELO_UID}#" \
     -e "s#^ASPNETCORE_URLS=.*#ASPNETCORE_URLS=${BIND}#" \
     "$BUNDLE/cielo.env.example" > /etc/cielo/cielo.env
 chmod 0640 /etc/cielo/cielo.env
 
-echo "==> [5/6] systemd service"
+echo "==> [7/8] systemd service"
 cp "$BUNDLE/systemd/cielo-runtime.service" /etc/systemd/system/cielo-runtime.service
 if [[ "$CI" -eq 1 ]]; then
   echo "    (--ci: service file installed but not started; the harness runs the binary directly)"
@@ -134,7 +222,7 @@ EOF
 chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
-echo "==> [6/6] Presentation mode: $MODE"
+echo "==> [8/8] Presentation mode: $MODE"
 if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
   # Minimal Wayland kiosk: `cage` runs a single fullscreen app (chromium) as cielo.
   # (Least-packages GUI; shake this out on the actual hardware/GPU.)

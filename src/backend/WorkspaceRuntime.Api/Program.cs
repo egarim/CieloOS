@@ -89,8 +89,8 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
     new SessionBackendOptions
     {
         PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman",
-        Image = builder.Configuration["Sessions:Image"] ?? "docker.io/accetto/ubuntu-vnc-xfce-g3:latest",
-        ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 6901,
+        Image = builder.Configuration["Sessions:Image"] ?? "localhost/lunos-desktop:latest",
+        ViewportPort = int.TryParse(builder.Configuration["Sessions:ViewportPort"], out var vp) ? vp : 3000,
         // The desktop chat launcher needs a URL reachable FROM the session container,
         // where the host's loopback is not the host. Default: take Chat:Url and swap a
         // loopback host for podman's host alias. Override with Sessions:ChatUrl.

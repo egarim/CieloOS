@@ -9,8 +9,13 @@ namespace WorkspaceRuntime.Infrastructure;
 public sealed class SessionBackendOptions
 {
     public string PodmanPath { get; init; } = "podman";
-    public string Image { get; init; } = "docker.io/accetto/ubuntu-vnc-xfce-g3:latest";
-    public int ViewportPort { get; init; } = 6901;
+    // The desktop image the distro builds for THIS machine's architecture
+    // (distro/images/desktop/Containerfile). The old default,
+    // docker.io/accetto/ubuntu-vnc-xfce-g3, is published for amd64 only, so it could
+    // never start on arm64; it also served noVNC on 6901 while the image we actually
+    // build serves Selkies on 3000.
+    public string Image { get; init; } = "localhost/lunos-desktop:latest";
+    public int ViewportPort { get; init; } = 3000;
     public string NamePrefix { get; init; } = "lunos-session-";
     public string SessionLabel { get; init; } = "lunos.session=1";
 
@@ -117,6 +122,10 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         var runArguments = new List<string>
         {
             "run", "-d",
+            // Survive a host reboot: podman-restart.service brings back anything with a
+            // restart policy, and "unless-stopped" means a session the owner explicitly
+            // destroyed stays destroyed.
+            "--restart", "unless-stopped",
             "--name", name,
             "--label", options.SessionLabel,
             "--label", $"lunos.owner={owner}",
@@ -140,6 +149,23 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         runArguments.Add("-p");
         runArguments.Add($"127.0.0.1::{containerPort}");
         runArguments.Add(image);
+
+        // A missing image is the expected state right after an --offline/--skip-images
+        // install, while cielo-session-images.service is still building. Say that,
+        // rather than surfacing raw podman stderr about an unknown image.
+        // Only for localhost/ tags: those can never be pulled, so a miss is fatal and
+        // worth explaining. A remote reference is left to podman, which pulls it on run.
+        var localOnlyImage = image.StartsWith("localhost/", StringComparison.Ordinal);
+        var imagePresent = localOnlyImage
+            ? await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken)
+            : (ExitCode: 0, Stdout: "", Stderr: "");
+        if (imagePresent.ExitCode != 0)
+        {
+            return new ToolExecutionResult(false,
+                $"The {(isConsole ? "console" : "desktop")} session image '{image}' is not available yet. If this machine was just " +
+                "installed it is still building (systemctl status cielo-session-images); otherwise build " +
+                "it with /usr/local/bin/cielo-build-session-images.", null);
+        }
 
         var run = await RunPodmanAsync(runArguments.ToArray(), cancellationToken);
 

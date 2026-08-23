@@ -41,6 +41,10 @@ cp "$ROOT/distro/run.sh" "$STAGE/run.sh"
 cp "$ROOT/distro/scripts/cielo-selftest.sh" "$STAGE/cielo-selftest.sh"
 cp "$ROOT/distro/services/cielo-runtime.service" "$STAGE/systemd/cielo-runtime.service"
 cp "$ROOT/distro/config/cielo.env.example" "$STAGE/cielo.env.example"
+# The session images are BUILT ON THE TARGET so they match its architecture and
+# carry the agent's tooling; install.sh needs their Containerfiles to do that.
+mkdir -p "$STAGE/images"
+cp -a "$ROOT/distro/images/." "$STAGE/images/"
 cp "$ROOT/distro/RELEASE-README.md" "$STAGE/README.md" 2>/dev/null || true
 chmod +x "$STAGE/install.sh" "$STAGE/run.sh" "$STAGE/cielo-selftest.sh"
 
