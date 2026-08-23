@@ -1,85 +1,100 @@
 # Lun.Os
 
-Lun.Os is the product brand for a rename-safe workspace runtime prototype. The
-implementation uses neutral `WorkspaceRuntime` identifiers so the commercial name
-can change later without invasive refactoring; branding is loaded from
-`config/branding.json`.
+**An operating system built to be operated by AI.**
 
-Lun.Os is an **operating system built to be operated by AI** — not by making a
-GUI automatable, but by making automation unnecessary: humans and agents emit the
-**same typed, policy-checked commands onto one bus**, and the visible UI is a
-projection of that contract. Software joins Lun.Os by speaking the contract
-(tools and surfaces), not as opaque GUI apps. Every action — a human click, an
-agent's API call, a keystroke into a console — passes one policy engine
-(`Allow` / `Deny` / `RequireApproval`) and lands on one audit trail.
+Not by bolting automation onto a GUI, but by making automation unnecessary: humans and AI agents emit the **same typed, policy-checked commands onto one bus**, and every action — a human click, an agent's API call, a keystroke into a console, a click on a desktop — passes **one policy engine** (`Allow` / `Deny` / `RequireApproval`) and lands on **one audit trail**. The UI is a projection of that contract; software joins Lun.Os by speaking the contract, not as an opaque app.
 
-Thesis: **typed where possible, pixels where necessary, policy everywhere.** See
-[`docs/ai-native-ui.md`](docs/ai-native-ui.md) for the design laws, decisions,
-and roadmap.
+> Thesis: **typed where possible, pixels where necessary, policy everywhere.**
 
-## What works today
+*(“Lun.Os” is the product brand; the code uses neutral `WorkspaceRuntime` identifiers so the name can change without refactoring. Branding loads from `config/branding.json`.)*
 
-- **Identity & ownership.** Real distinct identities (joche, yulia), each
-  **owning** an agent. Per-identity file-backed bearer tokens; the acting
-  user/agent is derived from the token, not the request body. An agent may only
-  act as itself; a human only through agents it owns; approvals are human-only.
-- **Surfaces** (schema-2 manifests under `surfaces/`): `spreadsheet`, `session`,
-  and `console`. `ManifestPolicyEngine` is the single policy source; commands
-  carry `RequireApproval` where they mutate; approvals are **hash-bound** with
-  dry-run **effect-diff previews**. Revisioned state + ETag + SSE (`/api/events`).
-- **Sessions.** One rootless **podman** container per session over a **per-owner
-  persistent home volume** (the home is the primitive; a session is a view of
-  it). Two kinds: a **console** (ttyd + tmux) and a **desktop** (webtop XFCE).
-  **Inhabiting** — an owner can *shadow* or *become* an owned agent's session,
-  recorded with **dual-actor** audit (`joche → joche-agent`).
-- **The agent-desk panel.** A left rail of your desks (you + the agents you own),
-  each anchored on its home: files, sessions, activity, and pending approvals.
-  A **"give the agent a task"** console with a live screen view.
-- **Agent-driven console loop.** An agent operates its **own** console —
-  observe the screen (`tmux capture-pane`), decide, type (`tmux send-keys`) —
-  where every keystroke is a policy-checked, audited `console.type`. The brain is
-  **pluggable** (`IConsoleAgentBrain`): a cloud model (DeepSeek, OpenAI-compatible)
-  today, local models planned. The console sandbox has real tools (`curl`, `jq`,
-  `w3m`, `python3` + `openpyxl`) and a `websearch` command backed by a
-  self-hosted **SearXNG** service, so it does real web work (e.g. *"search the
-  top 10 posts about El Salvador and make an Excel file"*) with real data.
-- **Persistence & audit.** SQLite by default, PostgreSQL via configuration (see
-  [`docs/local-dev.md`](docs/local-dev.md)); a full audit log with dual-actor
-  attribution.
+---
 
-## Run locally
+## The problem we solve
 
-From the repository root:
+AI agents that "use a computer" today drive it through **screenshots and guessed pixel clicks** — unreliable, ungoverned, and unauditable. You can't see what the agent is allowed to do, prove what it did, or stop it typing a command an on-screen popup told it to.
+
+Lun.Os makes an agent a **first-class, governed OS citizen**:
+
+- It acts through the **same command bus** a human does — so ownership, policy, and audit apply to *every* action, not just the ones an app chose to expose.
+- It grounds on the desktop's **accessibility tree** (exact element boxes) first, using pixels only as a fallback — so clicks are precise, not guessed.
+- Dangerous actions (typing, keystrokes) require the owner's consent; a **time-boxed input grant** lets the agent work autonomously under one-time approval, revocable at any moment.
+
+**Who it's for:** anyone who wants an **AI coworker on a real desktop** — doing research, driving apps (spreadsheets, office docs), operating a console — where the human *owns* the agent, *consents* to what it touches, and can *audit* everything it did.
+
+## How it works (the flow)
+
+Everything funnels through one choke point (`AgentRuntime.SubmitAsync`): it binds the acting agent to the requesting user, checks the manifest policy, enforces session ownership, consults input grants, and appends a dual-actor audit event.
+
+- **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — the system map (bus, surfaces, sessions, brains, models, identities).
+- **[docs/boot-and-install-flow.md](docs/boot-and-install-flow.md)** — install (autoinstall → services), every-boot bring-up, and session-create on demand.
+
+```text
+Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ executor ─▶ audit
+                                     │                                 │
+                                  surfaces                         session containers
+                          (spreadsheet · session ·             (console: ttyd+tmux |
+                           console · desktop · session-input)    desktop: XFCE+Selkies)
+```
+
+## Features (what works today)
+
+**Identity, policy, audit**
+- Distinct human identities (joche, yulia), each **owning** an agent. The acting user/agent is derived from a per-identity bearer token, never the request body. An agent may only act as itself; a human only through agents it owns; approvals are human-only.
+- **Surfaces** (schema-2 manifests in `surfaces/`): `spreadsheet`, `session`, `console`, `desktop`, `session-input`. One `ManifestPolicyEngine` is the sole policy source; mutating commands are `RequireApproval`, bound to a **hash of the exact previewed request**.
+- A full **audit log** with **dual-actor** attribution (`joche → joche-agent`) and an **input ledger** (exact console text, desktop click coordinates, keystrokes).
+
+**Sessions**
+- One rootless **podman** container per session over a **persistent per-owner home volume** (+ a shared owner↔agent volume). Two kinds: **console** (ttyd + tmux) and **desktop** (webtop XFCE + Selkies, with ONLYOFFICE and the agent's hands/eyes: `xdotool`, `scrot`, AT-SPI).
+- **Inhabiting** — an owner can *shadow* or *become* an owned agent's session, dual-actor audited.
+
+**Agents that do real work**
+- **Console loop** — the agent operates its own console (observe `tmux capture-pane` → decide → type `tmux send-keys`), every keystroke a governed `console.type`. Real tools: `curl`, `jq`, `python3`+`openpyxl`, `python-docx/pptx`, and a private **web search** (self-hosted **SearXNG**) — e.g. *"search the top posts about X and make a spreadsheet."*
+- **Desktop loop** — the agent uses the GUI: **AT-SPI-first grounding** (exact element boxes → click the element, not a guessed pixel), with a **vision-model fallback** only for what the accessibility tree can't see. Clicks are autonomous; **typing/keys require the owner's consent**.
+- **Input grant** — a human leases input on a session for N minutes; while live, the agent **types autonomously**; revocable, time-boxed, audited (the V0.6 consent model).
+
+**Models — layered & replaceable** ([docs/model-config.md](docs/model-config.md))
+- One capability-based registry resolves a provider per capability (**chat / vision / embedding**) through a cascade **agent → user → OS**. Providers are tagged by capability and **locality** (`on-box` / `remote-self-hosted` / `cloud`).
+- Ships with **DeepSeek** and **Azure OpenAI gpt-4.1-mini** (cloud) and **local Bonsai-4B** (llama.cpp, on-box). AT-SPI-first means the **default desktop path needs no vision model and nothing leaves the box**.
+
+**The panel** — an agent-desk: a rail of your desks (you + owned agents), each anchored on its home (files, sessions, activity, pending approvals), plus a "give the agent a task" console with a live view.
+
+## Requirements
+
+**To run the OS (installed / VM):**
+- Ubuntu ARM64 or x86-64 (the dev VM is Ubuntu on QEMU/HVF), **podman**, **.NET 10** runtime.
+- **~8 GB RAM** minimum; **16 GB recommended** if running the local Bonsai model. CPU-only is fine (no GPU required).
+- Optional: cloud model keys (DeepSeek / Azure OpenAI) for stronger reasoning/vision — or run **fully local** with Bonsai.
+
+**To develop:**
+- macOS (Apple Silicon) or Linux, **.NET 10 SDK**, **Node** (for the Vite panel), and for the VM workflow: **QEMU**, `xorriso`, `jq` (see `distro/scripts/check-host.sh`).
+
+## Run it
+
+Local dev (backend + panel on your machine):
 
 ```bash
 ./scripts/dev.sh
 ```
 
 - Backend API: http://127.0.0.1:5148/api/branding
-- Frontend panel: http://127.0.0.1:5173
+- Panel: http://127.0.0.1:5173
 
-`dev.sh` prints joche's session token; each identity has its own at
-`.data/secrets/<slug>.token`. Run the tests with `./scripts/test.sh`.
+`dev.sh` prints joche's token; each identity has one at `.data/secrets/<slug>.token`. Tests: `./scripts/test.sh`.
+
+Build & run the VM image: `./distro/scripts/vm-prepare.sh` then `./distro/scripts/vm-run.sh --install` (see [docs/boot-and-install-flow.md](docs/boot-and-install-flow.md)).
 
 ## Where it's going
 
-- **Hands and eyes** ([`docs/hands-and-eyes.md`](docs/hands-and-eyes.md)) —
-  step 1 (console tools + private search) ships today; step 2 is a **local-only
-  desktop-control agent** (AT-SPI-first perception + a vision-model fallback,
-  perception→text→decision, a `/dev/uinput` injection daemon, Ollama models) so
-  the agent uses a real desktop like a person.
-- **Live image** ([`docs/live-image.md`](docs/live-image.md)) — a bootable,
-  multi-arch (x86-64 / Raspberry Pi / Apple-Silicon-in-UTM) Lun.Os to run on real
-  hardware.
-- The production session backend moves from podman to Incus system containers;
-  the command shape and policy path are unchanged (only the executor moves).
+Design laws, decisions, and the milestone roadmap live in [docs/ai-native-ui.md](docs/ai-native-ui.md). Near-term: the per-user **models config surface** and a **"screenshot-leaves-the-machine" consent** for cloud vision (model-config.md Phase 3); agent **memory** on the audit substrate; and the move from podman to **Incus** system containers (same command shape, only the executor moves).
 
-## Distro (early)
+## Documentation
 
-The Linux distribution work lives under `distro/` (an Ubuntu profile, session
-image `distro/images/console/`, the SearXNG service `distro/services/searxng/`,
-and neutral system services). Agent-guided setup uses the `workspace-installer`
-CLI; the agent never receives a free-form installer shell — approval is a
-separate operation reserved for the trusted onboarding surface (see
-[`docs/agent-guided-installation.md`](docs/agent-guided-installation.md)). This
-layer is early and still aspirational relative to the runtime above.
+| Doc | What |
+|---|---|
+| [architecture-diagram.md](docs/architecture-diagram.md) | System map — the one bus and everything on it |
+| [boot-and-install-flow.md](docs/boot-and-install-flow.md) | Install, boot, and session-create flows |
+| [model-config.md](docs/model-config.md) | Layered, capability-based model configuration |
+| [ai-native-ui.md](docs/ai-native-ui.md) | Design laws, decisions, roadmap |
+| [architecture.md](docs/architecture.md) · [local-dev.md](docs/local-dev.md) | Runtime internals · running & auth |
+| [hands-and-eyes.md](docs/hands-and-eyes.md) · [model-selection.md](docs/model-selection.md) | Desktop control · model/provider profiles |
