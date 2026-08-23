@@ -19,10 +19,12 @@ set -euo pipefail
 
 MODE="headless"
 PORT="5148"
+CI=0   # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="${2:?}"; shift 2 ;;
     --port) PORT="${2:?}"; shift 2 ;;
+    --ci) CI=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -38,7 +40,13 @@ if [[ "$MODE" == "headless" ]]; then BIND="http://0.0.0.0:$PORT"; else BIND="htt
 echo "==> [1/6] Dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
+if [[ "$CI" -eq 1 ]]; then
+  # Automated test only needs what the runtime + helpers use; podman/session bits
+  # can't be exercised in a plain container anyway.
+  apt-get install -y --no-install-recommends curl ca-certificates
+else
+  apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
+fi
 
 echo "==> [2/6] Service user 'lunos' + rootless podman prerequisites"
 if ! id -u lunos >/dev/null 2>&1; then
@@ -46,7 +54,8 @@ if ! id -u lunos >/dev/null 2>&1; then
 fi
 grep -q '^lunos:' /etc/subuid || usermod --add-subuids 100000-165535 lunos
 grep -q '^lunos:' /etc/subgid || usermod --add-subgids 100000-165535 lunos
-loginctl enable-linger lunos
+# linger (so /run/user/<uid> exists for rootless podman) needs systemd — skip in CI.
+[[ "$CI" -eq 1 ]] || loginctl enable-linger lunos
 LUNOS_UID="$(id -u lunos)"
 
 echo "==> [3/6] Install to /opt/lunos"
@@ -64,8 +73,12 @@ chmod 0640 /etc/lunos/lunos.env
 
 echo "==> [5/6] systemd service"
 cp "$BUNDLE/systemd/lunos-runtime.service" /etc/systemd/system/lunos-runtime.service
-systemctl daemon-reload
-systemctl enable --now lunos-runtime.service
+if [[ "$CI" -eq 1 ]]; then
+  echo "    (--ci: service file installed but not started; the harness runs the binary directly)"
+else
+  systemctl daemon-reload
+  systemctl enable --now lunos-runtime.service
+fi
 
 # On-box claim + add-user helpers (curl to loopback — no extra binary needed).
 cat > /usr/local/bin/lunos-claim <<EOF
@@ -89,9 +102,10 @@ curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/users" \
 echo
 EOF
 chmod +x /usr/local/bin/lunos-claim /usr/local/bin/lunos-add-user
+install -m 0755 "$BUNDLE/lunos-selftest.sh" /usr/local/bin/lunos-selftest
 
 echo "==> [6/6] Presentation mode: $MODE"
-if [[ "$MODE" == "kiosk" ]]; then
+if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
   # Minimal Wayland kiosk: `cage` runs a single fullscreen app (chromium) as lunos.
   # (Least-packages GUI; shake this out on the actual hardware/GPU.)
   apt-get install -y --no-install-recommends cage seatd chromium-browser || \
@@ -123,8 +137,12 @@ fi
 
 echo
 echo "================ Lun.Os installed ($MODE) ================"
-systemctl --no-pager --lines=0 status lunos-runtime.service || true
+if [[ "$CI" -eq 0 ]]; then
+  systemctl --no-pager --lines=0 status lunos-runtime.service || true
+fi
 echo
+echo "Verify anytime with:  lunos-selftest            (non-destructive)"
+echo "                      lunos-selftest --claim    (throwaway machine only)"
 echo "First-owner claim (loopback-only — do it on this box):"
 if [[ "$MODE" == "headless" ]]; then
   echo "  ssh in and run:   lunos-claim \"Your Name\""
