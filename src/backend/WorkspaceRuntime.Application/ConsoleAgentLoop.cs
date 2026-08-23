@@ -102,7 +102,10 @@ public sealed class ConsoleAgentLoop
         Guid userId,
         Guid agentId,
         IConsoleAgentBrain brain,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        // Called as each step lands, so a caller can stream progress instead of
+        // waiting for the whole loop. Optional: nothing else in the loop changes.
+        Func<ConsoleLoopStep, Task>? onStep = null)
     {
         var steps = new List<ConsoleLoopStep>();
         var history = new List<string>();
@@ -120,7 +123,9 @@ public sealed class ConsoleAgentLoop
             var action = await brain.DecideAsync(goal, view.Screen, history, step, cancellationToken);
             if (action.Done)
             {
-                steps.Add(new ConsoleLoopStep(step, view.Screen, null, false, true, action.Note, "Done", "Agent reported the goal complete."));
+                var doneStep = new ConsoleLoopStep(step, view.Screen, null, false, true, action.Note, "Done", "Agent reported the goal complete.");
+                steps.Add(doneStep);
+                if (onStep is not null) await onStep(doneStep);
                 return new ConsoleLoopResult(sessionId, goal, true, "Agent reported the goal complete.", steps);
             }
 
@@ -146,7 +151,9 @@ public sealed class ConsoleAgentLoop
                 principal,
                 cancellationToken);
 
-            steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, result.Decision.ToString(), result.Reason));
+            var typedStep = new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, result.Decision.ToString(), result.Reason);
+            steps.Add(typedStep);
+            if (onStep is not null) await onStep(typedStep);
             history.Add($"typed: {text}");
             recent.Add(text);
             if (recent.Count > 2)

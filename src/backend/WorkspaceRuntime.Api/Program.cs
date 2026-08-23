@@ -855,38 +855,26 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     var session = (await sessions.ListAsync(cancellationToken))
         .FirstOrDefault(s => string.Equals(s.Owner, agent.Slug, StringComparison.Ordinal) && s.Kind == "console" && s.Status == "running");
 
-    string content;
-    if (session is null)
-    {
-        content = "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
-    }
-    else
-    {
-        var goal =
-            $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
-            "If you can answer from what you already know, just answer — do not touch the console. " +
-            "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
-            "~/shared), then give the answer. Put your full reply in the note when you finish.";
-        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+    const string noSession =
+        "I don't have a running console session to work in yet. Open one from the agent's desk (Sessions → agent-console) and message me again.";
 
+    var goal =
+        $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
+        "If you can answer from what you already know, just answer — do not touch the console. " +
+        "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
+        "~/shared), then give the answer. Put your full reply in the note when you finish.";
+
+    // The reply travels as JSON on the finishing step, so newlines, quotes and code
+    // blocks survive. outbox.md remains a fallback for agents that still write it.
+    async Task<string> ReplyOfAsync(ConsoleLoopResult run)
+    {
         var owner = Ownership.RootUserSlug(caller.Slug, store);
         var outbox = await home.ReadSharedAsync(owner, "outbox.md", cancellationToken);
-        // The answer now comes back through JSON on the finishing step, so newlines, quotes
-        // and code blocks survive. outbox.md remains a fallback for agents that still write it.
         var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
-        var reply = finished?.Note?.Trim()
+        return finished?.Note?.Trim()
             ?? (outbox is not null && !string.IsNullOrWhiteSpace(outbox.Content) ? outbox.Content.Trim() : null)
             ?? run.Steps.LastOrDefault(step => step.Note is not null)?.Note
             ?? run.StopReason;
-
-        var actions = string.Join("\n", run.Steps
-            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
-            .Select(step => $"› `{step.Text}`"));
-        // The answer leads; what the agent typed is kept but folded away - it is context,
-        // not the reply itself.
-        content = string.IsNullOrEmpty(actions)
-            ? reply
-            : $"{reply}\n\n<details>\n<summary>What the agent did</summary>\n\n{actions}\n\n</details>";
     }
 
     if (request.Stream == true)
@@ -899,11 +887,59 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
             model = "lunos-agent",
             choices = new[] { new { index = 0, delta, finish_reason = finish } }
         };
-        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { role = "assistant", content }, null), agentJson)}\n\n", cancellationToken);
-        await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(Chunk(new { }, "stop"), agentJson)}\n\n", cancellationToken);
+        async Task SendAsync(object payload)
+        {
+            await context.Response.WriteAsync($"data: {JsonSerializer.Serialize(payload, agentJson)}\n\n", cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
+        }
+
+        await SendAsync(Chunk(new { role = "assistant", content = "" }, null));
+
+        if (session is null)
+        {
+            await SendAsync(Chunk(new { content = noSession }, null));
+        }
+        else
+        {
+            // Emit each command as the agent runs it, so a long turn shows progress
+            // instead of a silent wait, then the answer itself.
+            var typed = 0;
+            var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken,
+                async step =>
+                {
+                    if (step.Done || string.IsNullOrWhiteSpace(step.Text)) return;
+                    typed++;
+                    await SendAsync(Chunk(new { content = $"› `{step.Text}`\n" }, null));
+                });
+
+            var reply = await ReplyOfAsync(run);
+            await SendAsync(Chunk(new { content = typed > 0 ? $"\n{reply}" : reply }, null));
+        }
+
+        await SendAsync(Chunk(new { }, "stop"));
         await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);
         await context.Response.Body.FlushAsync(cancellationToken);
         return Results.Empty;
+    }
+
+    string content;
+    if (session is null)
+    {
+        content = noSession;
+    }
+    else
+    {
+        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+        var reply = await ReplyOfAsync(run);
+
+        var actions = string.Join("\n", run.Steps
+            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
+            .Select(step => $"› `{step.Text}`"));
+        // The answer leads; what the agent typed is kept but folded away - it is
+        // context, not the reply itself.
+        content = string.IsNullOrEmpty(actions)
+            ? reply
+            : $"{reply}\n\n<details>\n<summary>What the agent did</summary>\n\n{actions}\n\n</details>";
     }
 
     return Results.Ok(new
