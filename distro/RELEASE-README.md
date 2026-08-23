@@ -20,15 +20,22 @@ sudo ./cielo/install.sh --mode headless   # or: app | kiosk
 ### Or run it as an app — no root, no systemd
 
 ```
-tar xzf cielo-linux-arm64.tar.gz
-./cielo/run.sh                 # or: PORT=6000 ./cielo/run.sh
+tar xzf cielo-linux-<arch>.tar.gz    # linux-arm64 on ARM, linux-x64 on Intel/AMD
+./cielo/run.sh                       # or: PORT=6000 ./cielo/run.sh
 ```
 
-Same runtime as `install.sh --mode app`, but foreground (Ctrl-C stops it) with all
-state in `<bundle>/.data` — no `/opt`, no service, no `sudo`. This is the path for
-**WSL2 on Windows**, including Windows-on-ARM (use the `linux-arm64` bundle): WSL
-forwards `localhost`, so the Windows browser reaches the loopback bind and the
-first-run claim works. Step-by-step: `docs/wsl-quickstart.md` in the repo.
+Same runtime as `install.sh --mode app`, but foreground (Ctrl-C stops it) with the
+control plane's state in `<bundle>/.data` — no `/opt`, no service, no `sudo`. This is
+the path for **WSL2 on Windows**, including Windows-on-ARM (use the `linux-arm64`
+bundle): WSL forwards `localhost`, so the Windows browser reaches the loopback bind
+and the first-run claim works.
+
+Note that `run.sh` installs no helper commands — `cielo-claim` / `cielo-add-user` /
+`cielo-selftest` come from `install.sh`. On this path, claim and add teammates from
+the panel, and run the bundled `./cielo/cielo-selftest.sh` directly.
+
+Step-by-step for Windows: `docs/wsl-quickstart.md` in the repository
+(https://github.com/egarim/CieloOS/blob/main/docs/wsl-quickstart.md).
 
 ## First owner (loopback-only, by design)
 
@@ -43,7 +50,9 @@ Add a teammate later: `cielo-add-user "Their Name" <owner-token>` (or the panel)
 
 ## Notes
 
-- Provider-free and single SQLite DB under `/opt/cielo/.data` (or `<bundle>/.data` with `run.sh`).
+- Provider-free and single SQLite DB under `/opt/cielo/.data` (or `<bundle>/.data` with
+  `run.sh`). Session containers keep their images and named volumes in podman storage
+  outside either location, so removing the install/bundle does not remove those.
 - Sessions are rootless podman containers; their images build on first use (or
   prebuild them from the distro Containerfiles as the `cielo` user).
 - Dogfood posture: plain HTTP, token-gated. For a VPS, put it behind TLS (a reverse

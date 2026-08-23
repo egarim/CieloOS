@@ -17,6 +17,9 @@ From zero to the claim wizard is five steps.
 wsl --install -d Ubuntu-24.04
 ```
 
+Run this in an **Administrator** PowerShell — installing WSL enables Windows optional
+features and needs elevation (and usually a reboot).
+
 Reboot if it asks, then open **Ubuntu** from the Start menu and create your Linux
 user. Confirm you're on WSL **2** (WSL 1 has no real kernel and won't do):
 
@@ -46,9 +49,15 @@ tar xzf cielo-linux-arm64.tar.gz
 ./cielo/run.sh                 # or: PORT=6000 ./cielo/run.sh
 ```
 
-`run.sh` stays in the foreground (Ctrl-C stops it) and keeps **all** its state in
-`cielo/.data` — the SQLite DB and secrets. Nothing is written to `/opt`, no service
-is registered, and it never asks for `sudo`. Delete the folder and it's gone.
+`run.sh` stays in the foreground (Ctrl-C stops it) and keeps its **control-plane**
+state in `cielo/.data` — the SQLite DB and secrets. Nothing is written to `/opt`, no
+service is registered, and it never asks for `sudo`.
+
+> If you later create sessions, podman stores their images and named volumes under
+> `~/.local/share/containers`, **outside** the bundle. Deleting the bundle folder
+> removes the control plane, not those — clean them up with `podman volume ls` /
+> `podman volume rm lunos-home-<owner>` and `podman system prune` if you want the
+> disk space back.
 
 ## 4. Open the panel in your Windows browser
 
@@ -100,8 +109,13 @@ Sessions__ViewportPort=3000 \
   Selkies on **3000**, so without this the session's viewport button points at a dead
   port.
 
-The image is ~3.4 GB, so the first `create` is a long download; pull it ahead of time
-with `podman pull` and each click after that starts in seconds. Note that stock webtop
+The image is ~3.4 GB, so the first `create` is a long download. Pull it ahead of time
+and each click after that starts in seconds:
+
+```bash
+podman pull lscr.io/linuxserver/webtop:ubuntu-xfce
+```
+ Note that stock webtop
 is **not** `lunos-desktop`: it lacks the `xdotool` / `scrot` / AT-SPI tooling (and
 ONLYOFFICE) that `distro/images/desktop/Containerfile` layers on, so a human can use
 the desktop but an agent cannot drive it.
@@ -147,7 +161,7 @@ root nor systemd, which is why it exists as a separate script rather than a flag
 | `wsl -l -v` shows version 1 | `wsl --set-version Ubuntu-24.04 2` |
 | `run.sh: cannot execute: required file not found` | The file has CRLF endings (copied through Windows tooling): `sed -i 's/\r$//' cielo/run.sh` |
 | `Exec format error` | Wrong arch bundle. Check `uname -m`: `aarch64` → `linux-arm64`, `x86_64` → `linux-x64`. |
-| Browser can't reach `localhost:5148` | Make sure `run.sh` is still running, and that nothing else holds the port; try `PORT=6000 ./cielo/run.sh`. |
+| Browser can't reach `localhost:5148` | Make sure `run.sh` is still running, and that nothing else holds the port. If you switch ports with `PORT=6000 ./cielo/run.sh`, open `http://localhost:6000/` — the port you launch with is the port you browse to. |
 | Sessions never start | Install podman (above); the rest of the panel works without it. |
 
 ## Status

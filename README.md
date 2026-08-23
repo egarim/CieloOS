@@ -97,11 +97,11 @@ sudo ./cielo/install.sh --mode app               # app | headless | kiosk
 - **headless** — a VPS / old box; binds all interfaces, reach it with a token.
 - **kiosk** — boots into a fullscreen panel browser.
 
-**Run it as an app, no root and no systemd** — the same bundle, foreground, state in `cielo/.data`. This is the WSL2 path (including Windows-on-ARM: build `linux-arm64`):
+**Run it as an app, no root and no systemd** — the same bundle, foreground, control-plane state in `cielo/.data` (podman keeps any session volumes outside it). This is the WSL2 path (including Windows-on-ARM: build `linux-arm64`):
 
 ```bash
-tar xzf cielo-linux-arm64.tar.gz
-./cielo/run.sh                                   # → http://localhost:5148/
+tar xzf cielo-linux-<arch>.tar.gz               # linux-arm64 on ARM, linux-x64 on Intel/AMD
+./cielo/run.sh                                  # → http://localhost:5148/
 ```
 
 See [docs/wsl-quickstart.md](docs/wsl-quickstart.md) to go from a stock Windows machine to the claim wizard.

@@ -64,4 +64,40 @@ docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash 
   kill "$RUNTIME_PID" 2>/dev/null
   exit $rc
 '
-echo "==> PASS: install + first-run verified on Linux ($ARCH)"
+echo "==> run.sh (foreground, non-root, no systemd) in ubuntu:24.04 ($PLATFORM)"
+# The install.sh path above launches bin/WorkspaceRuntime.Api directly, so it never
+# exercises the staged launcher. Run it the way a WSL2/laptop user does: unprivileged,
+# straight from the bundle dir, and check the panel comes up and state lands in .data.
+docker run --rm --platform "$PLATFORM" -v "$STAGE":/bundle:ro ubuntu:24.04 bash -euo pipefail -c '
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -y >/dev/null && apt-get install -y --no-install-recommends curl ca-certificates >/dev/null
+  useradd --create-home --home-dir /home/app app
+  cp -r /bundle /home/app/cielo && chown -R app:app /home/app/cielo
+  test -x /home/app/cielo/run.sh || { echo "run.sh is not executable in the bundle"; exit 1; }
+
+  runuser -u app -- /home/app/cielo/run.sh >/tmp/run.log 2>&1 &
+  RUN_PID=$!
+
+  ok=0
+  for i in $(seq 1 90); do
+    if curl -fsS http://127.0.0.1:5148/api/setup/status >/dev/null 2>&1; then ok=1; break; fi
+    if ! kill -0 "$RUN_PID" 2>/dev/null; then echo "run.sh EXITED EARLY:"; cat /tmp/run.log; exit 1; fi
+    sleep 1
+  done
+  [ "$ok" = "1" ] || { echo "run.sh NEVER BECAME READY:"; tail -40 /tmp/run.log; exit 1; }
+
+  # It must serve the panel and keep its state inside the bundle, not /opt.
+  curl -fsS http://127.0.0.1:5148/ | grep -q "id=.root." || { echo "panel not served by run.sh"; exit 1; }
+  test -f /home/app/cielo/.data/workspace-runtime.db || { echo "run.sh did not create .data/workspace-runtime.db"; exit 1; }
+  test ! -e /opt/cielo || { echo "run.sh wrote to /opt/cielo"; exit 1; }
+
+  # A bad port must fail fast rather than surfacing an opaque bind error.
+  if runuser -u app -- /home/app/cielo/run.sh --port 99999 >/dev/null 2>&1; then
+    echo "run.sh accepted an out-of-range port"; exit 1
+  fi
+
+  kill "$RUN_PID" 2>/dev/null
+  echo "  run.sh OK (non-root, panel served, state in .data)"
+'
+
+echo "==> PASS: install + run.sh + first-run verified on Linux ($ARCH)"
