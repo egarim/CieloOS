@@ -29,7 +29,15 @@ model story is provider-free (add your own key in the Models tab, no restart).
   (2026-08-23): built `linux-arm64` in WSL2 Ubuntu 24.04 (aarch64), ran `./cielo/run.sh`
   as a non-root user, reached the claim wizard from the Windows browser at
   `http://localhost:5148/` (WSL forwards loopback, so the claim gate is satisfied);
-  `cielo-selftest` 4/4. Sessions/podman not exercised. See docs/wsl-quickstart.md.
+  `cielo-selftest` 4/4. See docs/wsl-quickstart.md.
+- ⬜ **Session defaults are amd64-only.** Verified on arm64: `Sessions:Image` defaults to
+  `accetto/ubuntu-vnc-xfce-g3:latest` (published for amd64 ONLY) and `Sessions:ViewportPort`
+  defaults to `6901`, while `distro/images/desktop/Containerfile` builds on webtop, which
+  serves Selkies on **3000**. So on any ARM host (WSL2, Apple Silicon) desktop sessions
+  cannot start, and the viewport port would be wrong even if they did. Rootless podman
+  itself is fine on arm64/WSL (no systemd, no XDG_RUNTIME_DIR needed); with
+  `Sessions__Image=lscr.io/linuxserver/webtop:ubuntu-xfce Sessions__ViewportPort=3000` a
+  `human-desktop` session starts and serves. Pick a multi-arch default and align the port.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 10/10 pass on native Linux.
   `distro/scripts/test-install-vm.sh` runs the x86-64 bundle in a full-system qemu
