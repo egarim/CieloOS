@@ -251,6 +251,16 @@ cat > /usr/local/bin/cielo-build-desk-image <<'EOF'
 # user is the wrong default. The panel starts this too; it is here for the box.
 set -euo pipefail
 id="${1:?Usage: cielo-build-desk-image <profile>}"
+
+# Rootless podman keeps a store PER USER. Built as root, the image would land in
+# root's store and be invisible to the runtime, which runs as cielo — so the
+# session would still say the image is missing, with the image sitting right
+# there. Drop to cielo the way the session-image builder does.
+if [[ "$(id -u)" -eq 0 ]]; then
+  exec runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" \
+    /usr/local/bin/cielo-build-desk-image "$id"
+fi
+
 context="/var/lib/cielo/images/profiles/${id}"
 test -d "$context" || { echo "No desk profile '${id}' under /var/lib/cielo/images/profiles." >&2; exit 2; }
 

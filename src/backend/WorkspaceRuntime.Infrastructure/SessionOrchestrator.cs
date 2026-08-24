@@ -129,7 +129,12 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         // The console is the same lightweight terminal for every desk; only the
         // desktop carries a toolchain, so only the desktop varies by desk profile.
         var desk = resolveDeskProfile?.Invoke(owner) ?? DeskProfiles.Default;
-        var image = isConsole ? options.ConsoleImage : desk.Image;
+        // Only a profile with an image of its OWN overrides the configured desktop
+        // image: Sessions:Image is how a deployment or a test points the default
+        // desk somewhere else, and a desk profile must not quietly take that away.
+        var image = isConsole
+            ? options.ConsoleImage
+            : desk.NeedsOwnImage ? desk.Image : options.Image;
         var containerPort = isConsole ? options.ConsolePort : options.ViewportPort;
         var homePath = isConsole ? options.ConsoleHomePath : options.HomePath;
 
@@ -271,11 +276,31 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             return false;
         }
 
-        // One build at a time per profile; a second click must not start a second
-        // multi-gigabyte build over the top of the first.
-        if (!imageBuilds.TryAdd(profile.Id, "building"))
+        // One build at a time per profile — a second click must not start a second
+        // multi-gigabyte build over the first — but a build that FAILED has to be
+        // retryable, or a network blip means the desk can never be built again
+        // without a restart.
+        while (true)
         {
-            return imageBuilds[profile.Id] == "building";
+            if (imageBuilds.TryGetValue(profile.Id, out var status))
+            {
+                if (status == "building")
+                {
+                    return true;
+                }
+
+                if (imageBuilds.TryUpdate(profile.Id, "building", status))
+                {
+                    break;
+                }
+
+                continue; // Someone else changed it between the read and the write.
+            }
+
+            if (imageBuilds.TryAdd(profile.Id, "building"))
+            {
+                break;
+            }
         }
 
         var context = Path.Combine(imagesRoot, profile.Id);
