@@ -1072,7 +1072,7 @@ function App() {
                             <span className="fileName">{entry.name}</span>
                             <span className="fileSize">{entry.kind === "directory" ? "" : `${entry.size} B`}</span>
                           </button>
-                          {entry.kind !== "directory" && (
+                          {(entry.kind === "file" || entry.kind === "link") && (
                             <button
                               className="fileDownload"
                               data-automation-id={`download-${entry.name}`}

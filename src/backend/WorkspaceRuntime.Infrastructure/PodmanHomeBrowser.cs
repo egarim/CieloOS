@@ -25,6 +25,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
     // the session can swap a path component in between — so the check is on the
     // open descriptor itself, which cannot be swapped out from under us.
     //
+    // The type check before the open is a separate hazard: opening a FIFO for
+    // reading blocks until a writer appears, and a session can leave one in its own
+    // home. That check is by name and so racy on its own, which is why every caller
+    // also bounds how long it will wait for the open to complete.
+    //
     // $1 is the (podman-controlled) mountpoint, $2 the sanitized relative path.
     // Neither is interpolated into the script; only our own fixed operations are.
     private const string Guard = """
@@ -35,6 +40,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         if [ -n "$relative" ]; then
           target="$mount/$relative"
         fi
+        kind="$(stat -L -c '%F' -- "$target")"
+        case "$kind" in
+          'regular file'|'regular empty file'|'directory') ;;
+          *) exit 9 ;;
+        esac
         exec 3< "$target"
         opened="$(readlink /proc/self/fd/3)"
         case "$opened" in
@@ -98,7 +108,7 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
                 continue;
             }
 
-            var kind = columns[0] switch { "d" => "directory", "l" => "link", _ => "file" };
+            var kind = columns[0] switch { "d" => "directory", "l" => "link", "f" => "file", _ => "special" };
             _ = long.TryParse(columns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
             var epoch = columns[2].Split('.', 2)[0];
             _ = long.TryParse(epoch, NumberStyles.Integer, CultureInfo.InvariantCulture, out var modified);
@@ -240,12 +250,18 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         // Nobody reads stderr, and a full pipe would wedge `cat` mid-file.
         _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
 
+        // A download may legitimately stream for a long time, so it cannot run under
+        // a `timeout`; what is bounded instead is the wait for that first byte. If
+        // the open blocks — a FIFO slipped in behind the type check — the marker
+        // never arrives and this becomes a 404 rather than a stuck request.
         var stream = process.StandardOutput.BaseStream;
         var marker = new byte[1];
         int read;
+        using var openWait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        openWait.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
-            read = await stream.ReadAsync(marker, cancellationToken);
+            read = await stream.ReadAsync(marker, openWait.Token);
         }
         catch
         {
@@ -288,8 +304,12 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         return real.Length == 0 ? null : real;
     }
 
+    // `timeout` is the backstop for the one thing the guard cannot prevent by
+    // itself: if the target turns into a FIFO between the type check and the open,
+    // the open blocks forever. Listing and previewing are meant to be instant, so a
+    // ceiling costs nothing and turns a hung request into a plain "not readable".
     private Task<(int ExitCode, string Stdout, string Stderr)> RunGuardedAsync(string mount, string relative, string operation, CancellationToken cancellationToken) =>
-        RunPodmanAsync(new[] { "unshare", "bash", "-c", Guard + "\n" + operation, "cielo-browse", mount, relative }, cancellationToken);
+        RunPodmanAsync(new[] { "unshare", "timeout", "15", "bash", "-c", Guard + "\n" + operation, "cielo-browse", mount, relative }, cancellationToken);
 
     private Process? StartPodman(string[] arguments)
     {
