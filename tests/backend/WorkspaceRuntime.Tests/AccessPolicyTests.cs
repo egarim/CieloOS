@@ -26,6 +26,7 @@ public class AccessPolicyTests
     [InlineData("/api/auth/login", "POST", AccessLevel.Public)]
     [InlineData("/api/auth/logout", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/auth/password", "POST", AccessLevel.HumanOnly)]
+    [InlineData("/api/keys", "GET", AccessLevel.HumanOnly)]
     [InlineData("/api/keys", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/keys/00000000-0000-0000-0000-000000000001", "DELETE", AccessLevel.HumanOnly)]
     [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]

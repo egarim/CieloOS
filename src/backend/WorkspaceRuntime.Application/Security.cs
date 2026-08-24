@@ -66,8 +66,11 @@ public static class AccessPolicy
         // is an owner's decision, not something an agent can set off.
         // Sessions and keys belong to the person, so these are human-only: an
         // agent must not be able to mint a credential or end a session.
-        if ((isPost || isDelete) && (path.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase)
-            || path == "/api/keys" || path.StartsWith("/api/keys/", StringComparison.OrdinalIgnoreCase)))
+        // READING them is human-only too: the list is an inventory of a person's
+        // credentials and where they are signed in, and an agent token or an API
+        // key handing that over is the same disclosure as letting it change them.
+        if (path.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase)
+            || path == "/api/keys" || path.StartsWith("/api/keys/", StringComparison.OrdinalIgnoreCase))
         {
             return AccessLevel.HumanOnly;
         }
