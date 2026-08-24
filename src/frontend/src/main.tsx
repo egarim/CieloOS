@@ -1,6 +1,6 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowRight, Bot, Check, Cpu, KeyRound, Loader2, ShieldCheck, Terminal, User, UserPlus, X } from "lucide-react";
+import { ArrowRight, Bot, Check, Cpu, Download, KeyRound, Loader2, ShieldCheck, Terminal, User, UserPlus, X } from "lucide-react";
 import "./styles.css";
 
 type Branding = {
@@ -50,7 +50,7 @@ type InferenceStatus = {
 type SessionView = { id: string; owner: string; profile: string; status: string; viewportPort: number; kind: string };
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
-type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number };
+type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
 type Whoami = { slug: string; display: string; kind: string; homes: string[] };
 type ConsoleView = { sessionId: string; screen: string; available: boolean; detail?: string | null };
 type LoopStep = { step: number; text: string | null; submit: boolean; done: boolean; note?: string | null; decision: string; reason: string };
@@ -614,6 +614,38 @@ function App() {
     }
   }
 
+  // Taking a file off the machine. Every call carries the bearer token, so this
+  // cannot be a plain <a href> — fetch the bytes with the header, then hand the
+  // browser a blob to save under the file's own name.
+  async function downloadEntry(name: string, path: string) {
+    const url = filesMode === "shared"
+      ? `/api/shared/download?path=${encodeURIComponent(path)}`
+      : `/api/home/${encodeURIComponent(filesOwner)}/download?path=${encodeURIComponent(path)}`;
+    try {
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${readToken() ?? ""}` } });
+      if (response.status === 401) {
+        signOut();
+        return;
+      }
+      if (!response.ok) {
+        setFilesError(`Could not download '${name}'.`);
+        return;
+      }
+      const href = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement("a");
+      anchor.href = href;
+      anchor.download = name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      // Revoking immediately can race the browser's own read of the blob, so let
+      // the save finish first; the URL is per-download and dies with the page.
+      window.setTimeout(() => URL.revokeObjectURL(href), 60_000);
+    } catch (error) {
+      setFilesError(String(error));
+    }
+  }
+
   function homeCrumbs(): { label: string; path: string }[] {
     const crumbs = [{ label: "~", path: "" }];
     let acc = "";
@@ -1030,24 +1062,51 @@ function App() {
                       <p className="muted">Empty</p>
                     ) : (
                       listing.entries.map((entry) => (
-                        <button
-                          key={entry.name}
-                          className="fileRow"
-                          data-automation-id={`file-${entry.name}`}
-                          onClick={() => openHomeEntry(entry)}
-                        >
-                          <span className="fileKind">{entry.kind === "directory" ? "▸" : "·"}</span>
-                          <span className="fileName">{entry.name}</span>
-                          <span className="fileSize">{entry.kind === "directory" ? "" : `${entry.size} B`}</span>
-                        </button>
+                        <div key={entry.name} className="fileRowWrap">
+                          <button
+                            className="fileRow"
+                            data-automation-id={`file-${entry.name}`}
+                            onClick={() => openHomeEntry(entry)}
+                          >
+                            <span className="fileKind">{entry.kind === "directory" ? "▸" : "·"}</span>
+                            <span className="fileName">{entry.name}</span>
+                            <span className="fileSize">{entry.kind === "directory" ? "" : `${entry.size} B`}</span>
+                          </button>
+                          {(entry.kind === "file" || entry.kind === "link") && (
+                            <button
+                              className="fileDownload"
+                              data-automation-id={`download-${entry.name}`}
+                              title={`Download ${entry.name}`}
+                              onClick={() => downloadEntry(entry.name, filesPath ? `${filesPath}/${entry.name}` : entry.name)}
+                            >
+                              <Download size={14} aria-hidden />
+                              <span className="srOnly">Download {entry.name}</span>
+                            </button>
+                          )}
+                        </div>
                       ))
                     )}
                   </div>
                 )}
                 {filePreview && (
                   <div className="filePreview">
-                    <p className="muted small">{filePreview.path}{filePreview.truncated ? " (truncated)" : ""}</p>
-                    <pre>{filePreview.content}</pre>
+                    <p className="muted small">
+                      {filePreview.path}{filePreview.truncated ? " (truncated)" : ""}
+                      <button
+                        className="fileDownloadLink"
+                        data-automation-id="preview-download"
+                        onClick={() => downloadEntry(filePreview.path.split("/").pop() ?? filePreview.path, filePreview.path)}
+                      >
+                        <Download size={13} aria-hidden /> Download
+                      </button>
+                    </p>
+                    {filePreview.binary ? (
+                      <p className="muted small">
+                        A binary file ({filePreview.size} B) — download it to open in the right application.
+                      </p>
+                    ) : (
+                      <pre>{filePreview.content}</pre>
+                    )}
                   </div>
                 )}
               </div>

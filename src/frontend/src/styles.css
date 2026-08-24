@@ -905,30 +905,80 @@ button.crumb:hover {
   overflow: hidden auto;
 }
 
-button.fileRow {
+/* The row is a wrapper, not a button: opening and downloading are two actions,
+   and a button cannot legally contain another one. */
+.fileRowWrap {
   align-items: center;
   background: var(--panel);
-  border: 0;
   border-bottom: 1px solid var(--hairline);
+  display: flex;
+}
+
+.fileRowWrap:last-child {
+  border-bottom: 0;
+}
+
+.fileRowWrap:hover {
+  background: var(--paper);
+}
+
+button.fileRow {
+  align-items: center;
+  background: transparent;
+  border: 0;
   border-radius: 0;
   color: var(--ink);
   cursor: pointer;
   display: grid;
+  flex: 1;
   font: inherit;
   gap: 10px;
   grid-template-columns: 16px 1fr auto;
   justify-items: start;
   min-height: 0;
+  min-width: 0;
   padding: 8px 12px;
   text-align: left;
 }
 
-button.fileRow:last-child {
-  border-bottom: 0;
+button.fileDownload {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  display: flex;
+  margin-right: 8px;
+  padding: 6px;
 }
 
-button.fileRow:hover {
-  background: var(--paper);
+button.fileDownload:hover {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+button.fileDownloadLink {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  gap: 4px;
+  margin-left: 8px;
+  padding: 0;
+  vertical-align: middle;
+}
+
+.srOnly {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 }
 
 .fileKind {
