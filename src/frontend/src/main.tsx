@@ -132,6 +132,20 @@ function readToken(): string | null {
 
 class UnauthorizedError extends Error {}
 
+// Every authenticated request needs these, including the ones that cannot go
+// through api() because they read a stream or a blob rather than JSON. The panel
+// header is what makes the runtime honour the session cookie at all, so a fetch
+// that forgets it is a 401 for anyone signed in with a password — which is now
+// the normal way to sign in.
+function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  const token = readToken();
+  return {
+    "X-Cielo-Panel": "1",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...extra
+  };
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = readToken();
   const response = await fetch(path, {
@@ -165,6 +179,9 @@ function App() {
   // A cookie session cannot be read from JavaScript, so "am I signed in" is a
   // question only the runtime can answer — asked once on load.
   const [session, setSession] = React.useState(false);
+  // Set while a sign-out is in flight, so the session probe below cannot race it
+  // and re-declare the panel signed in against a cookie about to be revoked.
+  const signingOut = React.useRef(false);
   const [loginError, setLoginError] = React.useState<string | null>(null);
   // First-run setup: null while we ask the runtime whether it has an owner yet.
   const [setupClaimed, setSetupClaimed] = React.useState<boolean | null>(null);
@@ -217,16 +234,24 @@ function App() {
 
   // Signing out now ENDS the session server-side. Clearing local storage never
   // invalidated anything: the token stayed valid forever (issue #9, point 3).
-  const signOut = React.useCallback(() => {
-    const stored = readToken();
-    void fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "X-Cielo-Panel": "1", ...(stored ? { Authorization: `Bearer ${stored}` } : {}) }
-    }).catch(() => undefined);
+  // Awaited, not fired and forgotten: clearing the state first would restart the
+  // "am I signed in?" probe, which could answer YES against a cookie the server
+  // has not revoked yet and leave the panel looking signed in.
+  const signOut = React.useCallback(async () => {
+    signingOut.current = true;
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: authHeaders()
+      });
+    } catch {
+      // A logout we could not deliver still clears this browser.
+    }
     window.localStorage.removeItem(TOKEN_KEY);
     setToken(null);
     setSession(false);
+    signingOut.current = false;
   }, []);
 
   // A cookie session is invisible to JavaScript, so ask the runtime once on load
@@ -236,7 +261,7 @@ function App() {
     let alive = true;
     fetch("/api/whoami", { credentials: "same-origin", headers: { "X-Cielo-Panel": "1" } })
       .then((response) => {
-        if (alive && response.ok) setSession(true);
+        if (alive && !signingOut.current && response.ok) setSession(true);
       })
       .catch(() => undefined);
     return () => {
@@ -344,7 +369,8 @@ function App() {
       while (!closed) {
         try {
           const response = await fetch("/api/events", {
-            headers: { Authorization: `Bearer ${readToken() ?? ""}` },
+            headers: authHeaders(),
+            credentials: "same-origin",
             signal: controller.signal
           });
           if (response.status === 401 || !response.body) return;
@@ -606,7 +632,8 @@ function App() {
     try {
       await fetch(`/api/desk-profiles/${encodeURIComponent(id)}/build`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${readToken() ?? ""}` }
+        headers: authHeaders(),
+        credentials: "same-origin"
       });
       setDeskProfiles(await api<DeskProfileView[]>("/api/desk-profiles"));
     } catch (error) {
@@ -808,7 +835,7 @@ function App() {
       ? `/api/shared/download?path=${encodeURIComponent(path)}`
       : `/api/home/${encodeURIComponent(filesOwner)}/download?path=${encodeURIComponent(path)}`;
     try {
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${readToken() ?? ""}` } });
+      const response = await fetch(url, { headers: authHeaders(), credentials: "same-origin" });
       if (response.status === 401) {
         signOut();
         return;
