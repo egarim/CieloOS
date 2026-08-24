@@ -58,6 +58,18 @@ model story is provider-free (add your own key in the Models tab, no restart).
   Still unverified: the service actually starting on a real first boot (the image
   pull happens there), and a full chat round-trip through Open WebUI's own UI —
   the wiring was verified against `/v1/agent/models` with the same token instead.
+- ✅ **The desktop looks like CieloOS (2026-08-24).** The session image seeds a
+  light, macOS-adjacent look from Ubuntu packages only (Orchis-Light, Papirus-Light,
+  Breeze_Light, Inter, Plank) plus a vector wallpaper rasterised at build. Verified
+  by screenshot on arm64 across seven builds, and the seed is a first-run default:
+  a session whose theme was changed by hand kept that change across a restart.
+  Two things this cost, both recorded because they will bite again: the wallpaper
+  key is named after the *monitor*, whose name is decided at session start
+  (`screen` here, `selkies-primary` in an older config), so it is set at runtime
+  from `xrandr` rather than seeded; and Plank reads **dconf**, not the settings
+  file it writes, so its theme ships as a dconf system default.
+  Still open: a screenshot smoke test, so a webtop base-image update cannot
+  silently undo the layout.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 12/12 pass on native Linux, and it
   asserts the chat is installed, loopback-bound, follows a moved port on reinstall,

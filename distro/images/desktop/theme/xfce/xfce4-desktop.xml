@@ -1,0 +1,25 @@
+<?xml version="1.1" encoding="UTF-8"?>
+
+<!--
+  No backdrop entry on purpose. The key XFCE stores the wallpaper under contains
+  the monitor's NAME, and that name is decided by the X server at session start
+  (`screen` here, `selkies-primary` and `monitorVirtual-1` on other webtop/X
+  versions). A seeded name that does not match is not an error — xfdesktop simply
+  ignores it and the desktop stays stock, which is exactly the failure this file
+  used to cause. /usr/local/bin/cielo-wallpaper asks xrandr and sets the real one.
+-->
+<channel name="xfce4-desktop" version="1.0">
+  <property name="last-settings-migration-version" type="uint" value="1"/>
+
+  <!-- An office desk, not a Linux desktop: the home folder is useful, the root
+       filesystem is a way to break things by accident. -->
+  <property name="desktop-icons" type="empty">
+    <property name="file-icons" type="empty">
+      <property name="show-filesystem" type="bool" value="false"/>
+      <property name="show-home" type="bool" value="true"/>
+      <property name="show-trash" type="bool" value="true"/>
+      <property name="show-removable" type="bool" value="true"/>
+    </property>
+    <property name="icon-size" type="uint" value="40"/>
+  </property>
+</channel>

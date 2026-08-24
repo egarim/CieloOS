@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The CieloOS desktop background. Cielo is sky, so: daylight, not a photograph.
+  Deliberately quiet in the middle third, where windows sit, and quiet again
+  behind the top bar and the dock — a busy wallpaper makes a light theme look
+  cheap and makes text on the panel hard to read.
+
+  Vector on purpose: it rasterises at build time to whatever size we want, and a
+  gradient this smooth would be a large PNG to carry in git.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e8f0fa"/>
+      <stop offset="45%" stop-color="#f2f6fb"/>
+      <stop offset="100%" stop-color="#fbfaf7"/>
+    </linearGradient>
+
+    <radialGradient id="dawn" cx="0.18" cy="0.12" r="0.75">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="55%" stop-color="#dce9f8" stop-opacity="0.45"/>
+      <stop offset="100%" stop-color="#dce9f8" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="warm" cx="0.86" cy="0.88" r="0.7">
+      <stop offset="0%" stop-color="#fbf1e2" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#fbf1e2" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="arc" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#9db8d8" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#9db8d8" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#9db8d8" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="2560" height="1440" fill="url(#sky)"/>
+  <rect width="2560" height="1440" fill="url(#dawn)"/>
+  <rect width="2560" height="1440" fill="url(#warm)"/>
+
+  <!-- Two horizons, far apart and far from the centre: enough to give the light
+       a direction without competing with anything a person opens. -->
+  <path d="M -200 300 Q 1280 90 2760 300" fill="none" stroke="url(#arc)" stroke-width="2"/>
+  <path d="M -200 1210 Q 1280 1010 2760 1210" fill="none" stroke="url(#arc)" stroke-width="2" opacity="0.6"/>
+</svg>

@@ -1,0 +1,44 @@
+#!/usr/bin/with-contenv bash
+# Seeds the CieloOS look into a session's /config before the desktop starts.
+#
+# Why here and not `xfconf-query` later: XFCE reads these channels at session
+# start. Setting them against a running session half-applies — the dock appears,
+# the panel and wallpaper do not, and restarting the panel by hand fails outright.
+#
+# Why only once: /config is the session's persistent volume. Seeding on every
+# start would silently undo whatever the person changed, so a marker file makes
+# this a first-run default rather than a policy.
+set -eu
+
+MARKER=/config/.cielo-theme-v1
+if [[ -f "$MARKER" ]]; then
+  exit 0
+fi
+
+# A session that predates this image has a populated /config and no marker, and
+# copying over it would destroy settings the person already has — the very thing
+# the marker exists to prevent, missed by one release. An existing XFCE config is
+# the tell: this init runs before the desktop starts, so on a genuinely new
+# volume nothing has created it yet. Mark it and leave it alone.
+if [[ -d /config/.config/xfce4 ]]; then
+  echo "existing session: leaving its settings alone" > "$MARKER"
+  chown "${PUID:-911}:${PGID:-911}" "$MARKER"
+  exit 0
+fi
+
+install -d /config/.config/xfce4/xfconf/xfce-perchannel-xml
+install -d /config/.config/autostart
+install -d /config/.config/plank/dock1/launchers
+
+cp -f /opt/cielo-theme/xfce/*.xml /config/.config/xfce4/xfconf/xfce-perchannel-xml/
+cp -f /opt/cielo-theme/autostart/*.desktop /config/.config/autostart/
+install -d /config/.config/gtk-3.0
+cp -f /opt/cielo-theme/gtk-3.0/gtk.css /config/.config/gtk-3.0/gtk.css
+cp -f /opt/cielo-theme/plank/launchers/*.dockitem /config/.config/plank/dock1/launchers/
+
+: > "$MARKER"
+
+# Everything under /config belongs to the desktop user, not to root — an
+# unwritable config directory is how you get a session that starts and then
+# forgets every setting.
+chown -R "${PUID:-911}:${PGID:-911}" /config/.config "$MARKER"

@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Sets the desktop background, from inside the running session.
+#
+# The wallpaper is the one XFCE setting a seeded file cannot reliably carry: the
+# key contains the monitor's name, and that name is not stable. This image alone
+# has produced `monitorselkies-primary`, while other X servers and webtop versions
+# produce `monitorVirtual-1` or `monitor0`. So ask the live channel what keys it
+# has rather than guessing, and set every one of them.
+set -uo pipefail
+
+# This runs unattended in a session nobody is watching, and its failure mode is
+# silent — the desktop simply looks stock. The log is how that gets diagnosed
+# without rebuilding the image to add prints.
+exec >>"${HOME:-/config}/.cielo-wallpaper.log" 2>&1
+echo "=== $(date -u +%FT%TZ) cielo-wallpaper"
+set -x
+
+WALLPAPER="${CIELO_WALLPAPER:-/usr/share/backgrounds/cielo/cielo-light.png}"
+if [[ ! -r "$WALLPAPER" ]]; then
+  echo "no wallpaper at $WALLPAPER"
+  exit 0
+fi
+
+mapfile -t IMAGE_KEYS < <(xfconf-query -c xfce4-desktop -l | grep -E '/last-image$')
+
+# The key that matters is the one for the monitor THIS session actually has, and
+# existing keys are no guide to it: a channel can carry a key from a previous
+# session under a different name and xfdesktop will quietly ignore it. Measured
+# here: xrandr reports `screen` while the inherited config said `selkies-primary`,
+# so every existing key was set correctly and the desktop never changed. Ask the
+# X server, and add its key to whatever else is there.
+monitor="$(xrandr --listmonitors | awk 'NR==2 {print $NF}')"
+if [[ -n "$monitor" ]]; then
+  live_key="/backdrop/screen0/monitor${monitor}/workspace0/last-image"
+  if [[ ! " ${IMAGE_KEYS[*]-} " == *" $live_key "* ]]; then
+    IMAGE_KEYS+=("$live_key")
+  fi
+fi
+
+if [[ "${#IMAGE_KEYS[@]}" -eq 0 ]]; then
+  echo "no monitor to set a backdrop on"
+  exit 0
+fi
+
+for key in "${IMAGE_KEYS[@]}"; do
+  xfconf-query -c xfce4-desktop -p "$key" -n -t string -s "$WALLPAPER" \
+    || xfconf-query -c xfce4-desktop -p "$key" -s "$WALLPAPER" || true
+  # 5 = zoomed: fills any aspect ratio without letterboxing. The image is quiet
+  # enough at the edges that cropping costs nothing.
+  style="${key%/last-image}/image-style"
+  xfconf-query -c xfce4-desktop -p "$style" -n -t int -s 5 \
+    || xfconf-query -c xfce4-desktop -p "$style" -s 5 || true
+done
+
+# xfdesktop repaints on its own when a key it already knows changes, but a key it
+# has never seen (a monitor name new to this session) does not always reach it.
+# A reload costs nothing and makes the outcome the same either way.
+xfdesktop --reload || true

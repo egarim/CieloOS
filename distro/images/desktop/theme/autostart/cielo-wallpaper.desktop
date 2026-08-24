@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=CieloOS wallpaper
+Comment=Applies the CieloOS background to whatever the monitor is called in this session
+Exec=/usr/local/bin/cielo-wallpaper
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

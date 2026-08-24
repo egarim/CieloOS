@@ -27,3 +27,44 @@ RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false upd
 COPY atspi_gi.py /usr/local/lib/lunos/atspi_gi.py
 COPY lunos-atspi /usr/local/bin/lunos-atspi
 RUN chmod +x /usr/local/bin/lunos-atspi
+
+# The CieloOS look: light, macOS-adjacent, and all from Ubuntu universe, so it
+# builds identically on both architectures with nothing fetched from GitHub.
+# Exact names matter and are easy to get wrong — the light variants are
+# Orchis-Light, Papirus-Light and Breeze_Light (NOT Breeze_Snow).
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        orchis-gtk-theme papirus-icon-theme breeze-cursor-theme fonts-inter plank dconf-cli \
+    && apt-get install -y --no-install-recommends librsvg2-bin \
+    && install -d /usr/share/backgrounds/cielo \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The wallpaper ships as vector and is rasterised here, so git carries 2 KB
+# instead of a multi-megabyte gradient. librsvg goes away again afterwards.
+COPY theme/cielo-light.svg /usr/share/backgrounds/cielo/cielo-light.svg
+RUN rsvg-convert -w 2560 -h 1440 -o /usr/share/backgrounds/cielo/cielo-light.png \
+        /usr/share/backgrounds/cielo/cielo-light.svg \
+    && apt-get purge -y librsvg2-bin && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Templates live outside /config on purpose: /config is the session's persistent
+# volume, so anything written there would become the user's own copy. The
+# init script seeds from here once, then leaves the session alone.
+COPY theme/xfce/ /opt/cielo-theme/xfce/
+COPY theme/autostart/ /opt/cielo-theme/autostart/
+COPY theme/plank/ /opt/cielo-theme/plank/
+COPY theme/gtk-3.0/ /opt/cielo-theme/gtk-3.0/
+
+# Plank reads dconf, so the dock theme has to be a dconf default rather than a
+# file in the person.s config. Compiling it into the system database leaves
+# their own settings free to override it.
+COPY theme/dconf/user-profile /etc/dconf/profile/user
+COPY theme/dconf/00-cielo-dock /etc/dconf/db/local.d/00-cielo-dock
+RUN dconf update
+# Plank's shipped themes are all dark, and orchis-gtk-theme does not install one,
+# so the light dock is ours. It lives with Plank's own themes, not in /config,
+# because it is part of the image rather than the person's settings.
+COPY theme/plank/themes/CieloOS/ /usr/share/plank/themes/CieloOS/
+COPY theme/cielo-wallpaper /usr/local/bin/cielo-wallpaper
+COPY theme/cielo-theme-seed /custom-cont-init.d/99-cielo-theme
+RUN chmod +x /usr/local/bin/cielo-wallpaper /custom-cont-init.d/99-cielo-theme
