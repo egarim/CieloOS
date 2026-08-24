@@ -355,6 +355,25 @@ fi
 token_file="/opt/cielo/.data/secrets/\${owner}.token"
 [[ -r "\$token_file" ]] || { echo "no token file for '\$owner'" >&2; exit 1; }
 
+# The chat gets its OWN revocable key rather than the owner's master credential
+# (issue #9, point 6). Minted once with the owner token and cached 0600; revoke it
+# from the panel and this chat stops working without touching anything else.
+key_file="/var/lib/cielo/chat-api-key"
+if [[ ! -s "\$key_file" ]]; then
+  minted="\$(curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/keys" \\
+    -H "Authorization: Bearer \$(cat "\$token_file")" \\
+    -H 'Content-Type: application/json' \\
+    -d '{"name": "cielo-chat"}' 2>/dev/null | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
+  if [[ -n "\$minted" ]]; then
+    install -d -m 0700 "\$(dirname "\$key_file")"
+    printf '%s' "\$minted" > "\$key_file"
+    chmod 0600 "\$key_file"
+  fi
+fi
+# Fall back to the owner token only if minting failed (an older runtime, say):
+# a working chat beats a chat that refuses to start over its own credential.
+chat_credential="\$(cat "\$key_file" 2>/dev/null || cat "\$token_file")"
+
 # --network host so the container reaches a loopback-bound runtime (app and kiosk
 # modes bind 127.0.0.1); HOST then keeps the chat itself off the network.
 exec podman run --rm --replace --name cielo-chat \\
@@ -364,7 +383,7 @@ exec podman run --rm --replace --name cielo-chat \\
   -e WEBUI_NAME="CieloOS Chat" \\
   -e WEBUI_AUTH=False \\
   -e OPENAI_API_BASE_URL="http://127.0.0.1:${PORT}/v1/agent" \\
-  -e OPENAI_API_KEY="\$(cat "\$token_file")" \\
+  -e OPENAI_API_KEY="\$chat_credential" \\
   -v cielo-chat-data:/app/backend/data \\
   "\$CHAT_IMAGE"
 SCRIPT

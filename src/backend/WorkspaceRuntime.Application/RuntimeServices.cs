@@ -31,6 +31,11 @@ public interface IRuntimeStore
     SpreadsheetState Spreadsheet { get; }
     long SpreadsheetRevision { get; }
     PlatformUser GetUser(Guid id);
+
+    // The password hash is deliberately NOT on PlatformUser: it has no business
+    // travelling with an identity that gets serialised to the panel and the API.
+    string? PasswordHashFor(Guid userId);
+    void SetPasswordHash(Guid userId, string hash);
     AgentProfile GetAgent(Guid id);
     void UpsertApproval(ApprovalRecord approval);
     ApprovalRecord GetApproval(Guid id);

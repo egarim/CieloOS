@@ -24,6 +24,11 @@ public class CommandBusConformanceTests
         "/api/sessions/*/desktop-run", // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
         "/api/users",                  // add a teammate: control-plane identity creation, human-only
         "/api/usage/limits",           // set a model budget: an owner's ceiling on spend, human-only
+        "/api/auth/login",             // sign in: the control plane's own front door
+        "/api/auth/logout",
+        "/api/auth/logout-all",
+        "/api/auth/password",
+        "/api/keys",                   // mint a revocable credential, human-only
         "/api/desk-profiles/*/build"   // build a desk image: provisioning this machine, human-only,
                                        // not a surface mutation (nothing in the workspace changes)
     };

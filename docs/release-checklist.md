@@ -141,9 +141,24 @@ model story is provider-free (add your own key in the Models tab, no restart).
   of mutually-distrusting principals is a **bare-metal + `--vm`** guarantee, not a
   shared-kernel container one — do not claim multi-tenant isolation until tested
   on real hardware.
-- ⬜ **Token storage.** Per-user bearer tokens live in `.data/secrets/*.token`
-  (file perms). Review for a shared/public deployment (short-lived tokens,
-  rotation).
+- ✅ **Login, sessions and revocable keys (2026-08-24).** A password (PBKDF2-SHA256,
+  per-password salt) proves who a person is; a server-side session in an httpOnly
+  SameSite=Strict cookie carries that and can be ended, including everywhere at
+  once; named API keys let a program act without holding anyone's own credential,
+  and the packaged chat now mints its own instead of using the owner token.
+  Cookie auth is only honoured with a panel header, which is what stops it being
+  a CSRF hole. Verified on the live instance: identical messages for a wrong
+  password and an unknown desk, an httpOnly cookie invisible to JavaScript,
+  the same cookie refused without the header, sign-out returning 401 immediately
+  after, an agent refused a key (403), and a revoked key dead on the next call.
+  Deliberately not done in this pass: passkeys/WebAuthn (needs HTTPS and a
+  domain; the default deployment is plain HTTP on loopback), MFA, per-key scopes
+  narrower than "acts as this person", and rate limiting on login — a local
+  attacker can still guess as fast as PBKDF2 allows (~100 ms per try).
+- ⬜ **Identity tokens are still eternal.** They remain how agents authenticate
+  and cannot be revoked individually; rotating `signing.key` invalidates every
+  identity at once. The login work above removes the need for a person to carry
+  one, but does not fix the token itself.
 - ✅ **Model keys.** DeepSeek / Azure keys read from `.data/secrets/*.env` (0600),
   never logged, never in audited command args.
 
