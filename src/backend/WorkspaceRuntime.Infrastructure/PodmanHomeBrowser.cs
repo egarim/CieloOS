@@ -15,6 +15,34 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 {
     private const long MaxReadBytes = 256 * 1024;
 
+    // Every read goes through this. It opens the requested path ONCE and then asks
+    // the kernel what it actually opened, via /proc/self/fd/3; if that is not
+    // inside the volume, nothing is read and nothing is listed.
+    //
+    // Sanitize() already strips "..", but that is only half the problem: a session
+    // owns its home and can drop a symlink to /etc in it, which open() follows.
+    // Checking the name first and then opening it by name again would be a race —
+    // the session can swap a path component in between — so the check is on the
+    // open descriptor itself, which cannot be swapped out from under us.
+    //
+    // $1 is the (podman-controlled) mountpoint, $2 the sanitized relative path.
+    // Neither is interpolated into the script; only our own fixed operations are.
+    private const string Guard = """
+        set -eu
+        mount="$1"
+        relative="$2"
+        target="$mount"
+        if [ -n "$relative" ]; then
+          target="$mount/$relative"
+        fi
+        exec 3< "$target"
+        opened="$(readlink /proc/self/fd/3)"
+        case "$opened" in
+          "$mount"|"$mount"/*) ;;
+          *) exit 8 ;;
+        esac
+        """;
+
     private readonly SessionBackendOptions options;
 
     public PodmanHomeBrowser(SessionBackendOptions options)
@@ -37,18 +65,15 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         }
 
         var relative = HomePath.Sanitize(path);
-        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
-        if (target is null)
-        {
-            return new HomeListing(owner, relative, Array.Empty<HomeEntry>());
-        }
 
-        var find = await RunPodmanAsync(new[]
-        {
-            "unshare", "find", target,
-            "-maxdepth", "1", "-mindepth", "1",
-            "-printf", "%y\t%s\t%T@\t%f\n"
-        }, cancellationToken);
+        // Listing the opened directory through its own descriptor, so a directory
+        // swapped for a symlink after the check cannot redirect the listing. Only
+        // %f (the bare name) is used, so the /proc path never reaches the caller.
+        var find = await RunGuardedAsync(
+            mount,
+            relative,
+            "find /proc/self/fd/3/. -maxdepth 1 -mindepth 1 -printf '%y\\t%s\\t%T@\\t%f\\n'",
+            cancellationToken);
 
         if (find.ExitCode != 0)
         {
@@ -112,13 +137,8 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
             return null;
         }
 
-        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
-        if (target is null)
-        {
-            return null;
-        }
-
-        var stat = await RunPodmanAsync(new[] { "unshare", "stat", "-c", "%F\t%s", target }, cancellationToken);
+        // %F/%s of the descriptor, not of the name: same file we would go on to read.
+        var stat = await RunGuardedAsync(mount, relative, "stat -L --printf '%F\\t%s' /proc/self/fd/3", cancellationToken);
         if (stat.ExitCode != 0)
         {
             return null;
@@ -132,10 +152,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 
         _ = long.TryParse(statColumns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
 
-        var read = await RunPodmanAsync(new[]
-        {
-            "unshare", "head", "-c", (MaxReadBytes + 1).ToString(CultureInfo.InvariantCulture), target
-        }, cancellationToken);
+        var read = await RunGuardedAsync(
+            mount,
+            relative,
+            $"head -c {(MaxReadBytes + 1).ToString(CultureInfo.InvariantCulture)} <&3",
+            cancellationToken);
 
         if (read.ExitCode != 0)
         {
@@ -163,11 +184,10 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
     public Task<HomeDownload?> DownloadSharedAsync(string owner, string path, CancellationToken cancellationToken) =>
         DownloadInVolumeAsync(options.SharedVolumePrefix + owner, owner, path, cancellationToken);
 
-    // Streams a file out of the volume verbatim. `cat` under `podman unshare` is
-    // the same host-side read path as the preview — no container is started and
-    // nothing runs inside the session (design law 4) — but the bytes are handed
-    // to the caller undecoded and uncapped, because a download that truncates or
-    // re-encodes is not a download.
+    // Streams a file out of the volume verbatim: the same guarded host-side read as
+    // the preview — no container is started and nothing runs inside the session
+    // (design law 4) — but the bytes are handed over undecoded and uncapped, because
+    // a download that truncates or re-encodes is not a download.
     private async Task<HomeDownload?> DownloadInVolumeAsync(string volume, string owner, string path, CancellationToken cancellationToken)
     {
         var mount = await MountpointAsync(volume, cancellationToken);
@@ -182,13 +202,10 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
             return null;
         }
 
-        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
-        if (target is null)
-        {
-            return null;
-        }
-
-        var stat = await RunPodmanAsync(new[] { "unshare", "stat", "-c", "%F\t%s", target }, cancellationToken);
+        // Type and size for the response and the audit line. The authoritative
+        // check is the guard on the streaming open below; if the file changes in
+        // between, this size is merely stale, and Content-Length is not set from it.
+        var stat = await RunGuardedAsync(mount, relative, "stat -L --printf '%F\\t%s' /proc/self/fd/3", cancellationToken);
         if (stat.ExitCode != 0)
         {
             return null;
@@ -202,69 +219,39 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 
         _ = long.TryParse(statColumns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
 
-        var startInfo = new ProcessStartInfo
+        // The guard runs inside the streaming process, so a refusal happens before
+        // any bytes exist. It writes one 0x01 byte first: reading that here is how
+        // we learn the open passed while the response is still ours to refuse —
+        // otherwise a rejected download would arrive as a silent empty file.
+        var process = StartPodman(new[] { "unshare", "bash", "-c", Guard + "\nprintf '\\001'\ncat <&3", "cielo-download", mount, relative });
+        if (process is null)
         {
-            FileName = options.PodmanPath,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        startInfo.ArgumentList.Add("unshare");
-        startInfo.ArgumentList.Add("cat");
-        startInfo.ArgumentList.Add(target);
+            return null;
+        }
 
-        var process = new Process { StartInfo = startInfo };
+        // Nobody reads stderr, and a full pipe would wedge `cat` mid-file.
+        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+        var stream = process.StandardOutput.BaseStream;
+        var marker = new byte[1];
+        int read;
         try
         {
-            process.Start();
+            read = await stream.ReadAsync(marker, cancellationToken);
         }
         catch
         {
-            process.Dispose();
-            return null;
+            read = 0;
         }
 
-        // Nobody reads stderr here, and a full pipe would wedge `cat` mid-file.
-        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+        if (read != 1 || marker[0] != 1)
+        {
+            using var rejected = new ProcessOutputStream(process);
+            return null;
+        }
 
         var name = relative.Split('/').Last();
         return new HomeDownload(owner, relative, name, HomeContentType.ForPath(relative), size, new ProcessOutputStream(process));
-    }
-
-    // Turns a caller-supplied relative path into a real path that is provably
-    // inside the volume, or null. Sanitize() stops "..", but that is only half the
-    // problem: a session owns its home and can drop a symlink to /etc in it, and
-    // both stat and cat follow symlinks — so without resolving first, an entirely
-    // authorized read walks straight out of the volume. Resolve both ends and
-    // require the target to be the mount or beneath it.
-    private async Task<string?> ResolveInsideAsync(string mount, string relative, CancellationToken cancellationToken)
-    {
-        var mountReal = await RealPathAsync(mount, cancellationToken);
-        if (mountReal is null)
-        {
-            return null;
-        }
-
-        var targetReal = relative.Length == 0
-            ? mountReal
-            : await RealPathAsync($"{mountReal}/{relative}", cancellationToken);
-
-        return targetReal is not null
-            && (targetReal == mountReal || targetReal.StartsWith(mountReal + "/", StringComparison.Ordinal))
-                ? targetReal
-                : null;
-    }
-
-    private async Task<string?> RealPathAsync(string path, CancellationToken cancellationToken)
-    {
-        var resolved = await RunPodmanAsync(new[] { "unshare", "realpath", "-e", "--", path }, cancellationToken);
-        if (resolved.ExitCode != 0)
-        {
-            return null;
-        }
-
-        var real = resolved.Stdout.Trim();
-        return real.Length == 0 ? null : real;
     }
 
     private async Task<string?> MountpointAsync(string volume, CancellationToken cancellationToken)
@@ -276,7 +263,52 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         }
 
         var mount = inspect.Stdout.Trim();
-        return string.IsNullOrEmpty(mount) ? null : mount;
+        if (mount.Length == 0)
+        {
+            return null;
+        }
+
+        // The guard compares the opened path against this prefix, so it has to be
+        // the canonical one. Podman owns this path; nothing a session can reach.
+        var canonical = await RunPodmanAsync(new[] { "unshare", "realpath", "-e", "--", mount }, cancellationToken);
+        if (canonical.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var real = canonical.Stdout.Trim();
+        return real.Length == 0 ? null : real;
+    }
+
+    private Task<(int ExitCode, string Stdout, string Stderr)> RunGuardedAsync(string mount, string relative, string operation, CancellationToken cancellationToken) =>
+        RunPodmanAsync(new[] { "unshare", "bash", "-c", Guard + "\n" + operation, "cielo-browse", mount, relative }, cancellationToken);
+
+    private Process? StartPodman(string[] arguments)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = options.PodmanPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            StandardOutputEncoding = null
+        };
+        foreach (var argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        var process = new Process { StartInfo = startInfo };
+        try
+        {
+            process.Start();
+            return process;
+        }
+        catch
+        {
+            process.Dispose();
+            return null;
+        }
     }
 
     private async Task<(int ExitCode, string Stdout, string Stderr)> RunPodmanAsync(string[] arguments, CancellationToken cancellationToken)
@@ -313,8 +345,7 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 
 // A read-only stream over a child process's stdout that owns the process. ASP.NET
 // disposes the stream once the response is written; without this wrapper, a client
-// that disconnects mid-download would leave `podman unshare cat` running with a
-// full pipe forever.
+// that disconnects mid-download would leave the reader running with a full pipe.
 internal sealed class ProcessOutputStream : Stream
 {
     private readonly Process process;
