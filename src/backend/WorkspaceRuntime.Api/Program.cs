@@ -1088,7 +1088,14 @@ app.MapGet("/api/sessions/{id}/browser", async (string id, HttpContext context, 
     {
         return Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
     }
+    // Both halves or neither. If the browser goes away between the two calls, a
+    // 200 with an empty title and URL reads as "the page has no address", which is
+    // a plausible-looking answer to a question we could not answer at all.
     var page = await browser.StatusAsync(id, cancellationToken);
+    if (!page.Ok)
+    {
+        return Results.Json(new { error = page.Error }, statusCode: StatusCodes.Status409Conflict);
+    }
     return Results.Ok(new { sessionId = id, page.Title, page.Url, count = elements.Elements.Count, elements.Elements });
 });
 

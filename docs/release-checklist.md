@@ -203,12 +203,21 @@ model story is provider-free (add your own key in the Models tab, no restart).
   - **No egress allowlist yet.** `navigate` is `RequireApproval` for every URL,
     which is safe but means routine browsing asks a human every time. The per-desk
     domain allowlist (phase 2) is what turns the common case back into `Allow`.
-  - **Clicks are confined to the current origin, not to nothing.** A cross-origin
-    document request during a click is failed and reported, and a `target=_blank`
-    tab is closed — so leaving a site still goes through the approval-gated
-    `navigate`. What this does NOT stop is a click that sends data to the site the
-    agent is already on: same-origin submission is indistinguishable from ordinary
-    use of that site. Treat "the agent may visit X" as "the agent may post to X".
+  - **Clicks are confined to the current origin.** Every request type is
+    intercepted for the duration of a click — `fetch`, XHR, `sendBeacon` and image
+    pixels included, not just navigations — and popups cannot be created at all
+    (`--block-new-web-contents`), so leaving a site goes through the
+    approval-gated `navigate`. `navigate` in turn refuses a cross-origin
+    **redirect**: a human approves a destination, and a server must not get to
+    pick a different one afterwards.
+    Two things this does NOT cover, deliberately:
+    - **Same-origin submission.** A click that posts to the site the agent is
+      already on is indistinguishable from ordinary use of that site. Read "the
+      agent may visit X" as "the agent may post to X".
+    - **Ambient page traffic.** Outside the click window a loaded page may talk to
+      whatever it likes; blocking that would break the web (every CDN, font and
+      analytics call). Confinement makes the AGENT's action bounded, not the
+      page's. The per-desk allowlist is the phase-2 answer.
   - **No `type` on the web.** Filling a form is phase 2, behind the existing
     `ISessionInputGrants` lease.
   - **No auto-waiting beyond the load event.** The helper waits for
