@@ -107,7 +107,9 @@ public sealed class FileSurfaceRegistry : ISurfaceRegistry
             RequireString(root, "displayName", path),
             RequireString(root, "executor", path),
             state,
-            commands);
+            commands,
+            root.TryGetProperty("targetsSession", out var targets)
+                && targets.ValueKind == JsonValueKind.True);
     }
 
     private static JsonElement Require(JsonElement element, string name, string path) =>

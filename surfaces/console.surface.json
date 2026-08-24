@@ -3,6 +3,7 @@
   "kind": "surface",
   "id": "console",
   "displayName": "Agent Console",
+  "targetsSession": true,
   "executor": "console",
   "state": {
     "document": "surface:console",

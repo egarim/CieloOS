@@ -3,6 +3,7 @@
   "kind": "surface",
   "id": "browser",
   "displayName": "Agent Browser",
+  "targetsSession": true,
   "executor": "browser",
   "state": {
     "document": "surface:browser",

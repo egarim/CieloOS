@@ -170,14 +170,21 @@ public sealed class AgentRuntime
             }
         }
 
-        // Console AND desktop I/O target a live session; gate them on that
-        // session's owner at the same choke point, so an agent can only
-        // observe/act on its own session and a human only on a session it or its
-        // agents own. These ops fail CLOSED: if the backend is missing or the
-        // session cannot be resolved, deny rather than let an unowned action slip
-        // through — a desktop click on someone else's screen is as owned as a
-        // keystroke into their console.
-        if ((dto.ToolName is "console" or "desktop" or "session-input") && dto.Arguments.TryGetValue("id", out var sessionTarget))
+        // Any surface that acts on a live session is gated on that session's
+        // owner at this choke point, so an agent can only act on its own session
+        // and a human only on a session it or its agents own. These ops fail
+        // CLOSED: if the backend is missing or the session cannot be resolved,
+        // deny rather than let an unowned action slip through — a desktop click on
+        // someone else's screen is as owned as a keystroke into their console.
+        //
+        // Which surfaces those are comes from the MANIFEST (`targetsSession`), not
+        // from a list here. The list version read `console or desktop or
+        // session-input`; `browser` was added later, nobody extended it, and for a
+        // while one user could drive another user's browser — the gated read
+        // endpoints refused them while the bus did not. A missing declaration is
+        // now a failing test rather than a silent hole.
+        if (surfaces.Find(dto.ToolName) is { TargetsSession: true }
+            && dto.Arguments.TryGetValue("id", out var sessionTarget))
         {
             if (sessions is null)
             {

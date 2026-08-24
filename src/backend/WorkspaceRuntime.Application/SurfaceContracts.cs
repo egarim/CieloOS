@@ -13,7 +13,17 @@ public sealed record SurfaceManifest(
     string DisplayName,
     string Executor,
     SurfaceStateSpec State,
-    IReadOnlyDictionary<string, SurfaceCommandSpec> Commands);
+    IReadOnlyDictionary<string, SurfaceCommandSpec> Commands,
+    // Does this surface act on a live SESSION named by an `id` argument? If so,
+    // the command bus gates every one of its commands on that session's owner.
+    //
+    // This is declared per surface rather than hard-coded in the bus because the
+    // hard-coded version already failed: the list read `console or desktop or
+    // session-input`, `browser` was added later and nobody extended it, and for a
+    // while any user could drive another user's browser. A surface that forgets
+    // to declare this is caught by a test; a bus that forgets to list it was
+    // caught by nothing.
+    bool TargetsSession = false);
 
 public sealed record SurfaceStateSpec(
     string Document,

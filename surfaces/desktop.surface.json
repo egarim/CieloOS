@@ -3,6 +3,7 @@
   "kind": "surface",
   "id": "desktop",
   "displayName": "Agent Desktop",
+  "targetsSession": true,
   "executor": "desktop",
   "state": {
     "document": "surface:desktop",

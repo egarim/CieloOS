@@ -3,6 +3,7 @@
   "kind": "surface",
   "id": "session-input",
   "displayName": "Session Input Grant",
+  "targetsSession": true,
   "executor": "session-input",
   "state": {
     "document": "surface:session-input",
