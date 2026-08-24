@@ -1,0 +1,3 @@
+# Source read by node and the browser; a CR in a shell-invoked script or a JSON
+# file is a needless difference between platforms.
+* text eol=lf
