@@ -344,7 +344,7 @@ app.MapGet("/api/setup/status", (HttpContext context, ISetupService setup) => Re
     owner = IsLoopback(context.Connection.RemoteIpAddress) ? setup.OwnerSlug() : null
 }));
 
-app.MapPost("/api/setup/claim", async (ClaimRequest? request, HttpContext context, ISetupService setup, ISessionBackend sessions, CancellationToken cancellationToken) =>
+app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup, ISessionBackend sessions) =>
 {
     var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress), request?.DeskProfile);
     if (result.Outcome == ClaimOutcome.Ok)
@@ -352,7 +352,7 @@ app.MapPost("/api/setup/claim", async (ClaimRequest? request, HttpContext contex
         // "Built on first use" has to mean it: choosing a developer desk in the
         // wizard and then being told the image is missing, with the only build
         // button hidden in a form about teammates, is not a first use.
-        await StartDeskImageBuildIfMissing(request?.DeskProfile, sessions, cancellationToken);
+        StartDeskImageBuildIfMissing(request?.DeskProfile, sessions);
     }
 
     return result.Outcome switch
@@ -430,14 +430,14 @@ app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
 // Add a teammate (an existing owner invites another user). Human-only (enforced
 // in AccessPolicy). Returns the new user's slug + bearer token for the owner to
 // hand over; the token file is also written 0600 on the box.
-app.MapPost("/api/users", async (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions, CancellationToken cancellationToken) =>
+app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions) =>
 {
     var result = setup.AddUser(request?.Name, request?.DeskProfile);
     if (result.Outcome == AddUserOutcome.Ok)
     {
         // Same as the claim: a desk created is a desk that should become usable
         // without anyone having to know an image needs building.
-        await StartDeskImageBuildIfMissing(request?.DeskProfile, sessions, cancellationToken);
+        StartDeskImageBuildIfMissing(request?.DeskProfile, sessions);
 
         // What kind of desk someone was given is part of who did what: it decides
         // the toolchain they get and what their agent may do.
@@ -1220,9 +1220,13 @@ static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
 
 // Creating a desk starts its image build if the machine does not have it yet.
-// Best-effort on purpose: a desk is created either way, and a machine with no
-// build context (or no podman) must not fail to create a user over it.
-static async Task StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBackend sessions, CancellationToken cancellationToken)
+//
+// Detached from the request on purpose, and it never throws. The identity is
+// already persisted and its token minted by the time this runs, so anything that
+// could abort the response — a client that disconnects, a podman that hangs — must
+// not be on this path: a claimed machine whose owner never received the token
+// cannot be claimed again, which is a bricked first install.
+static void StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBackend sessions)
 {
     var profile = DeskProfiles.Resolve(deskProfileId);
     if (!profile.NeedsOwnImage || sessions is not SessionOrchestrator orchestrator)
@@ -1230,16 +1234,28 @@ static async Task StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBa
         return;
     }
 
-    if (await orchestrator.ImageExistsAsync(profile.Image, cancellationToken))
+    _ = Task.Run(async () =>
     {
-        return;
-    }
+        try
+        {
+            if (await orchestrator.ImageExistsAsync(profile.Image, CancellationToken.None))
+            {
+                return;
+            }
 
-    var imagesRoot = Environment.GetEnvironmentVariable("Sessions__ProfileImagesPath") ?? "/var/lib/cielo/images/profiles";
-    if (Directory.Exists(Path.Combine(imagesRoot, profile.Id)))
-    {
-        orchestrator.StartImageBuild(profile, imagesRoot, VsCodeDebForThisMachine());
-    }
+            var imagesRoot = Environment.GetEnvironmentVariable("Sessions__ProfileImagesPath")
+                ?? "/var/lib/cielo/images/profiles";
+            if (Directory.Exists(Path.Combine(imagesRoot, profile.Id)))
+            {
+                orchestrator.StartImageBuild(profile, imagesRoot, VsCodeDebForThisMachine());
+            }
+        }
+        catch
+        {
+            // A desk that has to be built by hand is a nuisance; a user creation
+            // that fails because of it is worse.
+        }
+    });
 }
 
 // VS Code ships a .deb per architecture, and the developer desk image is built on
