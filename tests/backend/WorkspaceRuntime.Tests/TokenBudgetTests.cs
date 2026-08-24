@@ -19,6 +19,19 @@ public class TokenBudgetTests
     }
 
     [Fact]
+    public void A_small_budget_is_usable_from_the_first_call()
+    {
+        // A deliberately small ceiling must not be spent before it begins: with
+        // nothing used, a call is allowed.
+        var ledger = new FakeLedger(new TokenSpend(User: 0, Agent: 0, Machine: 0))
+        {
+            Limits = { new TokenLimit(TokenLimit.UserScope, User.ToString(), 2000) }
+        };
+
+        Assert.Null(TokenBudget.Exceeded(ledger, User, Agent, "cloud"));
+    }
+
+    [Fact]
     public void A_call_that_would_overshoot_the_ceiling_is_not_made()
     {
         // 900 of 1,000 used: under the limit, but the next call could cost far

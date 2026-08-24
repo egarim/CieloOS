@@ -92,7 +92,11 @@ public static class TokenBudget
                 _ => (-1L, "")
             };
 
-            if (used >= 0 && limit.MonthlyTokens > 0 && used + PerCallHeadroom > limit.MonthlyTokens)
+            // Never more than half the ceiling: a deliberately small budget — a
+            // 2,000-token trial desk — would otherwise be spent before it began,
+            // rejecting every call at zero used.
+            var headroom = Math.Min(PerCallHeadroom, limit.MonthlyTokens / 2);
+            if (used >= 0 && limit.MonthlyTokens > 0 && used + headroom > limit.MonthlyTokens)
             {
                 return $"The model budget for {subject} is used up for this month " +
                        $"({used:N0} of {limit.MonthlyTokens:N0} tokens). An owner can raise it in the panel's Models tab.";
