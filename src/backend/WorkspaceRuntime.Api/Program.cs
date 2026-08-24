@@ -130,6 +130,14 @@ builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExec
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<AgentRuntime>();
+// The ledger behind issue #14: every model call recorded, per-desk and per-agent
+// ceilings enforced. Registered before the loops so they can take it.
+builder.Services.AddSingleton<ITokenLedger>(sp => databaseProvider == "memory"
+    // The memory provider registers no DbContext at all, and the loops ask the
+    // ledger about the budget on every step — an unresolvable service there would
+    // fail the run rather than skip the accounting.
+    ? new InMemoryTokenLedger()
+    : new EfTokenLedger(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
 builder.Services.AddSingleton<ConsoleAgentLoop>();
 
 // Model providers, tagged by capability (chat / vision) and locality, resolved
@@ -210,7 +218,10 @@ IConsoleAgentBrain fallbackBrain = demoEnabled ? new RecipeConsoleBrain() : new 
 builder.Services.AddSingleton<IConsoleBrainRegistry>(sp => new ConsoleBrainRegistry(
     sp.GetRequiredService<IModelRegistry>(),
     fallbackBrain,
-    sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>()));
+    sp.GetRequiredService<ILoggerFactory>().CreateLogger<ConsoleBrainRegistry>(),
+    // Without this the brains are built with a plain HttpClient and nothing is
+    // ever counted — the ledger exists and stays empty.
+    sp.GetRequiredService<ITokenLedger>()));
 // A default single brain for any injection site that does not select per-agent.
 builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
     sp.GetRequiredService<IConsoleBrainRegistry>().ResolveDefault().Brain);
@@ -222,7 +233,8 @@ builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
 builder.Services.AddSingleton<DesktopAgentLoop>();
 builder.Services.AddSingleton<IDesktopBrainRegistry>(sp => new DesktopBrainRegistry(
     sp.GetRequiredService<IModelRegistry>(),
-    sp.GetRequiredService<ILoggerFactory>()));
+    sp.GetRequiredService<ILoggerFactory>(),
+    sp.GetRequiredService<ITokenLedger>()));
 
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
@@ -428,6 +440,114 @@ app.MapPost("/api/desk-profiles/{id}/build", async (string id, HttpContext conte
         "desk.image.build", AuditOutcome.Success, $"Started building the '{profile.Id}' desk image."));
 
     return Results.Accepted($"/api/desk-profiles", new { profile.Id, status = orchestrator.BuildStatus(profile.Id) });
+});
+
+// What has been spent, and against what ceiling. Readable by any principal —
+// an agent that cannot see its own budget cannot explain why it stopped.
+app.MapGet("/api/usage", (HttpContext context, ITokenLedger ledger, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var (userId, agentId) = ActingAgent(caller, null, store);
+    // Two numbers, because they answer different questions: what counts against
+    // a ceiling, and what the machine actually did.
+    var spent = ledger.SpentThisMonth(userId, agentId, billableOnly: true);
+    var all = ledger.SpentThisMonth(userId, agentId, billableOnly: false);
+    var limits = ledger.Limits;
+
+    return Results.Ok(new
+    {
+        month = DateTimeOffset.UtcNow.ToString("yyyy-MM"),
+        // The caller's own id, so the panel can set a ceiling for this desk
+        // without a second round-trip to work out who it is talking about.
+        deskSubject = userId,
+        desk = spent.User,
+        agent = spent.Agent,
+        machine = spent.Machine,
+        // Including on-box, which never counts against a ceiling.
+        deskAll = all.User,
+        machineAll = all.Machine,
+        // Only the ceilings that bind THIS caller: another desk's budget is not
+        // this desk's business.
+        limits = limits
+            .Where(limit => limit.Scope == TokenLimit.OsScope
+                || (limit.Scope == TokenLimit.UserScope && limit.Subject == userId.ToString())
+                || (limit.Scope == TokenLimit.AgentScope && limit.Subject == agentId.ToString()))
+            .Select(limit => new { limit.Scope, limit.Subject, limit.MonthlyTokens }),
+        deskLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.UserScope && limit.Subject == userId.ToString())?.MonthlyTokens ?? 0,
+        machineLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.OsScope)?.MonthlyTokens ?? 0,
+        recent = ledger.Recent(10, userId).Select(usage => new
+        {
+            usage.OccurredAt,
+            usage.ProviderId,
+            usage.Model,
+            usage.Locality,
+            usage.PromptTokens,
+            usage.CompletionTokens
+        })
+    });
+});
+
+// Setting a ceiling is an owner's decision, like adding a provider: it decides
+// what someone else's agent may spend.
+app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext context, ITokenLedger ledger, IRuntimeStore store) =>
+{
+    var scope = (request?.Scope ?? "").Trim().ToLowerInvariant();
+    if (scope is not (TokenLimit.UserScope or TokenLimit.AgentScope or TokenLimit.OsScope))
+    {
+        return Results.BadRequest(new { error = "scope must be 'user', 'agent' or 'os'." });
+    }
+
+    // Canonical form, not what was typed: a limit stored as "{ABC...}" or in
+    // uppercase parses fine and then never matches the id the budget check
+    // compares against — a ceiling that silently does nothing.
+    var caller = Caller(context);
+
+    // The same ownership boundary as everything else: a human sets budgets for
+    // their own desk and the agents they own, and nobody sets one for a desk they
+    // do not own. Without this, one teammate could cut off another's agent.
+    var canonical = "";
+    if (scope == TokenLimit.OsScope)
+    {
+        // Machine-wide policy is set ON the machine, the same rule the first-owner
+        // claim uses — there is no administrator role to check against yet (#9).
+        if (!IsLoopback(context.Connection.RemoteIpAddress))
+        {
+            return Results.Json(
+                new { error = "A machine-wide budget can only be set from the machine itself (localhost or your SSH tunnel)." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+    else
+    {
+        var subject = (request?.Subject ?? "").Trim();
+        if (!Guid.TryParse(subject, out var subjectId))
+        {
+            return Results.BadRequest(new { error = $"a '{scope}' limit needs the subject's id." });
+        }
+
+        var owned = scope == TokenLimit.UserScope
+            ? subjectId == caller.Subject
+            : store.Agents.Any(agent => agent.Id == subjectId && agent.OwnerUserId == caller.Subject);
+
+        if (!owned)
+        {
+            return Results.Json(
+                new { error = $"'{caller.Slug}' may only set a budget for its own desk and the agents it owns." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        canonical = subjectId.ToString();
+    }
+    var tokens = request?.MonthlyTokens ?? 0;
+    ledger.SetLimit(new TokenLimit(scope, canonical, tokens));
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "usage.limit", AuditOutcome.Success,
+        tokens > 0
+            ? $"Set the {scope} model budget to {tokens:N0} tokens a month{(scope == TokenLimit.OsScope ? "" : $" for {canonical}")}."
+            : $"Removed the {scope} model budget{(scope == TokenLimit.OsScope ? "" : $" for {canonical}")}."));
+
+    return Results.Ok(new { scope, subject = canonical, monthlyTokens = tokens });
 });
 
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
@@ -671,7 +791,7 @@ app.MapGet("/api/sessions/{id}/elements", async (string id, HttpContext context,
 // brain (model or recipe) for the next action, and submits each keystroke batch
 // as a policy-checked, audited `console.type`. Gated on the session owner, like
 // observe; the per-keystroke ownership/policy checks still apply inside the loop.
-app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, IModelRegistry models, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -685,8 +805,9 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
-    var brain = brains.Resolve(store.GetAgent(agentId)).Brain;
-    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, brain, cancellationToken);
+    var selection = brains.Resolve(store.GetAgent(agentId));
+    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, selection.Brain, cancellationToken,
+        model: BilledModel(selection.Provider, models));
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
@@ -695,7 +816,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
 // + a screenshot, asks the vision brain for the next action, and submits each
 // click/keystroke as a policy-checked, audited `desktop.*` command. Gated on the
 // session owner like the console loop; per-action ownership/policy still apply.
-app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionVisionConsent visionConsent, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionVisionConsent visionConsent, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, IModelRegistry models, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -711,7 +832,22 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
     var cloudVisionAllowed = visionConsent.IsAllowed(id, DateTimeOffset.UtcNow);
     var brain = desktopBrains.Resolve(store.GetAgent(agentId), cloudVisionAllowed);
-    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken);
+    // A desktop run can call two providers: the text brain for grounding and,
+    // with consent, a vision one. Each request is metered with its own provider
+    // (the brains stamp it), but the run-level budget check needs one locality —
+    // and it has to be the most expensive possibility, or an on-box grounding
+    // brain would exempt a cloud vision run from every ceiling.
+    var chatProvider = models.Resolve("chat", store.GetAgent(agentId));
+    var visionProvider = cloudVisionAllowed ? models.Resolve("vision", store.GetAgent(agentId)) : null;
+    var billedLocality = new[] { chatProvider?.Profile.Locality, visionProvider?.Profile.Locality }
+        .Any(locality => locality is not null && !string.Equals(locality, TokenBudget.OnBoxLocality, StringComparison.OrdinalIgnoreCase))
+            ? "cloud"
+            : TokenBudget.OnBoxLocality;
+
+    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken,
+        model: chatProvider is null
+            ? null
+            : new ModelIdentity(chatProvider.Profile.Id, chatProvider.Profile.Model, billedLocality));
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
@@ -1002,12 +1138,14 @@ app.MapGet("/v1/agent/models", () => Results.Ok(new
     data = new[] { new { id = "lunos-agent", @object = "model", created = 0, owned_by = "lunos" } }
 }));
 
-app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, IModelRegistry models, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var (userId, agentId) = ActingAgent(caller, null, store);
     var agent = store.GetAgent(agentId);
-    var brain = brains.Resolve(agent).Brain;
+    var selection = brains.Resolve(agent);
+    var brain = selection.Brain;
+    var billed = BilledModel(selection.Provider, models);
     var messages = request.Messages ?? new List<AgentChatMessage>();
     var userMessage = messages.LastOrDefault(message => message.Role == "user")?.Content ?? "";
 
@@ -1126,12 +1264,13 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
             // instead of a silent wait, then the answer itself.
             var typed = 0;
             var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken,
-                async step =>
+                onStep: async step =>
                 {
                     if (step.Done || string.IsNullOrWhiteSpace(step.Text)) return;
                     typed++;
                     await SendAsync(Chunk(new { content = $"› `{step.Text}`\n" }, null));
-                });
+                },
+                model: billed);
 
             var reply = await ReplyOfAsync(run);
             await SendAsync(Chunk(new { content = typed > 0 ? $"\n{reply}" : reply }, null));
@@ -1150,7 +1289,7 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     }
     else
     {
-        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken);
+        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken, model: billed);
         var reply = await ReplyOfAsync(run);
 
         var actions = string.Join("\n", run.Steps
@@ -1223,6 +1362,16 @@ static async Task<IResult> ResolveAsync(
 
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
+
+// What a run is about to be billed for. Null when the provider is not one the
+// registry knows (the recipe fallback, for instance), which is exactly when
+// there is nothing to bill.
+static ModelIdentity? BilledModel(string providerId, IModelRegistry models)
+{
+    var provider = models.Providers.FirstOrDefault(candidate =>
+        string.Equals(candidate.Id, providerId, StringComparison.OrdinalIgnoreCase));
+    return provider is null ? null : new ModelIdentity(provider.Id, provider.Model, provider.Locality);
+}
 
 // Creating a desk starts its image build if the machine does not have it yet.
 //
@@ -1353,6 +1502,8 @@ public sealed record SurfaceCommandRequest(
     Guid? AgentId);
 
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
+
+public sealed record SetTokenLimitRequest(string? Scope, string? Subject, long? MonthlyTokens);
 
 public sealed record ClaimRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,

@@ -58,6 +58,10 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 **Chat**
 - **Open WebUI**, installed and started by `install.sh` against the OpenAI-compatible `/v1/agent` endpoint and authenticated as the owner: every message runs the console loop, so the agent uses its tools and operates the OS, and the reply streams back as it works. Loopback-only until there is a login (issue #9) — tunnel to reach it from elsewhere.
 
+**Model spend — metered and capped**
+- Every model call is recorded with the tokens it used, attributed the way actions are: a human, acting through an agent. The panel's Models tab shows spend for the desk and the machine this month, with recent calls.
+- Monthly **ceilings** per desk, per agent or for the whole machine. The budget is checked before every model call, holding back enough headroom for one more call, so a run stops *before* crossing the line rather than after — with an explanation naming the numbers, not a provider error. On-box models are recorded but never capped: they cost machine time, not money.
+
 **Models — layered & replaceable** ([docs/model-config.md](docs/model-config.md))
 - One capability-based registry resolves a provider per capability (**chat / vision / embedding**) through a cascade **agent → user → OS**. Providers are tagged by capability and **locality** (`on-box` / `remote-self-hosted` / `cloud`).
 - Ships with **DeepSeek** and **Azure OpenAI gpt-4.1-mini** (cloud) and **local Bonsai-4B** (llama.cpp, on-box). AT-SPI-first means the **default desktop path needs no vision model and nothing leaves the box**.

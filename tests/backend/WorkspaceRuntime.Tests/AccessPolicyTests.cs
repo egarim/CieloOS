@@ -16,6 +16,10 @@ public class AccessPolicyTests
     [InlineData("/api/desk-profiles", "GET", AccessLevel.Public)]
     // Building one costs gigabytes, so it is the owner's call, not an agent's.
     [InlineData("/api/desk-profiles/dotnet/build", "POST", AccessLevel.HumanOnly)]
+    // Anyone may read the bill (an agent that cannot see its budget cannot explain
+    // why it stopped); only an owner may change a ceiling.
+    [InlineData("/api/usage", "GET", AccessLevel.AnyPrincipal)]
+    [InlineData("/api/usage/limits", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]

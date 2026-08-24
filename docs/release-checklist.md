@@ -87,6 +87,26 @@ model story is provider-free (add your own key in the Models tab, no restart).
   toolchain to the human and withhold it from the machine.
   Still open: the marketing images have never been built (they exist as layers and
   build on demand), and switching an existing desk's profile is not implemented.
+- ✅ **Model spend metered and capped (2026-08-24).** Every provider call is
+  recorded with its token counts against (user, agent, provider, model), and
+  monthly ceilings per desk / agent / machine stop a run before the call is made.
+  Verified against a real DeepSeek key on the live instance: a chat recorded
+  1,121 + 61 tokens; a ceiling below that spend produced *"The model budget for
+  your desk is used up for this month (1,182 of 500 tokens)"* as the agent's
+  reply with spend unchanged — the refused call was never made; raising the
+  ceiling restored service; an agent asking to change a ceiling got 403; both
+  changes appear in the audit trail.
+  Two things worth remembering: SQLite cannot compare a `DateTimeOffset` in a
+  query, so the month is stored as an explicit `yyyy-MM` key rather than derived;
+  and metering had to be wired at the HTTP handler because the three brains each
+  build their own request, so a per-brain hook would be three places to forget.
+  The ceiling holds back headroom for one more call rather than reserving spend,
+  so it stops slightly early instead of overshooting. It is **not** atomic: two
+  runs starting at the same instant can both pass the check, and each may then
+  spend one call's worth. A true reservation needs the provider to price a call
+  before charging it.
+  Still open: cost estimates in money (needs a per-model price table), and a
+  rollup if a machine ever makes enough calls for summing to hurt.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 12/12 pass on native Linux, and it
   asserts the chat is installed, loopback-bound, follows a moved port on reinstall,

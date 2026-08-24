@@ -15,10 +15,17 @@ public sealed class DesktopAgentLoop
     private readonly AgentRuntime runtime;
     private readonly IDesktopBackend desktop;
 
-    public DesktopAgentLoop(AgentRuntime runtime, IDesktopBackend desktop)
+    // Metered and capped like the console loop (issue #14): a desktop run spends
+    // on models too, and the vision path spends the most — a screenshot is a
+    // large prompt. Named `tokens` because this file already has a local `ledger`
+    // meaning the step's input record.
+    private readonly ITokenLedger? tokens;
+
+    public DesktopAgentLoop(AgentRuntime runtime, IDesktopBackend desktop, ITokenLedger? tokens = null)
     {
         this.runtime = runtime;
         this.desktop = desktop;
+        this.tokens = tokens;
     }
 
     public async Task<DesktopLoopResult> RunAsync(
@@ -29,7 +36,10 @@ public sealed class DesktopAgentLoop
         Guid userId,
         Guid agentId,
         IDesktopAgentBrain brain,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        // Which provider this run bills. Optional, so existing callers and tests
+        // are unchanged and simply are not metered.
+        ModelIdentity? model = null)
     {
         var steps = new List<DesktopLoopStep>();
         var history = new List<string>();
@@ -38,8 +48,18 @@ public sealed class DesktopAgentLoop
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
 
+        using var accounting = tokens is not null && model is not null
+            ? TokenAccountingScope.Begin(userId, agentId, model.ProviderId, model.Model, model.Locality)
+            : null;
+
         for (var step = 1; step <= cap; step++)
         {
+            if (tokens is not null && model is not null
+                && TokenBudget.Exceeded(tokens, userId, agentId, model.Locality) is { } overspent)
+            {
+                return new DesktopLoopResult(sessionId, goal, false, overspent, steps);
+            }
+
             // Observe: elements are the grounding source; the screenshot gives the
             // vision model context (and the fallback path). Fail only if BOTH are
             // unavailable — a sparse tree is still a valid observation.

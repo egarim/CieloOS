@@ -88,10 +88,16 @@ public sealed class ConsoleAgentLoop
     private readonly AgentRuntime runtime;
     private readonly IConsoleBackend console;
 
-    public ConsoleAgentLoop(AgentRuntime runtime, IConsoleBackend console)
+    // Model spend is metered and capped here because this is where a run's cost
+    // actually accrues: one goal can be twenty model calls (issue #14). Optional,
+    // so a runtime without a ledger behaves exactly as before.
+    private readonly ITokenLedger? ledger;
+
+    public ConsoleAgentLoop(AgentRuntime runtime, IConsoleBackend console, ITokenLedger? ledger = null)
     {
         this.runtime = runtime;
         this.console = console;
+        this.ledger = ledger;
     }
 
     public async Task<ConsoleLoopResult> RunAsync(
@@ -105,15 +111,34 @@ public sealed class ConsoleAgentLoop
         CancellationToken cancellationToken,
         // Called as each step lands, so a caller can stream progress instead of
         // waiting for the whole loop. Optional: nothing else in the loop changes.
-        Func<ConsoleLoopStep, Task>? onStep = null)
+        Func<ConsoleLoopStep, Task>? onStep = null,
+        // Which provider is about to be billed. Optional so every existing caller
+        // and test keeps working; without it the run is simply not metered.
+        ModelIdentity? model = null)
     {
         var steps = new List<ConsoleLoopStep>();
         var history = new List<string>();
         var recent = new List<string>();
         var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
 
+        // The whole run bills to one acting pair, so the scope opens once and
+        // every model call underneath it is attributed without threading identity
+        // through the brains.
+        using var accounting = ledger is not null && model is not null
+            ? TokenAccountingScope.Begin(userId, agentId, model.ProviderId, model.Model, model.Locality)
+            : null;
+
         for (var step = 1; step <= cap; step++)
         {
+            // Checked every step, not just at the start: one goal can be twenty
+            // calls, and a budget that is only consulted once is a budget that can
+            // be blown through by a single long run.
+            if (ledger is not null && model is not null
+                && TokenBudget.Exceeded(ledger, userId, agentId, model.Locality) is { } overspent)
+            {
+                return new ConsoleLoopResult(sessionId, goal, false, overspent, steps);
+            }
+
             var view = await console.CaptureAsync(sessionId, cancellationToken);
             if (!view.Available)
             {

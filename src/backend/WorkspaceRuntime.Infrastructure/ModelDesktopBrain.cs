@@ -100,6 +100,11 @@ public sealed class ModelDesktopBrain : IDesktopAgentBrain
                 Content = JsonContent.Create(payload)
             };
             request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
+            // The vision brain is a separate instance with the VISION provider's
+            // options, so this is how a cloud vision call inside an otherwise
+            // on-box run gets counted as cloud.
+            request.Options.Set(TokenAccountingRequest.Key,
+                new ModelIdentity(options.ProviderId, options.Model, options.Locality));
 
             using var response = await http.SendAsync(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
