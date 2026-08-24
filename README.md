@@ -57,7 +57,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 - One capability-based registry resolves a provider per capability (**chat / vision / embedding**) through a cascade **agent → user → OS**. Providers are tagged by capability and **locality** (`on-box` / `remote-self-hosted` / `cloud`).
 - Ships with **DeepSeek** and **Azure OpenAI gpt-4.1-mini** (cloud) and **local Bonsai-4B** (llama.cpp, on-box). AT-SPI-first means the **default desktop path needs no vision model and nothing leaves the box**.
 
-**The panel** — an agent-desk: a rail of your desks (you + owned agents), each anchored on its home (files, sessions, activity, pending approvals), plus a "give the agent a task" console with a live view.
+**The panel** — an agent-desk: a rail of your desks (you + owned agents), each anchored on its home (files, sessions, activity, pending approvals), plus a "give the agent a task" console with a live view. Files the agent produces can be **downloaded** from the browser (byte-for-byte, policed and audited like any other read); binary files say so instead of previewing as noise.
 
 ## Requirements
 

@@ -39,6 +39,11 @@ printf '%s' "$status" | grep -q '"claimed"' \
 [ "$(code "$BASE/api/models")" = "401" ] \
   && pass "/api/models rejects no-token (401)" || fail "/api/models rejects no-token"
 
+# Downloads hand out file bytes, so an unauthenticated one must never be served —
+# and a path that walks out of the volume must be a plain 404, not /etc/passwd.
+[ "$(code "$BASE/api/shared/download?path=outbox.md")" = "401" ] \
+  && pass "file download rejects no-token (401)" || fail "file download rejects no-token"
+
 # --- destructive full flow (opt-in) ---
 if [ "$CLAIM" = "1" ]; then
   if printf '%s' "$status" | grep -q '"claimed":true'; then
@@ -65,6 +70,13 @@ if [ "$CLAIM" = "1" ]; then
         && pass "new provider is the chat default" || fail "new provider is the chat default"
       printf '%s' "$models" | grep -q 'sk-selftest' \
         && fail "API key LEAKED in /api/models" || pass "API key is not returned"
+
+      # A traversal must be reduced to a relative path, so this can only ever miss
+      # inside the volume. Anything but 404 means the download escaped it.
+      traversal="$(body "$BASE/api/shared/download?path=../../../../etc/passwd" -H "Authorization: Bearer $token")"
+      printf '%s' "$traversal" | grep -q 'root:' \
+        && fail "file download ESCAPED the volume (served /etc/passwd)" \
+        || pass "file download cannot traverse out of the volume"
     fi
   fi
 fi

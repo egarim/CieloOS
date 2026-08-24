@@ -136,7 +136,87 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 
         var truncated = read.Stdout.Length > MaxReadBytes;
         var content = truncated ? read.Stdout[..(int)MaxReadBytes] : read.Stdout;
+
+        // A spreadsheet or a PDF rendered as decoded text is noise at best, and at
+        // worst it looks like the file is corrupt. Say it is binary and let the
+        // caller offer the download instead of a preview of mojibake. NUL means
+        // binary outright; U+FFFD is what bytes that are not UTF-8 decode to.
+        if (content.Contains('\0') || content.Contains('�'))
+        {
+            return new HomeFile(owner, relative, "", false, size, Binary: true);
+        }
+
         return new HomeFile(owner, relative, content, truncated || size > MaxReadBytes, size);
+    }
+
+    public Task<HomeDownload?> DownloadAsync(string owner, string path, CancellationToken cancellationToken) =>
+        DownloadInVolumeAsync(options.HomeVolumePrefix + owner, owner, path, cancellationToken);
+
+    public Task<HomeDownload?> DownloadSharedAsync(string owner, string path, CancellationToken cancellationToken) =>
+        DownloadInVolumeAsync(options.SharedVolumePrefix + owner, owner, path, cancellationToken);
+
+    // Streams a file out of the volume verbatim. `cat` under `podman unshare` is
+    // the same host-side read path as the preview — no container is started and
+    // nothing runs inside the session (design law 4) — but the bytes are handed
+    // to the caller undecoded and uncapped, because a download that truncates or
+    // re-encodes is not a download.
+    private async Task<HomeDownload?> DownloadInVolumeAsync(string volume, string owner, string path, CancellationToken cancellationToken)
+    {
+        var mount = await MountpointAsync(volume, cancellationToken);
+        if (mount is null)
+        {
+            return null;
+        }
+
+        var relative = HomePath.Sanitize(path);
+        if (relative.Length == 0)
+        {
+            return null;
+        }
+
+        var target = $"{mount}/{relative}";
+
+        var stat = await RunPodmanAsync(new[] { "unshare", "stat", "-c", "%F\t%s", target }, cancellationToken);
+        if (stat.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var statColumns = stat.Stdout.Trim().Split('\t');
+        if (statColumns.Length < 2 || statColumns[0].Contains("directory", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        _ = long.TryParse(statColumns[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var size);
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = options.PodmanPath,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
+        };
+        startInfo.ArgumentList.Add("unshare");
+        startInfo.ArgumentList.Add("cat");
+        startInfo.ArgumentList.Add(target);
+
+        var process = new Process { StartInfo = startInfo };
+        try
+        {
+            process.Start();
+        }
+        catch
+        {
+            process.Dispose();
+            return null;
+        }
+
+        // Nobody reads stderr here, and a full pipe would wedge `cat` mid-file.
+        _ = process.StandardError.ReadToEndAsync(CancellationToken.None);
+
+        var name = relative.Split('/').Last();
+        return new HomeDownload(owner, relative, name, HomeContentType.ForPath(relative), size, new ProcessOutputStream(process));
     }
 
     private async Task<string?> MountpointAsync(string volume, CancellationToken cancellationToken)
@@ -180,5 +260,68 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         return (process.ExitCode, await stdoutTask, await stderrTask);
+    }
+}
+
+// A read-only stream over a child process's stdout that owns the process. ASP.NET
+// disposes the stream once the response is written; without this wrapper, a client
+// that disconnects mid-download would leave `podman unshare cat` running with a
+// full pipe forever.
+internal sealed class ProcessOutputStream : Stream
+{
+    private readonly Process process;
+    private readonly Stream inner;
+
+    public ProcessOutputStream(Process process)
+    {
+        this.process = process;
+        inner = process.StandardOutput.BaseStream;
+    }
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+    public override long Position
+    {
+        get => throw new NotSupportedException();
+        set => throw new NotSupportedException();
+    }
+
+    public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+
+    public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+        inner.ReadAsync(buffer, cancellationToken);
+
+    public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+        inner.ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+    public override void Flush()
+    {
+    }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+    public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            inner.Dispose();
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Already gone, or gone between the check and the kill.
+            }
+            process.Dispose();
+        }
+        base.Dispose(disposing);
     }
 }

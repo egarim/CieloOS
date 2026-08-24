@@ -638,6 +638,29 @@ app.MapGet("/api/home/{owner}/read", async (string owner, string path, HttpConte
             ? Results.Ok(file)
             : Results.NotFound(new { error = "File not found or not readable." }));
 
+// The way work leaves the machine. A preview decodes text and stops at 256 KiB, so
+// until now the spreadsheet an agent produced could be seen but not taken. Same
+// ownership check as the browse endpoints; a download is a read, and reads pass
+// policy (design law 2). It is also audited: bytes crossing out of a desk is
+// exactly the kind of act the trail exists to answer for.
+app.MapGet("/api/home/{owner}/download", async (string owner, string path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    if (!Ownership.CanAccessHome(caller, owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not browse '{owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    if (await home.DownloadAsync(owner, path, cancellationToken) is not { } file)
+    {
+        return Results.NotFound(new { error = "File not found or not readable." });
+    }
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "home.download", AuditOutcome.Success, $"Downloaded '{file.Path}' ({file.Size} bytes) from home of '{owner}'."));
+    return Results.File(file.Content, file.ContentType, file.Name);
+});
+
 // The caller's shared workspace (lunos-shared-<user>): the collaboration space a
 // user and their agents share at ~/shared. The owner is resolved FROM the caller,
 // so a caller only ever reaches its own shared space — no cross-user access.
@@ -655,6 +678,20 @@ app.MapGet("/api/shared/read", async (string path, HttpContext context, IHomeBro
     return await home.ReadSharedAsync(owner, path, cancellationToken) is { } file
         ? Results.Ok(file)
         : Results.NotFound(new { error = "File not found or not readable." });
+});
+
+app.MapGet("/api/shared/download", async (string path, HttpContext context, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var owner = Ownership.RootUserSlug(caller.Slug, store);
+    if (await home.DownloadSharedAsync(owner, path, cancellationToken) is not { } file)
+    {
+        return Results.NotFound(new { error = "File not found or not readable." });
+    }
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "shared.download", AuditOutcome.Success, $"Downloaded '{file.Path}' ({file.Size} bytes) from the shared workspace of '{owner}'."));
+    return Results.File(file.Content, file.ContentType, file.Name);
 });
 
 app.MapGet("/api/surfaces/{surfaceId}/manifest", (string surfaceId, ISurfaceRegistry surfaces) =>
