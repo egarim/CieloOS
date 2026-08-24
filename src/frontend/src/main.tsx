@@ -27,16 +27,6 @@ type ApprovalView = {
   preview?: EffectPreview | null;
 };
 type AuditEvent = { id: string; occurredAt: string; action: string; outcome: string; detail: string; principal?: string | null; onBehalfOf?: string | null };
-type SurfaceCommand = {
-  name: string;
-  displayName: string;
-  decision: string;
-  reason: string;
-  dryRun: boolean;
-  reversible: boolean;
-  input: { properties?: Record<string, { type?: string; pattern?: string }>; required?: string[] };
-};
-type SurfaceCommands = { surface: string; revision: number; commands: SurfaceCommand[] };
 type SurfaceState = { surface: string; revision: number; state: { cells: Record<string, string> } };
 type CommandResult = { decision: string; reason: string; approval?: ApprovalView | null; revision: number };
 type InferenceStatus = {
@@ -115,7 +105,6 @@ const emptyBranding: Branding = {
 };
 
 const TOKEN_KEY = "runtime.token";
-const inputDefaults: Record<string, string> = { address: "C1", value: "84", source: "A1,A2,C1", target: "D1" };
 
 function readToken(): string | null {
   return window.localStorage.getItem(TOKEN_KEY);
@@ -155,16 +144,14 @@ function App() {
   const [agents, setAgents] = React.useState<AgentProfile[]>([]);
   const [approvals, setApprovals] = React.useState<ApprovalView[]>([]);
   const [auditEvents, setAuditEvents] = React.useState<AuditEvent[]>([]);
-  const [surface, setSurface] = React.useState<SurfaceState | null>(null);
-  const [commands, setCommands] = React.useState<SurfaceCommand[]>([]);
-  const [commandInputs, setCommandInputs] = React.useState<Record<string, string>>(inputDefaults);
+  const [spreadsheetRevision, setSpreadsheetRevision] = React.useState<number | null>(null);
   const [lastResult, setLastResult] = React.useState<{ decision: string; reason: string } | null>(null);
   const [sessions, setSessions] = React.useState<SessionView[]>([]);
   const [sessionsAvailable, setSessionsAvailable] = React.useState(true);
   const [newSessionProfile, setNewSessionProfile] = React.useState("agent-console");
   const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [selectedDesk, setSelectedDesk] = React.useState<string | null>(null);
-  const [view, setView] = React.useState<"desk" | "surfaces" | "models">("desk");
+  const [view, setView] = React.useState<"desk" | "models">("desk");
   const [models, setModels] = React.useState<ModelsData | null>(null);
   const [providerForm, setProviderForm] = React.useState<ProviderForm>(emptyProviderForm);
   const [modelsMsg, setModelsMsg] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -233,8 +220,9 @@ function App() {
       load<AgentProfile[]>("/api/agents", setAgents),
       load<ApprovalView[]>("/api/approvals", setApprovals),
       load<AuditEvent[]>("/api/audit-events", setAuditEvents),
-      load<SurfaceState>("/api/surfaces/spreadsheet/state", setSurface),
-      load<SurfaceCommands>("/api/surfaces/spreadsheet/commands", (value) => setCommands(value.commands)),
+      // Only the revision is kept: approving a spreadsheet change sends it back so
+      // the runtime can refuse a decision made against a sheet that has since moved.
+      load<SurfaceState>("/api/surfaces/spreadsheet/state", (value) => setSpreadsheetRevision(value.revision)),
       load<ModelsData>("/api/models", setModels),
       load<Whoami>("/api/whoami", setWhoami)
     ]);
@@ -524,24 +512,6 @@ function App() {
     }
   }
 
-  async function dispatch(command: SurfaceCommand) {
-    const input: Record<string, string> = {};
-    for (const key of Object.keys(command.input.properties ?? {})) {
-      input[key] = commandInputs[key] ?? "";
-    }
-    try {
-      const result = await api<CommandResult>(`/api/surfaces/spreadsheet/commands/${command.name}`, {
-        method: "POST",
-        body: JSON.stringify({ input })
-      });
-      setLastResult({ decision: result.decision, reason: result.reason });
-      await refresh();
-    } catch (error) {
-      if (error instanceof UnauthorizedError) signOut();
-      else setLastResult({ decision: "Deny", reason: String(error) });
-    }
-  }
-
   // Session lifecycle rides the same command bus as everything else: create is
   // Allow, destroy is RequireApproval, so it surfaces in the approvals feed.
   async function sessionCommand(name: "create" | "destroy" | "inhabit", input: Record<string, string>) {
@@ -699,7 +669,7 @@ function App() {
     try {
       const result = await api<CommandResult>(`/api/approvals/${approval.id}/${action}`, {
         method: "POST",
-        body: JSON.stringify({ requestHash: approval.requestHash, observedRevision: surface?.revision ?? null })
+        body: JSON.stringify({ requestHash: approval.requestHash, observedRevision: spreadsheetRevision })
       });
       setLastResult({ decision: result.decision, reason: result.reason });
       await refresh();
@@ -817,7 +787,6 @@ function App() {
     .filter((event) => event.principal === selectedDesk || event.onBehalfOf === selectedDesk)
     .slice(0, 8);
   const pendingApprovals = approvals.filter((approval) => approval.status === "Pending");
-  const cells = Object.entries(surface?.state.cells ?? {}).sort(([left], [right]) => left.localeCompare(right));
 
   return (
     <main>
@@ -845,9 +814,15 @@ function App() {
       <nav className="viewNav">
         <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desks</button>
         <button className={view === "models" ? "active" : ""} onClick={() => setView("models")}>Models</button>
-        <button className={view === "surfaces" ? "active" : ""} onClick={() => setView("surfaces")}>Surface playground</button>
-        <span className="viewNavHint">conformance demo</span>
       </nav>
+
+      {/* Session commands and approvals both report through here; without it a
+          refused or failed command would fail silently. */}
+      {lastResult && (
+        <p className={`decision ${lastResult.decision.toLowerCase()}`} data-automation-id="decision">
+          {lastResult.decision}: {lastResult.reason}
+        </p>
+      )}
 
       {view === "models" ? (
         <ModelsView
@@ -862,59 +837,6 @@ function App() {
           message={modelsMsg}
           busy={modelsBusy}
         />
-      ) : view === "surfaces" ? (
-        <section className="grid">
-          <div className="panel">
-            <h2>Surface Commands</h2>
-            <p className="muted small">
-              A worked example, not a feature: the spreadsheet surface is driven through the same manifest-checked
-              command bus an agent uses. It proves a typed surface, a human click, and an agent call all pass one policy.
-            </p>
-            <div className="inline">
-              {Array.from(new Set(commands.flatMap((command) => Object.keys(command.input.properties ?? {}))))
-                .map((key) => (
-                  <label key={key}>
-                    {key}
-                    <input
-                      data-automation-id={`input-${key}`}
-                      value={commandInputs[key] ?? ""}
-                      onChange={(event) => setCommandInputs({ ...commandInputs, [key]: event.target.value })}
-                    />
-                  </label>
-                ))}
-            </div>
-            <div className="inline commandRow">
-              {commands.map((command) => (
-                <button
-                  key={command.name}
-                  data-automation-id={`cmd-${command.name}`}
-                  className={command.decision === "RequireApproval" ? "danger" : ""}
-                  title={command.reason}
-                  onClick={() => dispatch(command)}
-                >
-                  {command.decision === "RequireApproval" ? <X size={16} /> : <Check size={16} />} {command.displayName}
-                </button>
-              ))}
-            </div>
-            {lastResult && (
-              <p className={`decision ${lastResult.decision.toLowerCase()}`} data-automation-id="decision">
-                {lastResult.decision}: {lastResult.reason}
-              </p>
-            )}
-          </div>
-
-          <div className="panel">
-            <h2>Cells</h2>
-            <div className="cells">
-              {cells.length === 0 ? <span className="muted">No cells</span> : cells.map(([address, cellValue]) => (
-                <div className="cell" key={address}>
-                  <strong>{address}</strong>
-                  <span>{cellValue}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
       ) : (
         <section className="workspace">
           <aside className="desks" data-automation-id="desks-rail">
