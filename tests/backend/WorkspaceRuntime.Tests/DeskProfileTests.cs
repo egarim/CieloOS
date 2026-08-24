@@ -13,7 +13,9 @@ public class DeskProfileTests
         // upgrades must not suddenly need a multi-gigabyte image to open a session.
         Assert.Equal("office", DeskProfiles.Default.Id);
         Assert.Equal(DeskProfiles.SharedDesktopImage, DeskProfiles.Default.Image);
+        Assert.Equal(DeskProfiles.SharedConsoleImage, DeskProfiles.Default.ConsoleImage);
         Assert.False(DeskProfiles.Default.NeedsOwnImage);
+        Assert.False(DeskProfiles.Default.NeedsOwnConsoleImage);
     }
 
     [Theory]
@@ -37,6 +39,10 @@ public class DeskProfileTests
         // The build context directory and the image tag are derived from the id in
         // two different places (installer script and runtime), so they have to agree.
         Assert.Equal($"localhost/cielo-desk-{dotnet.Id}:latest", dotnet.Image);
+        // Both halves: the console the agent works in carries the toolchain too,
+        // or a .NET desk would have an agent that cannot run dotnet.
+        Assert.True(dotnet.NeedsOwnConsoleImage);
+        Assert.Equal($"localhost/cielo-console-{dotnet.Id}:latest", dotnet.ConsoleImage);
     }
 
     [Fact]

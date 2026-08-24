@@ -1,0 +1,37 @@
+# The .NET desk's CONSOLE image: the shared console (ttyd + tmux, the agent's
+# terminal) plus the same SDK and Uno templates the desktop has.
+#
+# Without this, a .NET desk's agent could not run `dotnet` — the toolchain would
+# exist only on the human's desktop, and "the agent works on the same desk" would
+# be false. It deliberately carries no VS Code: an agent does not need an editor.
+ARG BASE=localhost/lunos-console:latest
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ARG DOTNET_CHANNEL=10.0
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git unzip zip curl ca-certificates \
+    && icu="$(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -1)" \
+    && test -n "$icu" \
+    && apt-get install -y --no-install-recommends "$icu" \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --channel "${DOTNET_CHANNEL}" --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && rm -f /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH="/usr/share/dotnet:/usr/local/bin:${PATH}"
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+
+# Same shared CLI home as the desktop image, for the same reason: templates
+# installed by root at build time are otherwise invisible to whoever runs the
+# console.
+ENV DOTNET_CLI_HOME=/opt/cielo-dotnet/home
+RUN mkdir -p /opt/cielo-dotnet/home \
+    && dotnet new install Uno.Templates \
+    && dotnet tool install uno.check --tool-path /usr/local/bin \
+    && (dotnet workload install wasm-tools --skip-sign-check || true) \
+    && chmod -R 0777 /opt/cielo-dotnet/home

@@ -373,7 +373,10 @@ app.MapGet("/api/desk-profiles", async (ISessionBackend sessions, CancellationTo
     {
         // The panel says "this desk needs an image that is not built yet" rather
         // than letting a person pick a profile and meet a failure at session time.
-        var ready = !profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken);
+        // Ready means BOTH halves of the desk: the desktop the person opens and
+        // the console their agent works in.
+        var ready = (!profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken))
+            && (!profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken));
         profiles.Add(new
         {
             profile.Id,
@@ -402,7 +405,9 @@ app.MapPost("/api/desk-profiles/{id}/build", async (string id, HttpContext conte
 
     // Already built is a success, not a reason to spend another twenty minutes:
     // a stale panel must not be able to trigger a rebuild by clicking twice.
-    if (!profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken))
+    var desktopReady = !profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken);
+    var consoleReady = !profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken);
+    if (desktopReady && consoleReady)
     {
         return Results.Ok(new { profile.Id, status = "built" });
     }
@@ -1229,7 +1234,7 @@ static RuntimePrincipal Caller(HttpContext context) =>
 static void StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBackend sessions)
 {
     var profile = DeskProfiles.Resolve(deskProfileId);
-    if (!profile.NeedsOwnImage || sessions is not SessionOrchestrator orchestrator)
+    if ((!profile.NeedsOwnImage && !profile.NeedsOwnConsoleImage) || sessions is not SessionOrchestrator orchestrator)
     {
         return;
     }
@@ -1238,7 +1243,11 @@ static void StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBackend 
     {
         try
         {
-            if (await orchestrator.ImageExistsAsync(profile.Image, CancellationToken.None))
+            var desktopReady = !profile.NeedsOwnImage
+                || await orchestrator.ImageExistsAsync(profile.Image, CancellationToken.None);
+            var consoleReady = !profile.NeedsOwnConsoleImage
+                || await orchestrator.ImageExistsAsync(profile.ConsoleImage, CancellationToken.None);
+            if (desktopReady && consoleReady)
             {
                 return;
             }

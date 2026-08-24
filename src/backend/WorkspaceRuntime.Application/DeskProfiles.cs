@@ -20,16 +20,22 @@ public sealed record DeskProfile(
     string Label,
     string Description,
     string Image,
+    string ConsoleImage,
     IReadOnlySet<string> AgentTools)
 {
-    // A profile whose image is not the shared desktop has to be built before a
-    // session of that kind can start, and building it is not instant.
+    // Both halves of a desk, because both are used: the person works in the
+    // desktop session, and their AGENT works in the console one. A .NET desk whose
+    // console had no SDK would mean the agent could not run the toolchain the
+    // profile exists to provide.
     public bool NeedsOwnImage => !string.Equals(Image, DeskProfiles.SharedDesktopImage, StringComparison.Ordinal);
+
+    public bool NeedsOwnConsoleImage => !string.Equals(ConsoleImage, DeskProfiles.SharedConsoleImage, StringComparison.Ordinal);
 }
 
 public static class DeskProfiles
 {
     public const string SharedDesktopImage = "localhost/lunos-desktop:latest";
+    public const string SharedConsoleImage = "localhost/lunos-console:latest";
 
     // The default is the desk everyone has had until now, under a name. Keeping
     // it as `office` rather than inventing a new default means an existing
@@ -41,6 +47,7 @@ public static class DeskProfiles
         "Office",
         "Documents and spreadsheets: ONLYOFFICE, a file manager and a browser. The agent writes .xlsx/.docx/.pptx and can drive the desktop.",
         SharedDesktopImage,
+        SharedConsoleImage,
         OwnerDefaults.AgentTools);
 
     private static readonly DeskProfile Dotnet = new(
@@ -48,6 +55,7 @@ public static class DeskProfiles
         ".NET developer",
         "The office desk plus a .NET SDK, Uno Platform templates and VS Code with the Uno extension. `dotnet new unoapp` works on a fresh desk.",
         "localhost/cielo-desk-dotnet:latest",
+        "localhost/cielo-console-dotnet:latest",
         OwnerDefaults.AgentTools);
 
     private static readonly DeskProfile Marketing = new(
@@ -55,6 +63,7 @@ public static class DeskProfiles
         "Marketing",
         "The office desk plus the visual tools: GIMP, Inkscape and a screenshot tool, with the agent's private web search.",
         "localhost/cielo-desk-marketing:latest",
+        "localhost/cielo-console-marketing:latest",
         OwnerDefaults.AgentTools);
 
     public static IReadOnlyList<DeskProfile> All { get; } = new[] { Office, Dotnet, Marketing };

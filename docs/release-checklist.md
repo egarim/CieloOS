@@ -82,8 +82,11 @@ model story is provider-free (add your own key in the Models tab, no restart).
   the desk user until `DOTNET_CLI_HOME` moved that state somewhere shared; and VS
   Code's launcher refuses to run when it sees WSL in `/proc/version`, which the
   container inherits from the build host.
-  Still open: the marketing image has never been built (it exists as a layer and
-  builds on demand), and switching an existing desk's profile is not implemented.
+  A desk is two images — the desktop the person uses and the console their AGENT
+  works in — because a .NET desk whose console lacked the SDK would give the
+  toolchain to the human and withhold it from the machine.
+  Still open: the marketing images have never been built (they exist as layers and
+  build on demand), and switching an existing desk's profile is not implemented.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 12/12 pass on native Linux, and it
   asserts the chat is installed, loopback-bound, follows a moved port on reinstall,

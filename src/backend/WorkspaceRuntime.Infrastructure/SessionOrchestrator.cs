@@ -133,7 +133,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         // image: Sessions:Image is how a deployment or a test points the default
         // desk somewhere else, and a desk profile must not quietly take that away.
         var image = isConsole
-            ? options.ConsoleImage
+            ? desk.NeedsOwnConsoleImage ? desk.ConsoleImage : options.ConsoleImage
             : desk.NeedsOwnImage ? desk.Image : options.Image;
         var containerPort = isConsole ? options.ConsolePort : options.ViewportPort;
         var homePath = isConsole ? options.ConsoleHomePath : options.HomePath;
@@ -187,7 +187,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             // A desk profile's own image is built on demand, so "not there yet" is
             // an ordinary state with a specific remedy — say which one, rather than
             // pointing at the session-image builder that does not build it.
-            if (!isConsole && desk.NeedsOwnImage)
+            if (isConsole ? desk.NeedsOwnConsoleImage : desk.NeedsOwnImage)
             {
                 var status = imageBuilds.TryGetValue(desk.Id, out var state) ? state : "not built";
                 return new ToolExecutionResult(false,
@@ -289,7 +289,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
     // only debuggable if it said why.
     public bool StartImageBuild(DeskProfile profile, string imagesRoot, string? buildArgument = null)
     {
-        if (!profile.NeedsOwnImage)
+        if (!profile.NeedsOwnImage && !profile.NeedsOwnConsoleImage)
         {
             return false;
         }
@@ -321,27 +321,53 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             }
         }
 
-        var context = Path.Combine(imagesRoot, profile.Id);
         var log = Path.Combine(Path.GetTempPath(), $"cielo-desk-image-{profile.Id}.log");
 
         _ = Task.Run(async () =>
         {
             try
             {
-                var arguments = new List<string> { "build", "-t", profile.Image };
-                if (!string.IsNullOrEmpty(buildArgument))
+                // A desk is two images: the desktop the person uses and the console
+                // their agent works in. Both, or the profile only half exists.
+                var layers = new List<(string Layer, string Image)>();
+                if (profile.NeedsOwnImage)
                 {
-                    arguments.Add("--build-arg");
-                    arguments.Add(buildArgument);
+                    layers.Add(("desktop", profile.Image));
                 }
-                arguments.Add(context);
+                if (profile.NeedsOwnConsoleImage)
+                {
+                    layers.Add(("console", profile.ConsoleImage));
+                }
 
-                var result = await RunPodmanAsync(arguments.ToArray(), CancellationToken.None);
-                await File.WriteAllTextAsync(log, result.Stdout + Environment.NewLine + result.Stderr);
-                imageBuilds[profile.Id] = result.ExitCode == 0 ? "built" : $"failed (see {log})";
-                // The build knows the answer, so publish it rather than leaving the
-                // cache to expire and a freshly built desk looking unavailable.
-                imageChecks[profile.Image] = (result.ExitCode == 0, DateTimeOffset.UtcNow);
+                var transcript = new StringBuilder();
+                var ok = true;
+                foreach (var (layer, image) in layers)
+                {
+                    var arguments = new List<string> { "build", "-t", image };
+                    // Only the desktop layer takes a VS Code build arg; passing an
+                    // unknown one to the console layer is a warning, not an error,
+                    // but there is no reason to make podman print it.
+                    if (!string.IsNullOrEmpty(buildArgument) && layer == "desktop")
+                    {
+                        arguments.Add("--build-arg");
+                        arguments.Add(buildArgument);
+                    }
+                    arguments.Add(Path.Combine(imagesRoot, profile.Id, layer));
+
+                    var result = await RunPodmanAsync(arguments.ToArray(), CancellationToken.None);
+                    transcript.AppendLine($"=== {layer} ({image}) exit {result.ExitCode}");
+                    transcript.AppendLine(result.Stdout);
+                    transcript.AppendLine(result.Stderr);
+                    imageChecks[image] = (result.ExitCode == 0, DateTimeOffset.UtcNow);
+                    if (result.ExitCode != 0)
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                await File.WriteAllTextAsync(log, transcript.ToString());
+                imageBuilds[profile.Id] = ok ? "built" : $"failed (see {log})";
             }
             catch (Exception exception)
             {

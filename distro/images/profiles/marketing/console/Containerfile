@@ -1,0 +1,10 @@
+# The marketing desk's CONSOLE image: the shared console plus the command-line
+# image tools, so the agent can resize, convert and compose without the GUI.
+ARG BASE=localhost/lunos-console:latest
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends imagemagick webp \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*

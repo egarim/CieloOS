@@ -261,8 +261,8 @@ if [[ "$(id -u)" -eq 0 ]]; then
     /usr/local/bin/cielo-build-desk-image "$id"
 fi
 
-context="/var/lib/cielo/images/profiles/${id}"
-test -d "$context" || { echo "No desk profile '${id}' under /var/lib/cielo/images/profiles." >&2; exit 2; }
+root="/var/lib/cielo/images/profiles/${id}"
+test -d "$root" || { echo "No desk profile '${id}' under /var/lib/cielo/images/profiles." >&2; exit 2; }
 
 # VS Code ships a per-architecture .deb, like ONLYOFFICE in the session image.
 case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -270,7 +270,15 @@ case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
   *)             VSCODE_DEB="https://update.code.visualstudio.com/latest/linux-deb-x64/stable" ;;
 esac
 
-exec podman build --build-arg "VSCODE_DEB=${VSCODE_DEB}" -t "localhost/cielo-desk-${id}:latest" "$context"
+# A desk is two images: the desktop the person uses, and the console their AGENT
+# works in. Building only the desktop would give a .NET desk whose agent cannot
+# run dotnet — the toolchain present for the human and missing for the machine.
+if [ -d "$root/desktop" ]; then
+  podman build --build-arg "VSCODE_DEB=${VSCODE_DEB}" -t "localhost/cielo-desk-${id}:latest" "$root/desktop"
+fi
+if [ -d "$root/console" ]; then
+  podman build -t "localhost/cielo-console-${id}:latest" "$root/console"
+fi
 EOF
 chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
