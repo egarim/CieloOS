@@ -1,0 +1,78 @@
+# The .NET developer desk: the CieloOS desktop plus a .NET + Uno toolchain that
+# is ready to work, so `dotnet new unoapp` and VS Code with the Uno extension are
+# there the moment the desk is created.
+#
+# FROM the shared desktop on purpose (issue #15): the look, ONLYOFFICE and the
+# agent's hands and eyes (xdotool, scrot, AT-SPI) are inherited rather than
+# rebuilt per profile, and this layer only carries what a developer adds.
+ARG BASE=localhost/lunos-desktop:latest
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+# Pin the channel rather than "latest": a desk that silently changes SDK under a
+# project is worse than one that is a version behind.
+ARG DOTNET_CHANNEL=10.0
+
+# .NET from Microsoft's install script rather than apt: it gives the same SDK on
+# arm64 and x64, which the distro packages do not.
+# The ICU package name carries its soname version (libicu74, libicu76, …) and the
+# webtop base does not track a fixed Ubuntu release, so pinning one is a build
+# that breaks the day the base moves. Ask apt what this release actually has.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends git unzip zip python3-venv \
+    && icu="$(apt-cache search --names-only '^libicu[0-9]+$' | awk '{print $1}' | sort -V | tail -1)" \
+    && test -n "$icu" \
+    && apt-get install -y --no-install-recommends "$icu" \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+    && bash /tmp/dotnet-install.sh --channel "${DOTNET_CHANNEL}" --install-dir /usr/share/dotnet \
+    && ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet \
+    && rm -f /tmp/dotnet-install.sh
+ENV DOTNET_ROOT=/usr/share/dotnet
+ENV PATH="/usr/share/dotnet:/usr/local/bin:${PATH}"
+# Nothing here should phone home on first run of every terminal.
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
+ENV DOTNET_NOLOGO=1
+
+# VS Code ships a per-arch .deb, like ONLYOFFICE. The installer passes the one
+# that matches the target (see cielo-build-profile-images).
+ARG VSCODE_DEB=https://update.code.visualstudio.com/latest/linux-deb-arm64/stable
+RUN curl -fsSL -o /tmp/code.deb "$VSCODE_DEB" \
+    && (dpkg -i /tmp/code.deb || apt-get update && apt-get install -y -f --no-install-recommends) \
+    && rm -f /tmp/code.deb && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# `dotnet new install` is PER USER: templates installed by root at build time are
+# invisible to the person who actually uses the desk (uid 911), which is how you
+# get an image with Uno installed where `dotnet new unoapp` says the template does
+# not exist. DOTNET_CLI_HOME moves that per-user state somewhere both can read —
+# set before the install so root writes there too.
+ENV DOTNET_CLI_HOME=/opt/cielo-dotnet/home
+RUN mkdir -p /opt/cielo-dotnet/home
+
+# Uno as a first-class citizen, not an afterthought: the templates so
+# `dotnet new unoapp` works, the workloads it needs already installed, and
+# uno-check on PATH for when a project wants more.
+RUN dotnet new install Uno.Templates \
+    && dotnet tool install uno.check --tool-path /usr/local/bin \
+    && (dotnet workload install wasm-tools --skip-sign-check || true) \
+    # The desk user needs to be able to add their own templates and tools later,
+    # so this shared state is writable rather than a read-only gift from root.
+    && chmod -R 0777 /opt/cielo-dotnet/home
+
+# Extensions are installed into the image, then seeded into the person's own
+# extensions directory on first start — installing them read-only under /usr
+# would mean they could never add or update one themselves.
+# DONT_PROMPT_WSL_INSTALL because the container inherits the host kernel's
+# /proc/version: building on WSL, VS Code's launcher decides it is "in WSL", asks
+# whether to continue, and a build has nobody to answer. Nothing to do with the
+# image, everything to do with where it was built.
+RUN DONT_PROMPT_WSL_INSTALL=1 code --no-sandbox --user-data-dir /tmp/vscode-build \
+        --extensions-dir /opt/cielo-vscode/extensions \
+        --install-extension unoplatform.vscode \
+        --install-extension ms-dotnettools.csdevkit \
+    && rm -rf /tmp/vscode-build
+
+COPY code.desktop /usr/share/applications/cielo-code.desktop
+COPY cielo-dotnet-seed /custom-cont-init.d/99z-cielo-dotnet
+RUN chmod +x /custom-cont-init.d/99z-cielo-dotnet

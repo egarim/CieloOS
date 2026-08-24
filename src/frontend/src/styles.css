@@ -1189,3 +1189,18 @@ button.fileDownloadLink {
     grid-template-columns: 1fr;
   }
 }
+
+/* Desk profile picker (add-teammate form) */
+
+.profileChoice {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  gap: 8px;
+  color: var(--ink-soft);
+}
+
+.profileChoice select {
+  flex: 1;
+  font: inherit;
+}

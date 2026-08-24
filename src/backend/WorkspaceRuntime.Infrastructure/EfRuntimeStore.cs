@@ -48,7 +48,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
             {
                 firstUser ??= user;
                 firstAgent ??= agent;
-                context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug });
+                context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile });
                 context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
                 context.Agents.Add(ToAgentRow(agent));
             }
@@ -64,7 +64,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         get
         {
             using var context = contextFactory.CreateDbContext();
-            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug)).ToList();
+            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.DeskProfile)).ToList();
         }
     }
 
@@ -127,7 +127,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
     {
         using var context = contextFactory.CreateDbContext();
         var row = context.Users.AsNoTracking().Single(user => user.Id == id);
-        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug);
+        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.DeskProfile);
     }
 
     public AgentProfile GetAgent(Guid id)
@@ -228,7 +228,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return false;
         }
 
-        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug });
+        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile });
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "owner.claim", AuditOutcome.Success, $"Claimed owner '{user.Slug}'.")));
@@ -244,7 +244,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return false;
         }
 
-        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug });
+        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile });
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "user.add", AuditOutcome.Success, $"Added user '{user.Slug}'.")));

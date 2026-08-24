@@ -45,6 +45,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 - A full **audit log** with **dual-actor** attribution (`joche → joche-agent`) and an **input ledger** (exact console text, desktop click coordinates, keystrokes).
 
 **Sessions**
+- **Desk profiles** — a user is created as an **Office**, **.NET developer** or **Marketing** desk. The profile decides the session image, the dock and what the home starts with: a developer desk carries a .NET SDK, Uno Platform templates and VS Code with the Uno extension, so `dotnet new unoapp` works on a fresh desk. Profile images are layered on the shared desktop and **built on demand**, so a machine only pays for the desks it actually uses.
 - One rootless **podman** container per session over a **persistent per-owner home volume** (+ a shared owner↔agent volume). Two kinds: **console** (ttyd + tmux) and **desktop** (webtop XFCE + Selkies, with ONLYOFFICE and the agent's hands/eyes: `xdotool`, `scrot`, AT-SPI).
 - **Inhabiting** — an owner can *shadow* or *become* an owned agent's session, dual-actor audited.
 - A **CieloOS desktop**, not a stock XFCE one: light sky wallpaper, a menu-bar-like top panel, a Plank dock with Files / Documents / Terminal / Browser, Orchis-Light + Papirus + Inter, and no filesystem icon or workspace pager to break by accident. Seeded once per session, so anything the person changes afterwards sticks (issue #11).

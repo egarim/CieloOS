@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Visual Studio Code
+Comment=Code editing, with the Uno Platform extension
+# --no-sandbox because the session already is the sandbox: an unprivileged user
+# in a rootless container, which is where Electron's own sandbox cannot nest.
+Exec=/usr/bin/code --no-sandbox %F
+Icon=vscode
+Terminal=false
+Categories=Development;IDE;
+StartupWMClass=Code

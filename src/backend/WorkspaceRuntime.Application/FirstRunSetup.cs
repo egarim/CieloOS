@@ -74,11 +74,11 @@ public interface ISetupService
     // (the chat UI) need it to find whose token to act as; it is never returned
     // to a remote caller.
     string? OwnerSlug();
-    ClaimResult Claim(string? name, bool fromLoopback);
+    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
     // the identity + agent + token. Single-owner today; this is the multi-user seam.
-    AddUserResult AddUser(string? name);
+    AddUserResult AddUser(string? name, string? deskProfile = null);
 }
 
 public sealed class SetupService : ISetupService
@@ -107,7 +107,7 @@ public sealed class SetupService : ISetupService
     // belongs with the login work in #9.
     public string? OwnerSlug() => store.Users.Count == 1 ? store.Users[0].Slug : null;
 
-    public ClaimResult Claim(string? name, bool fromLoopback)
+    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null)
     {
         if (!fromLoopback)
         {
@@ -134,7 +134,7 @@ public sealed class SetupService : ISetupService
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
             }
 
-            var (user, workspace, agent) = BuildIdentity(displayName, slug);
+            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile);
             if (!store.CreateOwner(user, workspace, agent))
             {
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
@@ -146,7 +146,7 @@ public sealed class SetupService : ISetupService
         }
     }
 
-    public AddUserResult AddUser(string? name)
+    public AddUserResult AddUser(string? name, string? deskProfile = null)
     {
         var displayName = (name ?? "").Trim();
         if (displayName.Length == 0)
@@ -162,7 +162,7 @@ public sealed class SetupService : ISetupService
 
         lock (gate)
         {
-            var (user, workspace, agent) = BuildIdentity(displayName, slug);
+            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile);
             // store.AddUser rejects a duplicate user/agent slug inside the same
             // transaction; the lock serializes all identity creation.
             if (!store.AddUser(user, workspace, agent))
@@ -178,13 +178,17 @@ public sealed class SetupService : ISetupService
 
     // One user + their workspace + their agent, with the agent granted the full
     // owner tool set and no provider override (resolves via the registry cascade).
-    private static (PlatformUser user, Workspace workspace, AgentProfile agent) BuildIdentity(string displayName, string slug)
+    private static (PlatformUser user, Workspace workspace, AgentProfile agent) BuildIdentity(string displayName, string slug, string? deskProfile)
     {
-        var user = new PlatformUser(Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug);
+        // An unknown id resolves to the default rather than failing: a desk is
+        // more useful than an error, and the profile only decides what is
+        // installed, never who the person is.
+        var profile = DeskProfiles.Resolve(deskProfile);
+        var user = new PlatformUser(Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug, profile.Id);
         var workspace = new Workspace(Guid.NewGuid(), user.Id, $"{displayName}'s workspace");
         var agent = new AgentProfile(
             Guid.NewGuid(), user.Id, workspace.Id, $"{displayName}'s Agent",
-            "", OwnerDefaults.AgentTools, $"{slug}-agent");
+            "", profile.AgentTools.ToHashSet(), $"{slug}-agent");
         return (user, workspace, agent);
     }
 }

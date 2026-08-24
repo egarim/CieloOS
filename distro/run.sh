@@ -54,6 +54,9 @@ export Runtime__SeedDemo=false
 export Database__Provider=sqlite
 export Database__SqlitePath="$BUNDLE/.data/workspace-runtime.db"
 export Auth__SecretsPath="$BUNDLE/.data/secrets"
+# Desk-profile build contexts ship in the bundle; the installed layout keeps them
+# under /var/lib/cielo, which does not exist for an app run out of a directory.
+export Sessions__ProfileImagesPath="$BUNDLE/images/profiles"
 export ASPNETCORE_URLS="http://127.0.0.1:${PORT}"
 mkdir -p "$BUNDLE/.data"
 

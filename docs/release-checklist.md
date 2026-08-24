@@ -70,6 +70,20 @@ model story is provider-free (add your own key in the Models tab, no restart).
   file it writes, so its theme ships as a dconf system default.
   Still open: a screenshot smoke test, so a webtop base-image update cannot
   silently undo the layout.
+- ✅ **Desk profiles (2026-08-24).** A user is created as an office, .NET developer
+  or marketing desk; the profile decides the session image, the agent's tool grant
+  and the home seeding, and is recorded on the user and in the audit trail.
+  Verified on arm64 against the live instance: the existing owner migrated to
+  `office`, a new `dotnet` desk started its session from
+  `localhost/cielo-desk-dotnet:latest`, and inside it `dotnet new unoapp` produces
+  a solution with the Uno extension already in VS Code.
+  Two things worth remembering, both invisible until tested: `dotnet new install`
+  is **per user**, so templates installed by root at build time were missing for
+  the desk user until `DOTNET_CLI_HOME` moved that state somewhere shared; and VS
+  Code's launcher refuses to run when it sees WSL in `/proc/version`, which the
+  container inherits from the build host.
+  Still open: the marketing image has never been built (it exists as a layer and
+  builds on demand), and switching an existing desk's profile is not implemented.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
   full first-run self-test in `ubuntu:24.04` — 12/12 pass on native Linux, and it
   asserts the chat is installed, loopback-bound, follows a moved port on reinstall,

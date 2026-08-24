@@ -12,6 +12,10 @@ public class AccessPolicyTests
     [InlineData("/api/inference/status", "GET", AccessLevel.Public)]
     [InlineData("/api/setup/status", "GET", AccessLevel.Public)]
     [InlineData("/api/setup/claim", "POST", AccessLevel.Public)]
+    // The claim wizard offers the desk choice before any token exists.
+    [InlineData("/api/desk-profiles", "GET", AccessLevel.Public)]
+    // Building one costs gigabytes, so it is the owner's call, not an agent's.
+    [InlineData("/api/desk-profiles/dotnet/build", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]

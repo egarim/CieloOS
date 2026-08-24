@@ -24,7 +24,10 @@ public enum AuditOutcome
 // Slug is the stable lowercase identity key (^[a-z0-9-]{1,32}$): the home
 // volume name, the audit attribution, and the bearer-token subject all key off
 // it. A human's slug is their own; an agent's slug is its identity.
-public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug);
+// DeskProfile is what the desk is FOR (see DeskProfiles): it decides the session
+// image, the agent's tool grant and what the home starts with. Defaulted so every
+// user created before profiles existed reads as the office desk they already had.
+public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug, string DeskProfile = "office");
 
 public sealed record Workspace(Guid Id, Guid OwnerUserId, string Name);
 

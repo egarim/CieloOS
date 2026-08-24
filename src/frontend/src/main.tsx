@@ -41,7 +41,8 @@ type SessionView = { id: string; owner: string; profile: string; status: string;
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
-type Whoami = { slug: string; display: string; kind: string; homes: string[] };
+type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string };
+type DeskProfileView = { id: string; label: string; description: string; isDefault: boolean; imageReady: boolean; buildStatus: string };
 type ConsoleView = { sessionId: string; screen: string; available: boolean; detail?: string | null };
 type LoopStep = { step: number; text: string | null; submit: boolean; done: boolean; note?: string | null; decision: string; reason: string };
 type AgentRunResult = { sessionId: string; goal: string; completed: boolean; stopReason: string; steps: LoopStep[] };
@@ -158,6 +159,8 @@ function App() {
   const [modelsBusy, setModelsBusy] = React.useState(false);
   const [teammateOpen, setTeammateOpen] = React.useState(false);
   const [teammateName, setTeammateName] = React.useState("");
+  const [deskProfiles, setDeskProfiles] = React.useState<DeskProfileView[]>([]);
+  const [teammateProfile, setTeammateProfile] = React.useState("office");
   const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
   const [teammateError, setTeammateError] = React.useState<string | null>(null);
   const [teammateBusy, setTeammateBusy] = React.useState(false);
@@ -224,7 +227,8 @@ function App() {
       // the runtime can refuse a decision made against a sheet that has since moved.
       load<SurfaceState>("/api/surfaces/spreadsheet/state", (value) => setSpreadsheetRevision(value.revision)),
       load<ModelsData>("/api/models", setModels),
-      load<Whoami>("/api/whoami", setWhoami)
+      load<Whoami>("/api/whoami", setWhoami),
+      load<DeskProfileView[]>("/api/desk-profiles", setDeskProfiles)
     ]);
 
     if (unauthorized) signOut();
@@ -491,6 +495,20 @@ function App() {
 
   // Invite a teammate. The runtime returns their bearer token for you to hand
   // over (it is also written to a 0600 file on the box).
+  // A profile image is built in the background: this starts it and the desk-profile
+  // list reports progress, rather than a request that hangs for several minutes.
+  async function buildDeskImage(id: string) {
+    try {
+      await fetch(`/api/desk-profiles/${encodeURIComponent(id)}/build`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${readToken() ?? ""}` }
+      });
+      setDeskProfiles(await api<DeskProfileView[]>("/api/desk-profiles"));
+    } catch (error) {
+      setTeammateError(String(error));
+    }
+  }
+
   async function addTeammate() {
     const name = teammateName.trim();
     if (!name || teammateBusy) return;
@@ -499,7 +517,7 @@ function App() {
     try {
       const result = await api<{ slug: string; token: string }>("/api/users", {
         method: "POST",
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, deskProfile: teammateProfile })
       });
       setTeammateResult(result);
       setTeammateName("");
@@ -869,6 +887,40 @@ function App() {
               {teammateOpen && (
                 <div className="teammateForm">
                   <p className="muted small">Create another user on this machine — you'll get a token to hand them.</p>
+                  <label className="profileChoice">
+                    Desk
+                    <select
+                      data-automation-id="teammate-profile"
+                      value={teammateProfile}
+                      disabled={teammateBusy}
+                      onChange={(event) => setTeammateProfile(event.target.value)}
+                    >
+                      {deskProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.label}{profile.imageReady ? "" : " — image not built"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {deskProfiles.find((profile) => profile.id === teammateProfile) && (
+                    <p className="muted small">
+                      {deskProfiles.find((profile) => profile.id === teammateProfile)!.description}
+                    </p>
+                  )}
+                  {/* A desk whose image is missing can be created, but it cannot open a
+                      desktop session until the image exists — so offer the build here
+                      rather than letting the person discover it later. */}
+                  {deskProfiles.some((profile) => profile.id === teammateProfile && !profile.imageReady) && (
+                    <button
+                      className="ghost"
+                      data-automation-id="build-desk-image"
+                      onClick={() => buildDeskImage(teammateProfile)}
+                    >
+                      {deskProfiles.find((profile) => profile.id === teammateProfile)?.buildStatus === "building"
+                        ? <><Loader2 size={14} className="spin" /> building this desk's image…</>
+                        : "Build this desk's image (large download)"}
+                    </button>
+                  )}
                   <input
                     data-automation-id="teammate-name"
                     value={teammateName}
@@ -935,6 +987,9 @@ function App() {
                 <h2>
                   {desk.isSelf ? <User size={18} /> : <Bot size={18} />} {desk.label}
                   <span className="deskTag">{desk.isSelf ? "your desk" : "agent you own"}</span>
+                  {/* An agent shows its owner's desk profile because it works on
+                      that desk — same toolchain, same image. */}
+                  {whoami?.deskProfileLabel && <span className="deskTag">{whoami.deskProfileLabel}</span>}
                 </h2>
                 <p className="muted small">
                   Home volume <code>lunos-home-{desk.slug}</code> — it outlives every session; this is where this desk's work lives.
