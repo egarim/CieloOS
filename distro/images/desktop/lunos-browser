@@ -383,6 +383,46 @@ async def navigate(cdp, url):
     return {"ok": True, "title": here["t"], "url": here["u"]}
 
 
+async def back(cdp):
+    """Return to a page this session already visited — and only that page.
+
+    `back` is Allow precisely because it cannot reveal a host the agent has not
+    already been to. That is only true if the trip is actually to the remembered
+    entry: revisiting it re-asks the server, which may now answer 302 to somewhere
+    new, and an unapproved origin would be reached through the one verb that never
+    asks a human. Same guard as `navigate`, for the same reason.
+    """
+    history = await cdp.call("Page.getNavigationHistory")
+    index = history["currentIndex"]
+    if index <= 0:
+        return {"ok": False, "detail": "Nothing to go back to."}
+
+    entry = history["entries"][index - 1]
+    was = (await cdp.where())["u"]
+    guard = Confinement(cdp, origin_of(entry.get("url", "")), documents_only=True)
+    await guard.install()
+    try:
+        cdp.mark()
+        await cdp.call("Page.navigateToHistoryEntry", {"entryId": entry["id"]})
+        await cdp.settle(timeout=10.0)
+    finally:
+        await guard.remove()
+
+    here = await cdp.where()
+    if guard.blocked:
+        if origin_of(was):
+            cdp.mark()
+            await cdp.call("Page.navigate", {"url": was})
+            await cdp.settle(timeout=10.0)
+            here = await cdp.where()
+        elsewhere = sorted({destination for _, destination in guard.blocked})
+        return {"ok": False, "title": here["t"], "url": here["u"], "blocked": elsewhere,
+                "detail": "Going back now redirects to " + ", ".join(elsewhere[:3])
+                          + ", which was never approved; ask for that address instead."}
+
+    return {"ok": True, "title": here["t"], "url": here["u"]}
+
+
 async def click(cdp, ref):
     """Click a node the agent has already observed, without leaving this origin.
 
@@ -426,8 +466,21 @@ async def click(cdp, ref):
     await guard.install()
 
     try:
-        x = target["x"] + target["w"] // 2
-        y = target["y"] + target["h"] // 2
+        # The listed box was measured wherever the element happened to be; the
+        # pointer event is dispatched in VIEWPORT coordinates. For a control below
+        # the fold those differ, and the click lands somewhere else on the page —
+        # succeeding, silently, on the wrong thing. So bring it into view and
+        # measure again, immediately before dispatching.
+        x, y = target["x"] + target["w"] // 2, target["y"] + target["h"] // 2
+        try:
+            await cdp.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend}, timeout=5.0)
+            fresh = await cdp.call("DOM.getBoxModel", {"backendNodeId": backend}, timeout=5.0)
+            quad = fresh["model"]["content"]
+            xs, ys = quad[0::2], quad[1::2]
+            x = int((min(xs) + max(xs)) / 2)
+            y = int((min(ys) + max(ys)) / 2)
+        except (RuntimeError, TimeoutError, KeyError, IndexError, ValueError):
+            pass  # keep the observed centre rather than refusing to click at all
         cdp.mark()
         for kind in ("mousePressed", "mouseReleased"):
             await cdp.call("Input.dispatchMouseEvent", {
@@ -510,16 +563,7 @@ async def run(verb, args):
             return await click(cdp, args[0])
 
         if verb == "back":
-            history = await cdp.call("Page.getNavigationHistory")
-            index = history["currentIndex"]
-            if index <= 0:
-                return {"ok": False, "detail": "Nothing to go back to."}
-            cdp.mark()
-            await cdp.call("Page.navigateToHistoryEntry",
-                           {"entryId": history["entries"][index - 1]["id"]})
-            await cdp.settle(timeout=10.0)
-            here = await cdp.where()
-            return {"ok": True, "title": here["t"], "url": here["u"]}
+            return await back(cdp)
 
         return {"ok": False, "detail": f"Unknown verb '{verb}'."}
 
