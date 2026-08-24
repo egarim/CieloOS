@@ -114,6 +114,10 @@ public sealed class TokenUsageRow
     // makes the monthly window a fact in the schema instead of an assumption in
     // the code that reads it.
     public string MonthKey { get; set; } = "";
+    // UTC ticks, so "most recent first" is a database sort. SQLite stores a
+    // DateTimeOffset as text it cannot order meaningfully, and sorting in memory
+    // means reading an append-only table in full to show ten rows.
+    public long OccurredAtTicks { get; set; }
     public Guid UserId { get; set; }
     public Guid AgentId { get; set; }
     public string ProviderId { get; set; } = "";

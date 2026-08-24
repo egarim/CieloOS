@@ -22,6 +22,7 @@ public sealed class EfTokenLedger : ITokenLedger
             Id = Guid.NewGuid(),
             OccurredAt = usage.OccurredAt,
             MonthKey = MonthKeyOf(usage.OccurredAt),
+            OccurredAtTicks = usage.OccurredAt.UtcTicks,
             UserId = usage.UserId,
             AgentId = usage.AgentId,
             ProviderId = usage.ProviderId,
@@ -58,14 +59,14 @@ public sealed class EfTokenLedger : ITokenLedger
     public IReadOnlyList<TokenUsage> Recent(int limit, Guid? userId = null)
     {
         using var context = contextFactory.CreateDbContext();
-        // Ordered by Id-free insertion order via the timestamp, in memory: SQLite
-        // stores a DateTimeOffset as text it cannot sort meaningfully, and this
-        // list is the last handful of calls, not a report.
+        // Ordered and limited in the DATABASE, by ticks. Sorting on the
+        // DateTimeOffset meant reading this append-only table in full to return
+        // ten rows — fine on day one, slower every day after.
         return context.TokenUsage.AsNoTracking()
             .Where(row => userId == null || row.UserId == userId)
-            .AsEnumerable()
-            .OrderByDescending(row => row.OccurredAt)
+            .OrderByDescending(row => row.OccurredAtTicks)
             .Take(limit)
+            .AsEnumerable()
             .Select(row => new TokenUsage(
                 row.UserId, row.AgentId, row.ProviderId, row.Model, row.Locality,
                 row.PromptTokens, row.CompletionTokens, row.OccurredAt))
