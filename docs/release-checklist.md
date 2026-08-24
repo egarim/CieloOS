@@ -190,6 +190,50 @@ model story is provider-free (add your own key in the Models tab, no restart).
   so fresh sessions have the agent's hands/eyes without a manual step.
 - ⬜ **Bake console + desktop images into the distro** so console/desktop sessions
   work on first boot instead of being built ad-hoc (see backlog in ai-native-ui.md).
+- 🟡 **`browser` surface, phase 1 (#16).** `lunos-browser` is in the desktop
+  Containerfile, so a rebuilt `localhost/lunos-desktop:latest` carries it; the
+  profile images inherit it through `FROM ${BASE}`. Open, and deliberately not
+  done in phase 1:
+  - **An existing agent does not get the grant.** `OwnerDefaults.AgentTools` gains
+    `browser`, but that only applies when an identity is created, so on a machine
+    that already exists every agent is denied `browser` until its
+    `GrantedToolsJson` is updated. There is no endpoint for this and no
+    reconciliation on startup — widening an agent's capabilities during an upgrade
+    is the owner's decision, not a migration's.
+  - **No egress allowlist yet.** `navigate` is `RequireApproval` for every URL,
+    which is safe but means routine browsing asks a human every time. The per-desk
+    domain allowlist (phase 2) is what turns the common case back into `Allow`.
+  - **Clicks are confined to the current origin.** Every request type is
+    intercepted for the duration of a click — `fetch`, XHR, `sendBeacon` and image
+    pixels included, not just navigations — and popups cannot be created at all
+    (`--block-new-web-contents`), so leaving a site goes through the
+    approval-gated `navigate`. `navigate` in turn refuses a cross-origin
+    **redirect**: a human approves a destination, and a server must not get to
+    pick a different one afterwards.
+    Two things this does NOT cover, deliberately:
+    - **Same-origin submission.** A click that posts to the site the agent is
+      already on is indistinguishable from ordinary use of that site. Read "the
+      agent may visit X" as "the agent may post to X".
+    - **Anything the page does after the command ends.** This is the structural
+      one. The helper is one process per command, so CDP interception is torn down
+      when it exits: ambient traffic, a `setTimeout` scheduled by a click, or a
+      delayed `location` change all run with nothing watching. Confinement bounds
+      what the agent's action DOES, not what the page does afterwards.
+- ⬜ **Egress proxy for the agent browser (phase 2, and the real fix).** Launch the
+  agent's Chromium behind a local proxy in the session container
+  (`--proxy-server=127.0.0.1:<port>`) that enforces the per-desk allowlist for
+  every request, including CONNECT for TLS. This is the only enforcement that
+  outlives a command, and it subsumes four separate holes review found one at a
+  time in the CDP-window approach: cross-origin redirects, popups, delayed
+  requests, and ambient page traffic. Until it exists, "navigation is the
+  human-approved egress decision" is true *of the agent's commands*, not of the
+  browser as a whole — say so in release notes rather than implying more.
+  - **No `type` on the web.** Filling a form is phase 2, behind the existing
+    `ISessionInputGrants` lease.
+  - **No auto-waiting beyond the load event.** The helper waits for
+    `Page.loadEventFired` plus a short settle; a client-rendered page that paints
+    late can be read a beat early. This is the visible cost of not shipping
+    Playwright — revisit with numbers if it bites.
 - ⬜ **Local model on first boot.** `local-inference.service` pulls Bonsai-4B
   if missing; confirm the pull + sha256 verify path on a clean install, or ship
   the Bonsai ISO edition with weights bundled (model-selection.md).

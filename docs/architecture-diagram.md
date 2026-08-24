@@ -23,6 +23,7 @@ flowchart TB
             sf3["console"]
             sf4["desktop"]
             sf5["session-input"]
+            sf6["browser"]
         end
 
         subgraph agents["Agent loops + brains"]
@@ -41,7 +42,7 @@ flowchart TB
     subgraph sessions["Sessions — rootless podman containers"]
         direction TB
         console["console · ttyd + tmux + tools"]
-        desktop["desktop · webtop XFCE + Selkies + ONLYOFFICE + xdotool/scrot/AT-SPI"]
+        desktop["desktop · webtop XFCE + Selkies + ONLYOFFICE + xdotool/scrot/AT-SPI + Chromium/CDP"]
         searx["SearXNG · web search"]
         vols[("per-owner home volumes + shared volume")]
     end

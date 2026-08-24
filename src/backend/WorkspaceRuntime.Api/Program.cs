@@ -111,6 +111,7 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IDesktopBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<IBrowserBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
 {
     PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman"
@@ -119,6 +120,7 @@ builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequired
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceExecutor(provider.GetRequiredService<IDesktopBackend>()));
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new BrowserSurfaceExecutor(provider.GetRequiredService<IBrowserBackend>()));
 // V0.6 per-session input grant: a time-boxed lease that upgrades desktop
 // typing/keys to Allow (in-memory: a restart drops all input authority).
 builder.Services.AddSingleton<ISessionInputGrants, InMemorySessionInputGrants>();
@@ -1064,6 +1066,59 @@ app.MapGet("/api/sessions/{id}/elements", async (string id, HttpContext context,
     return elements.Ok
         ? Results.Ok(new { elements.SessionId, count = elements.Elements.Count, elements.Elements })
         : Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
+});
+
+// Observe the BROWSER open in a desktop session: where it is, and the actionable
+// elements from the page's own accessibility tree. The gated read that pairs with
+// the `browser` surface, same ownership rule as the screenshot.
+app.MapGet("/api/sessions/{id}/browser", async (string id, HttpContext context, IBrowserBackend browser, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var elements = await browser.ElementsAsync(id, cancellationToken);
+    if (!elements.Ok)
+    {
+        return Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
+    }
+    // Both halves or neither. If the browser goes away between the two calls, a
+    // 200 with an empty title and URL reads as "the page has no address", which is
+    // a plausible-looking answer to a question we could not answer at all.
+    var page = await browser.StatusAsync(id, cancellationToken);
+    if (!page.Ok)
+    {
+        return Results.Json(new { error = page.Error }, statusCode: StatusCodes.Status409Conflict);
+    }
+    return Results.Ok(new { sessionId = id, page.Title, page.Url, count = elements.Elements.Count, elements.Elements });
+});
+
+// The page's visible text. Deliberately a separate call from the element list:
+// this is the one output on the whole bus that is attacker-authored by design, so
+// it arrives wrapped and labelled as untrusted data rather than folded silently
+// into a perception payload a model might read as instructions.
+app.MapGet("/api/sessions/{id}/browser/text", async (string id, HttpContext context, IBrowserBackend browser, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var read = await browser.ReadAsync(id, cancellationToken);
+    return read.Ok
+        ? Results.Ok(new { sessionId = id, read.Url, read.Text, untrusted = true, prompt = UntrustedPageText.Wrap(read.Url, read.Text) })
+        : Results.Json(new { error = read.Error }, statusCode: StatusCodes.Status409Conflict);
 });
 
 // Drive a console session toward a goal: the loop observes the screen, asks the

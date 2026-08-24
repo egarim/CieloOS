@@ -1,0 +1,600 @@
+#!/usr/bin/env python3
+"""The agent's browser, driven over CDP from inside the session container.
+
+Invoked by the runtime as:
+    podman exec -u abc -e DISPLAY=:1 <container> lunos-browser <verb> [args...]
+
+Why in-container rather than a host-side Playwright client: the DevTools endpoint
+is unauthenticated and confers full control of the profile (cookies included), so
+it must never leave the session's network namespace. Publishing it to the host
+would let any local account drive another owner's browser, which is exactly the
+per-owner isolation the runtime enforces everywhere else. Here, loopback IS the
+session, so the endpoint is reachable by this session and nothing else.
+
+The profile is deliberately NOT the human's. Chromium 136+ refuses remote
+debugging on the default user-data-dir, and a running browser hands new launches
+off to the existing singleton instead - so the separation the threat model wants
+is also the only thing that works. A poisoned page therefore cannot reach the
+human's logged-in sessions; to give the agent a site, the human signs in inside
+the agent's profile while watching.
+
+Every verb prints one line of JSON on stdout and exits 0; failures print
+{"ok": false, "detail": ...} and exit non-zero.
+"""
+import asyncio
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+import websockets
+
+PORT = int(os.environ.get("CIELO_BROWSER_PORT", "9333"))
+PROFILE = os.environ.get("CIELO_BROWSER_PROFILE", "/config/.cielo-agent-browser")
+BINARY = "/usr/bin/chromium-browser"
+
+# The roles worth showing an agent: things you can act on. The full AX tree is
+# mostly structural noise (generic containers, text runs), and handing a model
+# 4000 nodes to pick from is how grounding degrades back into guessing.
+ACTIONABLE = {
+    "button", "link", "textbox", "searchbox", "combobox", "checkbox",
+    "radio", "menuitem", "menuitemcheckbox", "menuitemradio",
+    "tab", "option", "slider", "switch", "spinbutton",
+}
+
+MAX_ELEMENTS = 200
+READ_LIMIT = 20000
+REF = re.compile(r"^e([0-9]{1,9})-([0-9a-f]{6})$")
+
+
+def fail(detail, code=1):
+    print(json.dumps({"ok": False, "detail": str(detail)}))
+    sys.exit(code)
+
+
+def endpoint(path):
+    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=5) as response:
+        body = response.read().decode("utf-8", "replace")
+    return json.loads(body) if body.lstrip().startswith(("{", "[")) else body
+
+
+def running():
+    try:
+        endpoint("/json/version")
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def launch(timeout=25.0):
+    """Start the agent browser on the session's own display, or confirm it is up."""
+    if running():
+        return
+    if not os.path.exists(BINARY):
+        fail(f"No browser at {BINARY}.")
+    os.makedirs(PROFILE, exist_ok=True)
+    subprocess.Popen(
+        [
+            BINARY,
+            # The webtop containers are unprivileged, so the Chromium sandbox
+            # cannot start; this mirrors the image's own wrapped-chromium launcher.
+            "--no-sandbox", "--test-type", "--password-store=basic",
+            f"--user-data-dir={PROFILE}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={PORT}",
+            "--no-first-run", "--no-default-browser-check",
+            "--disable-background-networking",
+            # A target="_blank" link opens a SECOND CDP target, which the click
+            # path's request interception never sees — so the popup's first
+            # request, query string and all, completes before anything can close
+            # it. Closing it afterwards is theatre: the data has already left.
+            # This refuses to create the new contents at all, which keeps the
+            # agent on one page and keeps every navigation inside the interception
+            # the click path installs.
+            "--block-new-web-contents",
+            "about:blank",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if running():
+            return
+        time.sleep(0.25)
+    fail("The browser did not expose a DevTools endpoint in time.")
+
+
+def pages():
+    return [t for t in endpoint("/json/list") if t.get("type") == "page"]
+
+
+def page_socket():
+    open_pages = pages()
+    if not open_pages:
+        fail("The browser has no open page.")
+    return open_pages[0]["webSocketDebuggerUrl"]
+
+
+def origin_of(url):
+    """The browser's notion of an origin, or "" for anything without one.
+
+    Normalised, because the comparison decides whether a click is refused: a page
+    on https://example.com linking to https://EXAMPLE.com:443 is the SAME origin
+    to the browser, and comparing the two strings would refuse an ordinary
+    same-site link and tell the person it needs approval. An egress control that
+    fires on links that were never leaving is a control people learn to disable.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError:
+        return ""
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        return ""
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+    try:
+        port = parsed.port or (443 if scheme == "https" else 80)
+    except ValueError:
+        return ""
+    return f"{scheme}://{host}:{port}"
+
+
+def ref_of(backend, role, name):
+    """A click token that carries node identity, not a position in a list.
+
+    Sequential ids are recomputed on every observation, so on a page that changes
+    between looking and clicking, id 3 can quietly become a different control —
+    the click succeeds on the wrong thing rather than failing. The backend node id
+    pins WHICH node, and the digest of role+name pins WHAT it was when observed,
+    so a node that has been swapped or relabelled is refused instead of clicked.
+    """
+    digest = hashlib.sha256(f"{role}\x00{name}".encode("utf-8")).hexdigest()[:6]
+    return f"e{backend}-{digest}"
+
+
+class Cdp:
+    """A CDP client with a real reader: replies resolve futures, events dispatch.
+
+    The single-loop version could not answer an event while waiting for a reply,
+    which is fine until the browser asks US something — as it does once request
+    interception is on. Handlers therefore schedule their reply as a task rather
+    than awaiting inside the pump, which would deadlock on itself.
+    """
+
+    def __init__(self, socket):
+        self.socket = socket
+        self.counter = 0
+        self.pending = {}
+        self.handlers = {}
+        self.seen = set()
+        self.pump = None
+
+    def start(self):
+        self.pump = asyncio.create_task(self._read())
+
+    async def _read(self):
+        try:
+            async for raw in self.socket:
+                message = json.loads(raw)
+                identifier = message.get("id")
+                if identifier is not None:
+                    waiting = self.pending.pop(identifier, None)
+                    if waiting is not None and not waiting.done():
+                        if "error" in message:
+                            waiting.set_exception(RuntimeError(
+                                message["error"].get("message", str(message["error"]))))
+                        else:
+                            waiting.set_result(message.get("result", {}))
+                    continue
+                method = message.get("method")
+                if method is None:
+                    continue
+                self.seen.add(method)
+                handler = self.handlers.get(method)
+                if handler is not None:
+                    asyncio.create_task(handler(message.get("params", {})))
+        except (asyncio.CancelledError, websockets.exceptions.WebSocketException):
+            pass
+
+    async def call(self, method, params=None, timeout=30.0):
+        self.counter += 1
+        mine = self.counter
+        waiting = asyncio.get_running_loop().create_future()
+        self.pending[mine] = waiting
+        await self.socket.send(json.dumps({"id": mine, "method": method, "params": params or {}}))
+        try:
+            return await asyncio.wait_for(waiting, timeout)
+        except asyncio.TimeoutError:
+            self.pending.pop(mine, None)
+            raise TimeoutError(f"{method} did not answer in {timeout:.0f}s")
+
+    def mark(self):
+        """Forget the load events seen so far, so `settle` waits for the NEXT one."""
+        self.seen.discard("Page.loadEventFired")
+        self.seen.discard("Page.frameStoppedLoading")
+
+    async def settle(self, timeout=15.0):
+        """Wait for the page to finish loading, rather than sleeping and hoping.
+
+        A hand-rolled client has no auto-waiting, so this is where that absence
+        gets paid for. It is deliberately forgiving: a page that never fires a
+        load event (a long poll, a stalled subresource, a click that navigated
+        nowhere) should still be readable, so timing out here is not an error.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if "Page.loadEventFired" in self.seen:
+                break
+            await asyncio.sleep(0.05)
+        # A brief settle for what the load event does not cover: client-side
+        # rendering that paints just after it fires.
+        await asyncio.sleep(0.4)
+
+    async def where(self):
+        result = await self.call("Runtime.evaluate", {
+            "expression": "JSON.stringify({t: document.title, u: location.href})",
+            "returnByValue": True,
+        })
+        try:
+            return json.loads(result["result"]["value"])
+        except (KeyError, TypeError, ValueError):
+            return {"t": "", "u": ""}
+
+
+class Confinement:
+    """Fail requests that leave `origin` while an action is in flight.
+
+    Two callers, two shapes. A CLICK confines every request type, because a click
+    handler can send data with fetch, XHR, sendBeacon or a one-pixel image without
+    navigating anywhere — a document-only filter would let the click do exactly
+    what the policy says it cannot. A NAVIGATE confines documents only, so that a
+    cross-origin REDIRECT off the approved URL is refused: the human approved one
+    destination, and a server must not be able to choose another. Its subresources
+    are left alone, because a page fetching its own CDN is what the web is; that
+    ambient traffic is the phase-2 allowlist's problem, not something to break
+    every site over.
+
+    KNOWN LIMIT, and the reason the phase-2 egress proxy is not optional: this
+    guard exists only while a command is running. The helper is one process per
+    command, so CDP interception is torn down when it exits, and a page that
+    schedules work for later — setTimeout(() => fetch(...), 11000), or a delayed
+    location change — runs it with nothing watching. Confinement therefore bounds
+    what a click DOES, not what the page does afterwards, which is the same
+    boundary that already applies to any approved page's ambient behaviour. Making
+    it hold continuously needs enforcement that outlives the command: a proxy the
+    browser is launched behind, which is also how the per-desk allowlist should be
+    built. See docs/release-checklist.md.
+    """
+
+    # Request kinds worth naming to a person. The rest (fonts, stylesheets) are
+    # counted instead, so one blocked beacon is not buried under twenty webfonts.
+    NOTABLE = {"Document", "XHR", "Fetch", "Ping", "Image", "Media", "Other"}
+
+    def __init__(self, cdp, origin, documents_only=False):
+        self.cdp = cdp
+        self.origin = origin
+        self.documents_only = documents_only
+        self.blocked = []
+
+    def notable(self):
+        return [url for kind, url in self.blocked if kind in self.NOTABLE]
+
+    async def install(self):
+        self.cdp.handlers["Fetch.requestPaused"] = self._paused
+        pattern = {"urlPattern": "*", "requestStage": "Request"}
+        if self.documents_only:
+            pattern["resourceType"] = "Document"
+        await self.cdp.call("Fetch.enable", {"patterns": [pattern]})
+
+    async def remove(self):
+        self.cdp.handlers.pop("Fetch.requestPaused", None)
+        try:
+            await self.cdp.call("Fetch.disable", timeout=5.0)
+        except (RuntimeError, TimeoutError):
+            pass
+
+    async def _paused(self, params):
+        request_id = params.get("requestId")
+        url = (params.get("request") or {}).get("url", "")
+        kind = params.get("resourceType") or "Other"
+        destination = origin_of(url)
+        if self.origin and destination and destination != self.origin:
+            self.blocked.append((kind, url))
+            verb, arguments = "Fetch.failRequest", {
+                "requestId": request_id, "errorReason": "BlockedByClient"}
+        else:
+            verb, arguments = "Fetch.continueRequest", {"requestId": request_id}
+        try:
+            await self.cdp.call(verb, arguments, timeout=10.0)
+        except (RuntimeError, TimeoutError):
+            pass
+
+
+async def actionable(cdp):
+    await cdp.call("DOM.enable")
+    await cdp.call("Accessibility.enable")
+    tree = await cdp.call("Accessibility.getFullAXTree", {"depth": -1})
+    elements = []
+    for node in tree.get("nodes", []):
+        if node.get("ignored"):
+            continue
+        role = (node.get("role") or {}).get("value")
+        backend = node.get("backendDOMNodeId")
+        if role not in ACTIONABLE or backend is None:
+            continue
+        try:
+            box = await cdp.call("DOM.getBoxModel", {"backendNodeId": backend}, timeout=5.0)
+        except (RuntimeError, TimeoutError):
+            continue  # off-screen or detached: not something to click
+        quad = box["model"]["content"]
+        xs, ys = quad[0::2], quad[1::2]
+        x, y = int(min(xs)), int(min(ys))
+        width, height = int(max(xs)) - x, int(max(ys)) - y
+        if width <= 0 or height <= 0:
+            continue
+        name = " ".join((((node.get("name") or {}).get("value")) or "").split())[:120]
+        elements.append({
+            "id": len(elements) + 1,
+            "ref": ref_of(backend, role, name),
+            "role": role,
+            "name": name,
+            "x": x, "y": y, "w": width, "h": height,
+        })
+        if len(elements) >= MAX_ELEMENTS:
+            break
+    return elements
+
+
+async def navigate(cdp, url):
+    """Go where a human approved, and only there.
+
+    A human approves a destination, not a starting point. Without this, an
+    approved https://safe.example that answers 302 to anywhere would land the
+    agent on a host nobody agreed to — the server picking the destination after
+    the fact, which makes the approval a formality. Redirect hops that leave the
+    approved origin are refused and named, so the agent can ask for that origin
+    on its own merits.
+    """
+    was = (await cdp.where())["u"]
+    guard = Confinement(cdp, origin_of(url), documents_only=True)
+    await guard.install()
+    try:
+        cdp.mark()
+        await cdp.call("Page.navigate", {"url": url})
+        await cdp.settle()
+    finally:
+        await guard.remove()
+
+    here = await cdp.where()
+    if guard.blocked:
+        # Nowhere useful to be: the tab is on an error page for a destination the
+        # agent never asked for. Go back to where it was, which it had already
+        # reached.
+        if origin_of(was):
+            cdp.mark()
+            await cdp.call("Page.navigate", {"url": was})
+            await cdp.settle(timeout=10.0)
+            here = await cdp.where()
+        elsewhere = sorted({destination for _, destination in guard.blocked})
+        return {"ok": False, "title": here["t"], "url": here["u"],
+                "blocked": elsewhere,
+                "detail": f"{url} redirected to " + ", ".join(elsewhere[:3])
+                          + ", which is not what was approved; ask for that address instead."}
+
+    return {"ok": True, "title": here["t"], "url": here["u"]}
+
+
+async def back(cdp):
+    """Return to a page this session already visited — and only that page.
+
+    `back` is Allow precisely because it cannot reveal a host the agent has not
+    already been to. That is only true if the trip is actually to the remembered
+    entry: revisiting it re-asks the server, which may now answer 302 to somewhere
+    new, and an unapproved origin would be reached through the one verb that never
+    asks a human. Same guard as `navigate`, for the same reason.
+    """
+    history = await cdp.call("Page.getNavigationHistory")
+    index = history["currentIndex"]
+    if index <= 0:
+        return {"ok": False, "detail": "Nothing to go back to."}
+
+    entry = history["entries"][index - 1]
+    was = (await cdp.where())["u"]
+    guard = Confinement(cdp, origin_of(entry.get("url", "")), documents_only=True)
+    await guard.install()
+    try:
+        cdp.mark()
+        await cdp.call("Page.navigateToHistoryEntry", {"entryId": entry["id"]})
+        await cdp.settle(timeout=10.0)
+    finally:
+        await guard.remove()
+
+    here = await cdp.where()
+    if guard.blocked:
+        if origin_of(was):
+            cdp.mark()
+            await cdp.call("Page.navigate", {"url": was})
+            await cdp.settle(timeout=10.0)
+            here = await cdp.where()
+        elsewhere = sorted({destination for _, destination in guard.blocked})
+        return {"ok": False, "title": here["t"], "url": here["u"], "blocked": elsewhere,
+                "detail": "Going back now redirects to " + ", ".join(elsewhere[:3])
+                          + ", which was never approved; ask for that address instead."}
+
+    return {"ok": True, "title": here["t"], "url": here["u"]}
+
+
+async def click(cdp, ref):
+    """Click a node the agent has already observed, without leaving this origin.
+
+    Two things are enforced here that the surface manifest cannot express.
+
+    Identity: the ref names a backend node id and the role+name it had when it
+    was observed. A page that reorders or replaces controls in between gets a
+    refusal, not a click on whatever now occupies that slot.
+
+    Egress: a link click reaches any host on the internet, so allowing clicks
+    while gating `navigate` behind approval would have made the gate decorative —
+    the agent could simply click its way off the box. Document requests to another
+    origin are failed during the click, and the destination is reported back so
+    the agent can ask for it through `navigate`, which a human approves.
+    """
+    match = REF.match(ref)
+    if match is None:
+        return {"ok": False, "detail": f"'{ref}' is not an element reference from this page."}
+    backend, digest = int(match.group(1)), match.group(2)
+
+    elements = await actionable(cdp)
+    target = next((e for e in elements if e["ref"] == ref), None)
+    if target is None:
+        stale = next((e for e in elements if e["ref"].startswith(f"e{backend}-")), None)
+        if stale is not None:
+            return {"ok": False, "detail":
+                    f"Element {ref} is now {stale['role']} '{stale['name']}'; look again before clicking."}
+        return {"ok": False, "detail": f"Element {ref} is no longer on this page."}
+
+    here = await cdp.where()
+    was = here["u"]
+    origin = origin_of(was)
+    before = {t.get("id") for t in pages()}
+
+    # EVERY request type, not just documents. A click handler that calls fetch(),
+    # XHR, sendBeacon or loads a one-pixel image can send data to another origin
+    # without ever navigating, so a document-only filter would let the click do
+    # exactly what the policy says it cannot. The window is short — the click plus
+    # its settle — which is what makes blocking all types affordable here.
+    guard = Confinement(cdp, origin)
+    await guard.install()
+
+    try:
+        # The listed box was measured wherever the element happened to be; the
+        # pointer event is dispatched in VIEWPORT coordinates. For a control below
+        # the fold those differ, and the click lands somewhere else on the page —
+        # succeeding, silently, on the wrong thing. So bring it into view and
+        # measure again, immediately before dispatching.
+        x, y = target["x"] + target["w"] // 2, target["y"] + target["h"] // 2
+        try:
+            await cdp.call("DOM.scrollIntoViewIfNeeded", {"backendNodeId": backend}, timeout=5.0)
+            fresh = await cdp.call("DOM.getBoxModel", {"backendNodeId": backend}, timeout=5.0)
+            quad = fresh["model"]["content"]
+            xs, ys = quad[0::2], quad[1::2]
+            x = int((min(xs) + max(xs)) / 2)
+            y = int((min(ys) + max(ys)) / 2)
+        except (RuntimeError, TimeoutError, KeyError, IndexError, ValueError):
+            pass  # keep the observed centre rather than refusing to click at all
+        cdp.mark()
+        for kind in ("mousePressed", "mouseReleased"):
+            await cdp.call("Input.dispatchMouseEvent", {
+                "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1,
+            })
+        await cdp.settle(timeout=10.0)
+    finally:
+        await guard.remove()
+
+    # Popups are refused at the browser level (--block-new-web-contents), because
+    # by the time a new target is visible here its first request has already gone.
+    # This loop is the backstop for a browser that was started without the flag —
+    # an older process still alive from a previous version of this helper — and it
+    # reports rather than pretending the click was contained.
+    escaped = []
+    for target_page in pages():
+        if target_page.get("id") in before:
+            continue
+        escaped.append(target_page.get("url", ""))
+        try:
+            endpoint(f"/json/close/{target_page.get('id')}")
+        except (urllib.error.URLError, OSError, ValueError):
+            pass
+
+    here = await cdp.where()
+    refused = guard.notable() + escaped
+
+    # A failed navigation leaves the tab on chrome-error://, so blocking the click
+    # would also lose the agent's place — it would have to guess that it must go
+    # back before it can carry on. Returning to the page it was already on is not
+    # egress: that document was fetched before the click.
+    if guard.blocked and origin and origin_of(here["u"]) != origin:
+        # Under the same guard as any other navigation. Going back to a page the
+        # agent was already on sounds unimpeachable, but re-asking that URL re-asks
+        # its server, which may now answer 302 — and reaching an unapproved origin
+        # while RECOVERING from a blocked click would be a bitter way to lose the
+        # argument.
+        recovered = await navigate(cdp, was)
+        here = {"t": recovered.get("title", ""), "u": recovered.get("url", "")}
+
+    detail = f"Clicked {target['role']} '{target['name']}'."
+    if refused:
+        detail += (" It tried to reach " + ", ".join(sorted(set(refused))[:3])
+                   + "; leaving this site needs an approved navigate.")
+    quiet = len(guard.blocked) - len(guard.notable())
+    if quiet > 0:
+        detail += f" ({quiet} other cross-site request(s) were refused too.)"
+    return {"ok": True, "detail": detail, "title": here["t"], "url": here["u"],
+            "blocked": sorted({url for _, url in guard.blocked}) + sorted(set(escaped))}
+
+
+async def run(verb, args):
+    launch()
+    async with websockets.connect(page_socket(), max_size=64 * 1024 * 1024) as socket:
+        cdp = Cdp(socket)
+        cdp.start()
+        await cdp.call("Page.enable")
+        await cdp.call("Runtime.enable")
+
+        if verb == "status":
+            here = await cdp.where()
+            return {"ok": True, "title": here["t"], "url": here["u"]}
+
+        if verb == "navigate":
+            if not args:
+                return {"ok": False, "detail": "navigate needs a URL."}
+            return await navigate(cdp, args[0])
+
+        if verb == "elements":
+            return {"ok": True, "elements": await actionable(cdp)}
+
+        if verb == "read":
+            result = await cdp.call("Runtime.evaluate", {
+                "expression": f"document.body ? document.body.innerText.slice(0, {READ_LIMIT}) : ''",
+                "returnByValue": True,
+            })
+            here = await cdp.where()
+            return {"ok": True, "url": here["u"], "text": result["result"].get("value") or ""}
+
+        if verb == "click":
+            if not args:
+                return {"ok": False, "detail": "click needs an element reference."}
+            return await click(cdp, args[0])
+
+        if verb == "back":
+            return await back(cdp)
+
+        return {"ok": False, "detail": f"Unknown verb '{verb}'."}
+
+
+def main():
+    if len(sys.argv) < 2:
+        fail("usage: lunos-browser <status|navigate|elements|read|click|back> [args]")
+    verb = sys.argv[1]
+    try:
+        result = asyncio.run(run(verb, sys.argv[2:]))
+    except SystemExit:
+        raise
+    except Exception as error:  # one process per command: report and die
+        fail(f"{type(error).__name__}: {error}")
+    print(json.dumps(result))
+    sys.exit(0 if result.get("ok") else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,5 @@
+# Helpers and Containerfiles here are read by shell, python and podman on Linux;
+# a CR at the end of a shebang line makes the script unrunnable. lunos-atspi and
+# lunos-browser were previously uncovered - the theme/ subdirectory had its own
+# rule but this directory did not.
+* text eol=lf

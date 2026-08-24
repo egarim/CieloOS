@@ -1,0 +1,82 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "browser",
+  "displayName": "Agent Browser",
+  "executor": "browser",
+  "state": {
+    "document": "surface:browser",
+    "revisioned": false,
+    "shape": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  "commands": {
+    "navigate": {
+      "displayName": "Open a page",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "url": { "type": "string", "maxLength": 2048, "pattern": "^https?://" }
+        },
+        "required": ["id", "url"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "RequireApproval",
+        "reason": "Navigation IS the egress decision: it is the moment 'fetch a page' can become 'send data somewhere', and the destination may have been chosen by text the agent read on a previous page. A human confirms it until the per-desk domain allowlist lands (phase 2), which is what turns routine browsing back into Allow while keeping the first visit to an unknown host a decision. The approval binds to the destination, not just the request: a cross-origin redirect off the approved URL is refused and named, so a server cannot pick a different address after the fact. The executor independently refuses anything that is not http/https, so javascript:, data: and file: cannot re-open the script-execution door the manifest closes."
+      }
+    },
+    "click": {
+      "displayName": "Click an element on the page",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "element": { "type": "string", "pattern": "^e[0-9]{1,9}-[0-9a-f]{6}$" }
+        },
+        "required": ["id", "element"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "Allowed only because the executor confines a click to the page's own origin: a link reaches any host on the internet, so allowing clicks while gating `navigate` behind approval would have made that gate decorative. EVERY cross-origin request the click causes is failed and reported — fetch, XHR, sendBeacon and image pixels as well as navigations, because a handler can send data without going anywhere — and popups cannot be created at all, so leaving the site still goes through `navigate` and a human. This bounds what the CLICK does, not what the page does once the command ends: interception lives only while a command runs, so a page can schedule a request for later, and it does not stop a click that posts to the site the agent is already on. Enforcement that outlives a command is the phase-2 egress proxy. The target is named by a reference carrying the node's identity and the role+name it had when observed, so a page that changes in between is refused rather than clicked blind; each click is audited, and the blast radius is that session's browser profile, which is deliberately not the human's."
+      }
+    },
+    "back": {
+      "displayName": "Go back",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "Returning to a page already visited in this session adds no reach: it cannot reveal a host the agent has not already been to, and it is how an agent recovers from a wrong turn without a fresh navigation."
+      }
+    }
+  }
+}

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using WorkspaceRuntime.Application;
@@ -53,7 +54,7 @@ public sealed class SessionBackendOptions
 // through the same policy-checked bus as every other command. The production
 // target (docs/ai-native-ui.md D3) swaps podman for Incus system containers;
 // the command shape and policy path are identical, so only this executor moves.
-public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend, IDesktopBackend
+public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend, IDesktopBackend, IBrowserBackend
 {
     private readonly SessionBackendOptions options;
 
@@ -765,4 +766,154 @@ Categories=Network;
         request.Arguments.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : throw new ArgumentException($"Missing required argument '{key}'.");
+
+    // --- Browser backend: perceive and drive the page over CDP, via the
+    // in-container `lunos-browser` helper.
+    //
+    // The DevTools endpoint stays inside the session's network namespace. It is
+    // unauthenticated and confers full control of the profile, so publishing it to
+    // the host — the only way a host-side Playwright client could attach — would
+    // let any local account drive another owner's browser and break the per-owner
+    // isolation enforced everywhere else. `podman exec` crosses that boundary the
+    // same way PodmanHomeBrowser does, one command at a time, with each argument
+    // a separate argv entry so no host shell ever sees the URL. ---
+    private const string BrowserHelper = "lunos-browser";
+
+    async Task<BrowserPage> IBrowserBackend.StatusAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "status");
+        if (error is not null)
+        {
+            return new BrowserPage(sessionId, "", "", false, error);
+        }
+        return new BrowserPage(sessionId, Text(json, "title"), Text(json, "url"), true);
+    }
+
+    async Task<BrowserElements> IBrowserBackend.ElementsAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "elements");
+        if (error is not null)
+        {
+            return new BrowserElements(sessionId, Array.Empty<BrowserElement>(), false, error);
+        }
+
+        var elements = new List<BrowserElement>();
+        if (json.TryGetProperty("elements", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray())
+            {
+                elements.Add(new BrowserElement(
+                    Number(item, "id"), Text(item, "ref"), Text(item, "role"), Text(item, "name"),
+                    Number(item, "x"), Number(item, "y"), Number(item, "w"), Number(item, "h")));
+            }
+        }
+        return new BrowserElements(sessionId, elements, true);
+    }
+
+    async Task<BrowserText> IBrowserBackend.ReadAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "read");
+        return error is not null
+            ? new BrowserText(sessionId, "", "", false, error)
+            : new BrowserText(sessionId, Text(json, "url"), Text(json, "text"), true);
+    }
+
+    async Task<BrowserActionResult> IBrowserBackend.NavigateAsync(string sessionId, string url, CancellationToken cancellationToken)
+    {
+        // Checked here as well as in the executor: the backend is reachable from
+        // the agent loop directly, and a scheme guard that only one caller honours
+        // is not a guard.
+        if (!BrowserUrl.IsAllowed(url, out var refusal))
+        {
+            return new BrowserActionResult(false, refusal);
+        }
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "navigate", url);
+        return error is not null
+            ? new BrowserActionResult(false, error)
+            : new BrowserActionResult(true, $"Opened {Text(json, "url")}.", Text(json, "title"), Text(json, "url"));
+    }
+
+    async Task<BrowserActionResult> IBrowserBackend.ClickAsync(string sessionId, string elementRef, CancellationToken cancellationToken)
+    {
+        // Checked here as well as in the executor: the backend is reachable from
+        // the agent loop directly, and a shape guard only one caller honours is
+        // not a guard.
+        if (!BrowserRef.IsWellFormed(elementRef))
+        {
+            return new BrowserActionResult(false, $"'{elementRef}' is not an element reference from this page.");
+        }
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "click", elementRef);
+        return error is not null
+            ? new BrowserActionResult(false, error)
+            : new BrowserActionResult(true, Text(json, "detail"), Text(json, "title"), Text(json, "url"));
+    }
+
+    async Task<BrowserActionResult> IBrowserBackend.BackAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "back");
+        return error is not null
+            ? new BrowserActionResult(false, error)
+            : new BrowserActionResult(true, $"Went back to {Text(json, "url")}.", Text(json, "title"), Text(json, "url"));
+    }
+
+    // One helper invocation per command. The helper prints a single JSON line and
+    // exits non-zero on failure, so a non-zero exit with parseable output is a
+    // real refusal ("nothing to go back to") rather than a broken pipe, and both
+    // reach the caller as a detail string instead of an exception.
+    private async Task<(JsonElement Json, string? Error)> BrowserAsync(
+        string sessionId, CancellationToken cancellationToken, params string[] verb)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == sessionId);
+        if (session is null)
+        {
+            return (default, "Session not found.");
+        }
+        if (!string.Equals(session.Kind, "desktop", StringComparison.Ordinal))
+        {
+            return (default, "Only desktop sessions have a browser.");
+        }
+
+        var arguments = new List<string>
+        {
+            "exec", "-u", "abc", "-e", DesktopDisplayEnv, options.NamePrefix + sessionId, BrowserHelper
+        };
+        arguments.AddRange(verb);
+
+        var run = await RunPodmanAsync(arguments.ToArray(), cancellationToken);
+        var output = run.Stdout.Trim();
+        if (output.Length == 0)
+        {
+            var detail = run.Stderr.Trim();
+            return (default, detail.Length > 0 ? detail : $"The browser helper exited {run.ExitCode} without output.");
+        }
+
+        JsonElement json;
+        try
+        {
+            json = JsonDocument.Parse(output).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return (default, $"The browser helper returned unreadable output: {Truncate(output, 200)}");
+        }
+
+        if (!json.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+        {
+            return (default, Text(json, "detail") is { Length: > 0 } why ? why : "The browser refused the command.");
+        }
+        return (json, null);
+    }
+
+    private static string Text(JsonElement element, string property) =>
+        element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(property, out var value)
+            && value.ValueKind == JsonValueKind.String
+                ? value.GetString() ?? ""
+                : "";
+
+    private static int Number(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.TryGetInt32(out var number) ? number : 0;
+
+    private static string Truncate(string value, int limit) =>
+        value.Length <= limit ? value : value[..limit] + "…";
 }
