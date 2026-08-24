@@ -78,7 +78,7 @@ echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
   # chat is bound to loopback, since it has no login of its own yet.
   test -x /usr/local/bin/cielo-chat-run || { echo "no chat runner installed"; exit 1; }
   grep -q "^CHAT_HOST=127.0.0.1" /etc/cielo/chat.env || { echo "chat is not loopback-bound"; exit 1; }
-  grep -q "^Chat__Url=" /etc/cielo/cielo.env || { echo "panel would show no chat link"; exit 1; }
+  grep -q "^Chat__Url=http://localhost:8080/$" /etc/cielo/cielo.env || { echo "panel would show no chat link"; exit 1; }
   grep -q "WEBUI_AUTH=False" /usr/local/bin/cielo-chat-run || { echo "chat auth expectation changed"; exit 1; }
 
   set +e
@@ -148,6 +148,13 @@ echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
   want=amd64; [ "$(dpkg --print-architecture)" = arm64 ] && want=arm64
   grep -q "onlyoffice-desktopeditors_${want}.deb" /usr/local/bin/cielo-build-session-images \
     || { echo "image builder would install the wrong ONLYOFFICE architecture"; exit 1; }
+
+  # A box whose chat was moved must be advertised where it actually listens, or
+  # the panel links somewhere nothing is serving.
+  sed -i "s/^CHAT_PORT=.*/CHAT_PORT=9099/" /etc/cielo/chat.env
+  bash ./install.sh --offline --mode headless >/dev/null 2>&1
+  grep -q "^Chat__Url=http://localhost:9099/$" /etc/cielo/cielo.env \
+    || { echo "reinstall advertised the wrong chat address: $(grep '^Chat__Url=' /etc/cielo/cielo.env)"; exit 1; }
 
   # Opting out must UNDO, not just skip: this box already has the chat installed.
   bash ./install.sh --offline --mode headless --no-chat >/dev/null 2>&1

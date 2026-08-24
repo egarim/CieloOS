@@ -188,7 +188,19 @@ sed -e "s#UID_PLACEHOLDER#${CIELO_UID}#" \
 # starts the runtime — appending it later would leave the panel without a chat
 # link until the next restart.
 if [[ "$NO_CHAT" -eq 0 ]]; then
-  printf '\n# The chat UI installed by stage 8 (loopback; see /etc/cielo/chat.env).\nChat__Url=http://localhost:8080/\n' >> /etc/cielo/cielo.env
+  # Reinstalling a box whose /etc/cielo/chat.env was edited must advertise the
+  # address the chat will actually listen on, not the default. Read it in a
+  # subshell so the installer does not inherit those names.
+  chat_host="$( ( [[ -f /etc/cielo/chat.env ]] && . /etc/cielo/chat.env; printf '%s' "${CHAT_HOST:-127.0.0.1}" ) )"
+  chat_port="$( ( [[ -f /etc/cielo/chat.env ]] && . /etc/cielo/chat.env; printf '%s' "${CHAT_PORT:-8080}" ) )"
+  # A browser on the box reaches every local bind as localhost; only a specific
+  # non-local address has to be named.
+  case "$chat_host" in
+    127.0.0.1|localhost|0.0.0.0|"") chat_link_host="localhost" ;;
+    *)                              chat_link_host="$chat_host" ;;
+  esac
+  printf '\n# The chat UI installed by stage 8 (see /etc/cielo/chat.env).\nChat__Url=http://%s:%s/\n' \
+    "$chat_link_host" "$chat_port" >> /etc/cielo/cielo.env
 fi
 chmod 0640 /etc/cielo/cielo.env
 
