@@ -8,14 +8,28 @@ public class TokenBudgetTests
     private static readonly Guid Agent = Guid.NewGuid();
 
     [Fact]
-    public void Spend_below_the_ceiling_is_allowed()
+    public void Spend_with_room_for_another_call_is_allowed()
     {
+        var ledger = new FakeLedger(new TokenSpend(User: 900, Agent: 900, Machine: 900))
+        {
+            Limits = { new TokenLimit(TokenLimit.UserScope, User.ToString(), 100_000) }
+        };
+
+        Assert.Null(TokenBudget.Exceeded(ledger, User, Agent, "cloud"));
+    }
+
+    [Fact]
+    public void A_call_that_would_overshoot_the_ceiling_is_not_made()
+    {
+        // 900 of 1,000 used: under the limit, but the next call could cost far
+        // more than the 100 that is left. A ceiling that allows that describes
+        // where spending stops being allowed, not where it stops.
         var ledger = new FakeLedger(new TokenSpend(User: 900, Agent: 900, Machine: 900))
         {
             Limits = { new TokenLimit(TokenLimit.UserScope, User.ToString(), 1000) }
         };
 
-        Assert.Null(TokenBudget.Exceeded(ledger, User, Agent, "cloud"));
+        Assert.NotNull(TokenBudget.Exceeded(ledger, User, Agent, "cloud"));
     }
 
     [Fact]

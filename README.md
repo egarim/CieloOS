@@ -60,7 +60,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 
 **Model spend — metered and capped**
 - Every model call is recorded with the tokens it used, attributed the way actions are: a human, acting through an agent. The panel's Models tab shows spend for the desk and the machine this month, with recent calls.
-- Monthly **ceilings** per desk, per agent or for the whole machine. A run that hits one stops with an explanation naming the numbers, not a provider error — and the call that would have exceeded it is never made. On-box models are recorded but never capped: they cost machine time, not money.
+- Monthly **ceilings** per desk, per agent or for the whole machine. The budget is checked before every model call, holding back enough headroom for one more call, so a run stops *before* crossing the line rather than after — with an explanation naming the numbers, not a provider error. On-box models are recorded but never capped: they cost machine time, not money.
 
 **Models — layered & replaceable** ([docs/model-config.md](docs/model-config.md))
 - One capability-based registry resolves a provider per capability (**chat / vision / embedding**) through a cascade **agent → user → OS**. Providers are tagged by capability and **locality** (`on-box` / `remote-self-hosted` / `cloud`).

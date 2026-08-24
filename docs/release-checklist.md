@@ -100,6 +100,11 @@ model story is provider-free (add your own key in the Models tab, no restart).
   query, so the month is stored as an explicit `yyyy-MM` key rather than derived;
   and metering had to be wired at the HTTP handler because the three brains each
   build their own request, so a per-brain hook would be three places to forget.
+  The ceiling holds back headroom for one more call rather than reserving spend,
+  so it stops slightly early instead of overshooting. It is **not** atomic: two
+  runs starting at the same instant can both pass the check, and each may then
+  spend one call's worth. A true reservation needs the provider to price a call
+  before charging it.
   Still open: cost estimates in money (needs a per-model price table), and a
   rollup if a machine ever makes enough calls for summing to hurt.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the

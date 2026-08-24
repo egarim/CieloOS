@@ -59,6 +59,19 @@ public static class TokenBudget
     // see — but it is not what the ceiling is about.
     public const string OnBoxLocality = "on-box";
 
+    // What the NEXT call could cost, held back from the ceiling so that a call
+    // which would exceed it is not made at all. Without this, a desk 900 tokens
+    // into a 1,000 ceiling still gets one more unbounded call and lands at 1,400:
+    // the limit would describe where spending stops being allowed, not where it
+    // stops. The figure is the console brain's max_tokens (2,000) plus room for a
+    // prompt, so the ceiling is reached slightly early rather than overshot.
+    //
+    // It is not a reservation: two runs starting at the same instant can both
+    // pass this check. On a single-box OS with a handful of desks the overshoot
+    // is bounded by one call each, which is the trade being made — a true
+    // reservation needs the provider to tell us a cost before it charges it.
+    public const int PerCallHeadroom = 6000;
+
     // Returns null when the call may proceed, or the reason it may not, written
     // for the person who will read it in a chat reply.
     public static string? Exceeded(ITokenLedger ledger, Guid userId, Guid agentId, string locality)
@@ -79,7 +92,7 @@ public static class TokenBudget
                 _ => (-1L, "")
             };
 
-            if (used >= 0 && limit.MonthlyTokens > 0 && used >= limit.MonthlyTokens)
+            if (used >= 0 && limit.MonthlyTokens > 0 && used + PerCallHeadroom > limit.MonthlyTokens)
             {
                 return $"The model budget for {subject} is used up for this month " +
                        $"({used:N0} of {limit.MonthlyTokens:N0} tokens). An owner can raise it in the panel's Models tab.";
