@@ -37,7 +37,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         }
 
         var relative = HomePath.Sanitize(path);
-        var target = relative.Length == 0 ? mount : $"{mount}/{relative}";
+        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
+        if (target is null)
+        {
+            return new HomeListing(owner, relative, Array.Empty<HomeEntry>());
+        }
 
         var find = await RunPodmanAsync(new[]
         {
@@ -108,7 +112,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
             return null;
         }
 
-        var target = $"{mount}/{relative}";
+        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
+        if (target is null)
+        {
+            return null;
+        }
 
         var stat = await RunPodmanAsync(new[] { "unshare", "stat", "-c", "%F\t%s", target }, cancellationToken);
         if (stat.ExitCode != 0)
@@ -174,7 +182,11 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
             return null;
         }
 
-        var target = $"{mount}/{relative}";
+        var target = await ResolveInsideAsync(mount, relative, cancellationToken);
+        if (target is null)
+        {
+            return null;
+        }
 
         var stat = await RunPodmanAsync(new[] { "unshare", "stat", "-c", "%F\t%s", target }, cancellationToken);
         if (stat.ExitCode != 0)
@@ -217,6 +229,42 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
 
         var name = relative.Split('/').Last();
         return new HomeDownload(owner, relative, name, HomeContentType.ForPath(relative), size, new ProcessOutputStream(process));
+    }
+
+    // Turns a caller-supplied relative path into a real path that is provably
+    // inside the volume, or null. Sanitize() stops "..", but that is only half the
+    // problem: a session owns its home and can drop a symlink to /etc in it, and
+    // both stat and cat follow symlinks — so without resolving first, an entirely
+    // authorized read walks straight out of the volume. Resolve both ends and
+    // require the target to be the mount or beneath it.
+    private async Task<string?> ResolveInsideAsync(string mount, string relative, CancellationToken cancellationToken)
+    {
+        var mountReal = await RealPathAsync(mount, cancellationToken);
+        if (mountReal is null)
+        {
+            return null;
+        }
+
+        var targetReal = relative.Length == 0
+            ? mountReal
+            : await RealPathAsync($"{mountReal}/{relative}", cancellationToken);
+
+        return targetReal is not null
+            && (targetReal == mountReal || targetReal.StartsWith(mountReal + "/", StringComparison.Ordinal))
+                ? targetReal
+                : null;
+    }
+
+    private async Task<string?> RealPathAsync(string path, CancellationToken cancellationToken)
+    {
+        var resolved = await RunPodmanAsync(new[] { "unshare", "realpath", "-e", "--", path }, cancellationToken);
+        if (resolved.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var real = resolved.Stdout.Trim();
+        return real.Length == 0 ? null : real;
     }
 
     private async Task<string?> MountpointAsync(string volume, CancellationToken cancellationToken)
