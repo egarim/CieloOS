@@ -259,8 +259,26 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             : new ToolExecutionResult(false, $"Failed to destroy session '{id}': {remove.Stderr.Trim()}", null);
     }
 
-    public async Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken) =>
-        (await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken)).ExitCode == 0;
+    // Cached, because the endpoint that asks this is PUBLIC (the claim wizard has
+    // to show the desk choices before any token exists) and a headless install
+    // binds every interface. Without a cache, an anonymous caller could spawn two
+    // podman processes per request for as long as they cared to keep asking.
+    // Short TTL: an image appearing is worth noticing quickly, and a build
+    // publishes its own result the moment it finishes.
+    private static readonly TimeSpan ImageCheckTtl = TimeSpan.FromSeconds(30);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (bool Exists, DateTimeOffset Checked)> imageChecks = new(StringComparer.Ordinal);
+
+    public async Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken)
+    {
+        if (imageChecks.TryGetValue(image, out var cached) && DateTimeOffset.UtcNow - cached.Checked < ImageCheckTtl)
+        {
+            return cached.Exists;
+        }
+
+        var exists = (await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken)).ExitCode == 0;
+        imageChecks[image] = (exists, DateTimeOffset.UtcNow);
+        return exists;
+    }
 
     public string BuildStatus(string profileId) =>
         imageBuilds.TryGetValue(profileId, out var status) ? status : "";
@@ -321,6 +339,9 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
                 var result = await RunPodmanAsync(arguments.ToArray(), CancellationToken.None);
                 await File.WriteAllTextAsync(log, result.Stdout + Environment.NewLine + result.Stderr);
                 imageBuilds[profile.Id] = result.ExitCode == 0 ? "built" : $"failed (see {log})";
+                // The build knows the answer, so publish it rather than leaving the
+                // cache to expire and a freshly built desk looking unavailable.
+                imageChecks[profile.Image] = (result.ExitCode == 0, DateTimeOffset.UtcNow);
             }
             catch (Exception exception)
             {
