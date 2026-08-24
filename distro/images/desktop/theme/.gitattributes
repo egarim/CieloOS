@@ -1,0 +1,5 @@
+# These are read by GLib key-file parsers (Plank), a GTK CSS parser, and shell.
+# A CR at the end of every line makes a key-file value fail to parse and a
+# shebang unrunnable — and the failure is silent: Plank just falls back to its
+# dark default theme. Force LF regardless of the checkout platform.
+* text eol=lf

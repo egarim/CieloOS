@@ -1,0 +1,18 @@
+# Plank keeps its settings in dconf, NOT in ~/.config/plank/dock1/settings —
+# that file exists, plank writes it, and plank ignores it. Setting the theme
+# there is why the first cut of this dock stayed dark.
+#
+# These are system DEFAULTS, so anything the person changes lands in their own
+# dconf database and wins over this file. That is the whole point of using the
+# system db rather than writing their settings for them.
+[net/launchpad/plank/docks/dock1]
+theme='CieloOS'
+icon-size=44
+position='bottom'
+alignment='center'
+items-alignment='center'
+# 'none': a dock that hides itself is a dock an office user never finds again.
+hide-mode='none'
+zoom-enabled=true
+zoom-percent=125
+tooltips-enabled=true

@@ -1,0 +1,34 @@
+# A light dock, because the stock Plank themes are all dark and the point of
+# this work is a light desktop. Colours are R;;G;;B;;A.
+[PlankTheme]
+TopRoundness=8
+BottomRoundness=8
+LineWidth=1
+OuterStrokeColor=88;;108;;138;;110
+FillStartColor=246;;249;;253;;225
+FillEndColor=232;;238;;246;;240
+InnerStrokeColor=255;;255;;255;;220
+
+[PlankDockTheme]
+HorizPadding=8
+TopPadding=2
+BottomPadding=3
+ItemPadding=5
+IndicatorSize=5
+IconShadowSize=0
+UrgentBounceHeight=1.6667
+LaunchBounceHeight=0.625
+FadeOpacity=1.0
+ClickTime=300
+UrgentBounceTime=600
+LaunchBounceTime=600
+ActiveTime=300
+SlideTime=300
+FadeTime=250
+HideTime=250
+GlowSize=30
+GlowTime=10000
+GlowPulseTime=2000
+UrgentHueShift=150
+ItemMoveTime=450
+CascadeHide=true

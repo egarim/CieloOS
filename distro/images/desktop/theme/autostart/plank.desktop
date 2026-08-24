@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Plank
+Comment=The CieloOS dock
+Exec=plank
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

@@ -47,6 +47,7 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 **Sessions**
 - One rootless **podman** container per session over a **persistent per-owner home volume** (+ a shared owner↔agent volume). Two kinds: **console** (ttyd + tmux) and **desktop** (webtop XFCE + Selkies, with ONLYOFFICE and the agent's hands/eyes: `xdotool`, `scrot`, AT-SPI).
 - **Inhabiting** — an owner can *shadow* or *become* an owned agent's session, dual-actor audited.
+- A **CieloOS desktop**, not a stock XFCE one: light sky wallpaper, a menu-bar-like top panel, a Plank dock with Files / Documents / Terminal / Browser, Orchis-Light + Papirus + Inter, and no filesystem icon or workspace pager to break by accident. Seeded once per session, so anything the person changes afterwards sticks (issue #11).
 
 **Agents that do real work**
 - **Console loop** — the agent operates its own console (observe `tmux capture-pane` → decide → type `tmux send-keys`), every keystroke a governed `console.type`. Real tools: `curl`, `jq`, `python3`+`openpyxl`, `python-docx/pptx`, and a private **web search** (self-hosted **SearXNG**) — e.g. *"search the top posts about X and make a spreadsheet."*

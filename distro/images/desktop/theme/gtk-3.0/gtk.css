@@ -1,0 +1,19 @@
+/* xfdesktop draws desktop icon labels white with a drop shadow, which assumes a
+   dark wallpaper — on the CieloOS background they were nearly invisible. There is
+   no xfconf setting for this; the label colour comes from the GTK theme, so it
+   has to be said here. Both selectors are deliberate: the node name changed
+   between xfdesktop versions and carrying both costs nothing. */
+.xfdesktop-icon-view.view,
+.xfdesktop-icon-view.view:hover,
+.xfdesktop-icon-view.view:active,
+XfdesktopIconView.view,
+XfdesktopIconView.view:hover,
+XfdesktopIconView.view:active {
+    color: #21262d;
+    text-shadow: none;
+}
+
+.xfdesktop-icon-view.view:selected,
+XfdesktopIconView.view:selected {
+    color: #ffffff;
+}
