@@ -55,13 +55,14 @@ public sealed class EfTokenLedger : ITokenLedger
             month.Sum(row => (long?)(row.PromptTokens + row.CompletionTokens)) ?? 0);
     }
 
-    public IReadOnlyList<TokenUsage> Recent(int limit)
+    public IReadOnlyList<TokenUsage> Recent(int limit, Guid? userId = null)
     {
         using var context = contextFactory.CreateDbContext();
         // Ordered by Id-free insertion order via the timestamp, in memory: SQLite
         // stores a DateTimeOffset as text it cannot sort meaningfully, and this
         // list is the last handful of calls, not a report.
         return context.TokenUsage.AsNoTracking()
+            .Where(row => userId == null || row.UserId == userId)
             .AsEnumerable()
             .OrderByDescending(row => row.OccurredAt)
             .Take(limit)
@@ -120,4 +121,77 @@ public sealed class EfTokenLedger : ITokenLedger
     // resets.
     private static string MonthKeyOf(DateTimeOffset moment) =>
         moment.ToUniversalTime().ToString("yyyy-MM");
+}
+
+// The ledger for `Database:Provider=memory`, which has no DbContext at all.
+// Spend still needs counting there — the loops ask about the budget on every
+// step, and a runtime that cannot answer would fail rather than run.
+public sealed class InMemoryTokenLedger : ITokenLedger
+{
+    private readonly List<TokenUsage> usage = new();
+    private readonly Dictionary<(string Scope, string Subject), long> limits = new();
+    private readonly object gate = new();
+
+    public void Record(TokenUsage entry)
+    {
+        lock (gate)
+        {
+            usage.Add(entry);
+        }
+    }
+
+    public TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true)
+    {
+        var month = DateTimeOffset.UtcNow.ToString("yyyy-MM");
+        lock (gate)
+        {
+            var rows = usage
+                .Where(entry => entry.OccurredAt.ToUniversalTime().ToString("yyyy-MM") == month)
+                .Where(entry => !billableOnly
+                    || !string.Equals(entry.Locality, TokenBudget.OnBoxLocality, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            return new TokenSpend(
+                rows.Where(entry => entry.UserId == userId).Sum(entry => (long)entry.TotalTokens),
+                rows.Where(entry => entry.AgentId == agentId).Sum(entry => (long)entry.TotalTokens),
+                rows.Sum(entry => (long)entry.TotalTokens));
+        }
+    }
+
+    public IReadOnlyList<TokenUsage> Recent(int limit, Guid? userId = null)
+    {
+        lock (gate)
+        {
+            return usage
+                .Where(entry => userId is null || entry.UserId == userId)
+                .OrderByDescending(entry => entry.OccurredAt)
+                .Take(limit)
+                .ToList();
+        }
+    }
+
+    public IReadOnlyList<TokenLimit> Limits
+    {
+        get
+        {
+            lock (gate)
+            {
+                return limits.Select(pair => new TokenLimit(pair.Key.Scope, pair.Key.Subject, pair.Value)).ToList();
+            }
+        }
+    }
+
+    public void SetLimit(TokenLimit limit)
+    {
+        lock (gate)
+        {
+            if (limit.MonthlyTokens <= 0)
+            {
+                limits.Remove((limit.Scope, limit.Subject));
+                return;
+            }
+
+            limits[(limit.Scope, limit.Subject)] = limit.MonthlyTokens;
+        }
+    }
 }

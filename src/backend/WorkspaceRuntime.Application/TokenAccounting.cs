@@ -39,7 +39,9 @@ public interface ITokenLedger
     // model hard should be able to see that, it just should not be billed for it.
     TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true);
 
-    IReadOnlyList<TokenUsage> Recent(int limit);
+    // A caller sees its own calls, not the machine's: on a multi-user box the
+    // recent list would otherwise show other desks' providers, models and volumes.
+    IReadOnlyList<TokenUsage> Recent(int limit, Guid? userId = null);
 
     IReadOnlyList<TokenLimit> Limits { get; }
 

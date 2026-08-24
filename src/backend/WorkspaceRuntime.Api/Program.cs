@@ -132,8 +132,12 @@ builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequi
 builder.Services.AddSingleton<AgentRuntime>();
 // The ledger behind issue #14: every model call recorded, per-desk and per-agent
 // ceilings enforced. Registered before the loops so they can take it.
-builder.Services.AddSingleton<ITokenLedger>(sp =>
-    new EfTokenLedger(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
+builder.Services.AddSingleton<ITokenLedger>(sp => databaseProvider == "memory"
+    // The memory provider registers no DbContext at all, and the loops ask the
+    // ledger about the budget on every step — an unresolvable service there would
+    // fail the run rather than skip the accounting.
+    ? new InMemoryTokenLedger()
+    : new EfTokenLedger(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
 builder.Services.AddSingleton<ConsoleAgentLoop>();
 
 // Model providers, tagged by capability (chat / vision) and locality, resolved
@@ -462,10 +466,16 @@ app.MapGet("/api/usage", (HttpContext context, ITokenLedger ledger, IRuntimeStor
         // Including on-box, which never counts against a ceiling.
         deskAll = all.User,
         machineAll = all.Machine,
-        limits = limits.Select(limit => new { limit.Scope, limit.Subject, limit.MonthlyTokens }),
+        // Only the ceilings that bind THIS caller: another desk's budget is not
+        // this desk's business.
+        limits = limits
+            .Where(limit => limit.Scope == TokenLimit.OsScope
+                || (limit.Scope == TokenLimit.UserScope && limit.Subject == userId.ToString())
+                || (limit.Scope == TokenLimit.AgentScope && limit.Subject == agentId.ToString()))
+            .Select(limit => new { limit.Scope, limit.Subject, limit.MonthlyTokens }),
         deskLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.UserScope && limit.Subject == userId.ToString())?.MonthlyTokens ?? 0,
         machineLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.OsScope)?.MonthlyTokens ?? 0,
-        recent = ledger.Recent(10).Select(usage => new
+        recent = ledger.Recent(10, userId).Select(usage => new
         {
             usage.OccurredAt,
             usage.ProviderId,

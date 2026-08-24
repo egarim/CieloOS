@@ -110,7 +110,7 @@ public class TokenBudgetTests
 
         public TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true) => spend;
 
-        public IReadOnlyList<TokenUsage> Recent(int limit) => Array.Empty<TokenUsage>();
+        public IReadOnlyList<TokenUsage> Recent(int limit, Guid? userId = null) => Array.Empty<TokenUsage>();
 
         public void SetLimit(TokenLimit limit) => Recorded.Add(limit);
     }
