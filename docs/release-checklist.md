@@ -40,7 +40,7 @@ model story is provider-free (add your own key in the Models tab, no restart).
   `human-desktop` session starts and serves. Pick a multi-arch default and align the port.
 - ✅ **Installer verified on a clean machine (2026-08-24).** Built a bundle from main
   and ran `install.sh` in throwaway `ubuntu:24.04` containers on arm64:
-  `--ci` completes all 8 stages, stages the first-boot image builder and correctly
+  `--ci` completes all 9 stages, stages the first-boot image builder and correctly
   leaves it disabled; `--offline` defers the image build, writes the `podman-restart`
   wants-symlink for `cielo`, the linger marker, and enables runtime/kiosk/image units;
   the ONLYOFFICE package is selected from the target architecture. An installed runtime
@@ -49,8 +49,19 @@ model story is provider-free (add your own key in the Models tab, no restart).
   Still unverified: the image build itself under `install.sh` (it was exercised by hand
   via `podman build`, not through the installer), and `cielo-session-images.service`
   actually firing on a real first boot.
+- ✅ **Chat ships with the installer (2026-08-24).** Stage 8 installs Open WebUI as
+  `cielo-chat.service` against `/v1/agent`, as the owner, on loopback. Verified on
+  arm64 hardware: `HOST=127.0.0.1` makes it listen on loopback only and the LAN
+  address refuses; the runner refuses an unclaimed box, then resolves the owner and
+  its token after a claim; `/api/setup/status` returns the owner to a loopback caller
+  and `null` to a remote one, which still cannot claim.
+  Still unverified: the service actually starting on a real first boot (the image
+  pull happens there), and a full chat round-trip through Open WebUI's own UI —
+  the wiring was verified against `/v1/agent/models` with the same token instead.
 - ✅ **Automated Linux test.** `distro/scripts/test-install.sh` runs install + the
-  full first-run self-test in `ubuntu:24.04` — 10/10 pass on native Linux.
+  full first-run self-test in `ubuntu:24.04` — 12/12 pass on native Linux, and it
+  asserts the chat is installed, loopback-bound, follows a moved port on reinstall,
+  and is genuinely removed by `--no-chat`.
   `distro/scripts/test-install-vm.sh` runs the x86-64 bundle in a full-system qemu
   VM (definitive amd64; Docker's user-mode emulation FailFasts in .NET EH, a QEMU
   artifact — not a defect).
