@@ -28,16 +28,28 @@ public sealed class ConsoleBrainRegistry : IConsoleBrainRegistry
     // are unique per provider, so a cached brain never goes stale under its id.
     private readonly ConcurrentDictionary<string, IConsoleAgentBrain> brains = new(StringComparer.OrdinalIgnoreCase);
 
-    public ConsoleBrainRegistry(IModelRegistry models, IConsoleAgentBrain fallback, ILogger<ConsoleBrainRegistry> logger)
+    // Every brain built here shares one metering handler, so a provider added at
+    // runtime is counted from its first call — no registration step to forget
+    // (issue #14). Optional: a registry without a ledger simply does not count,
+    // which is what the tests want.
+    private readonly ITokenLedger? ledger;
+
+    public ConsoleBrainRegistry(IModelRegistry models, IConsoleAgentBrain fallback, ILogger<ConsoleBrainRegistry> logger, ITokenLedger? ledger = null)
     {
         this.models = models;
         this.fallback = fallback;
         this.logger = logger;
+        this.ledger = ledger;
     }
+
+    private HttpClient NewClient() =>
+        ledger is null
+            ? new HttpClient { Timeout = TimeSpan.FromSeconds(60) }
+            : new HttpClient(new TokenMeteringHandler(ledger, new HttpClientHandler())) { Timeout = TimeSpan.FromSeconds(60) };
 
     private IConsoleAgentBrain BrainFor(ProviderProfile provider) =>
         brains.GetOrAdd(provider.Id, _ => new ModelConsoleBrain(
-            new HttpClient { Timeout = TimeSpan.FromSeconds(60) },
+            NewClient(),
             new ModelBrainOptions { BaseUrl = provider.BaseUrl, Model = provider.Model, ApiKey = provider.ApiKey ?? "" }));
 
     public BrainSelection Resolve(AgentProfile agent)

@@ -43,6 +43,16 @@ type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
 type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string };
 type DeskProfileView = { id: string; label: string; description: string; isDefault: boolean; imageReady: boolean; buildStatus: string };
+type UsageView = {
+  month: string;
+  deskSubject: string;
+  desk: number;
+  agent: number;
+  machine: number;
+  deskLimit: number;
+  machineLimit: number;
+  recent: { occurredAt: string; providerId: string; model: string; locality: string; promptTokens: number; completionTokens: number }[];
+};
 type ConsoleView = { sessionId: string; screen: string; available: boolean; detail?: string | null };
 type LoopStep = { step: number; text: string | null; submit: boolean; done: boolean; note?: string | null; decision: string; reason: string };
 type AgentRunResult = { sessionId: string; goal: string; completed: boolean; stopReason: string; steps: LoopStep[] };
@@ -158,9 +168,11 @@ function App() {
   const [providerForm, setProviderForm] = React.useState<ProviderForm>(emptyProviderForm);
   const [modelsMsg, setModelsMsg] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [modelsBusy, setModelsBusy] = React.useState(false);
+  const [budgetDraft, setBudgetDraft] = React.useState("");
   const [teammateOpen, setTeammateOpen] = React.useState(false);
   const [teammateName, setTeammateName] = React.useState("");
   const [deskProfiles, setDeskProfiles] = React.useState<DeskProfileView[]>([]);
+  const [usage, setUsage] = React.useState<UsageView | null>(null);
   const [teammateProfile, setTeammateProfile] = React.useState("office");
   const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
   const [teammateError, setTeammateError] = React.useState<string | null>(null);
@@ -229,7 +241,8 @@ function App() {
       load<SurfaceState>("/api/surfaces/spreadsheet/state", (value) => setSpreadsheetRevision(value.revision)),
       load<ModelsData>("/api/models", setModels),
       load<Whoami>("/api/whoami", setWhoami),
-      load<DeskProfileView[]>("/api/desk-profiles", setDeskProfiles)
+      load<DeskProfileView[]>("/api/desk-profiles", setDeskProfiles),
+      load<UsageView>("/api/usage", setUsage)
     ]);
 
     if (unauthorized) signOut();
@@ -534,6 +547,25 @@ function App() {
     }, 5000);
     return () => window.clearInterval(timer);
   }, [token, deskProfiles.map((profile) => profile.buildStatus).join(",")]);
+
+  // A ceiling on what this desk may spend on models each month. Owner-only at the
+  // API; the panel just gives it a number to type.
+  async function setDeskBudget() {
+    const tokens = Number.parseInt(budgetDraft.replace(/[^0-9]/g, ""), 10);
+    if (Number.isNaN(tokens) || !whoami) return;
+    try {
+      if (!usage?.deskSubject) return;
+      await api("/api/usage/limits", {
+        method: "POST",
+        body: JSON.stringify({ scope: "user", subject: usage.deskSubject, monthlyTokens: tokens })
+      });
+      setUsage(await api<UsageView>("/api/usage"));
+      setBudgetDraft("");
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+      else setModelsMsg({ kind: "err", text: extractError(error) });
+    }
+  }
 
   async function addTeammate() {
     const name = teammateName.trim();
@@ -890,6 +922,10 @@ function App() {
 
       {view === "models" ? (
         <ModelsView
+          usage={usage}
+          budgetDraft={budgetDraft}
+          setBudgetDraft={setBudgetDraft}
+          setDeskBudget={setDeskBudget}
           models={models}
           form={providerForm}
           setForm={setProviderForm}
@@ -1328,6 +1364,10 @@ function App() {
 }
 
 function ModelsView({
+  usage,
+  budgetDraft,
+  setBudgetDraft,
+  setDeskBudget,
   models,
   form,
   setForm,
@@ -1339,6 +1379,10 @@ function ModelsView({
   message,
   busy
 }: {
+  usage: UsageView | null;
+  budgetDraft: string;
+  setBudgetDraft: (value: string) => void;
+  setDeskBudget: () => void;
   models: ModelsData | null;
   form: ProviderForm;
   setForm: React.Dispatch<React.SetStateAction<ProviderForm>>;
@@ -1355,6 +1399,57 @@ function ModelsView({
 
   return (
     <section className="grid" data-automation-id="models">
+      {usage && (
+        <div className="panel" data-automation-id="usage">
+          <h2>Model spend — {usage.month}</h2>
+          <p className="muted small">
+            Tokens are what a provider bills for, so they are what is counted. On-box models are
+            recorded too, but a ceiling never stops them: they cost machine time, not money.
+          </p>
+          <div className="usageRow">
+            <span>This desk</span>
+            <strong data-automation-id="usage-desk">{usage.desk.toLocaleString()}</strong>
+            <span className="muted small">
+              {usage.deskLimit > 0 ? `of ${usage.deskLimit.toLocaleString()} this month` : "no ceiling"}
+            </span>
+          </div>
+          <div className="usageRow">
+            <span>This machine</span>
+            <strong>{usage.machine.toLocaleString()}</strong>
+            <span className="muted small">
+              {usage.machineLimit > 0 ? `of ${usage.machineLimit.toLocaleString()} this month` : "no ceiling"}
+            </span>
+          </div>
+          <div className="inline">
+            <label>
+              Monthly ceiling for this desk
+              <input
+                data-automation-id="usage-limit"
+                value={budgetDraft}
+                placeholder={usage.deskLimit > 0 ? String(usage.deskLimit) : "e.g. 200000"}
+                onChange={(event) => setBudgetDraft(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && setDeskBudget()}
+              />
+            </label>
+            <button data-automation-id="usage-limit-set" onClick={setDeskBudget}>Set</button>
+          </div>
+          <p className="muted small">0 removes the ceiling. A run that hits it stops with an explanation rather than a provider error.</p>
+          {usage.recent.length > 0 && (
+            <div className="fileTree">
+              {usage.recent.slice(0, 5).map((entry, index) => (
+                <div className="fileRowWrap" key={`${entry.occurredAt}-${index}`}>
+                  <span className="fileRow">
+                    <span className="fileKind">·</span>
+                    <span className="fileName">{entry.model} <span className="muted small">({entry.locality})</span></span>
+                    <span className="fileSize">{(entry.promptTokens + entry.completionTokens).toLocaleString()}</span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="panel">
         <h2><Cpu size={15} /> Model providers</h2>
         <p className="muted small">

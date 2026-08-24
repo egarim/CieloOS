@@ -62,6 +62,10 @@ public static class AccessPolicy
         }
         // Building a desk image costs gigabytes of disk and a long download, so it
         // is an owner's decision, not something an agent can set off.
+        if (isPost && path == "/api/usage/limits")
+        {
+            return AccessLevel.HumanOnly;
+        }
         if (isPost && path.StartsWith("/api/desk-profiles/", StringComparison.OrdinalIgnoreCase))
         {
             return AccessLevel.HumanOnly;

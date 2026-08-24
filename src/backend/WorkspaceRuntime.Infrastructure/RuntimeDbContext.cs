@@ -83,6 +83,8 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<AuditEventRow> AuditEvents => Set<AuditEventRow>();
     public DbSet<PendingRequestRow> PendingRequests => Set<PendingRequestRow>();
     public DbSet<SpreadsheetRow> Spreadsheets => Set<SpreadsheetRow>();
+    public DbSet<TokenUsageRow> TokenUsage => Set<TokenUsageRow>();
+    public DbSet<TokenLimitRow> TokenLimits => Set<TokenLimitRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,5 +95,37 @@ public sealed class RuntimeDbContext : DbContext
         modelBuilder.Entity<AuditEventRow>().ToTable("runtime_audit_events");
         modelBuilder.Entity<PendingRequestRow>().ToTable("runtime_pending_requests").HasKey(row => row.ApprovalId);
         modelBuilder.Entity<SpreadsheetRow>().ToTable("runtime_spreadsheets");
+        modelBuilder.Entity<TokenUsageRow>().ToTable("runtime_token_usage");
+        // One limit per (scope, subject): "the cap for this agent" is a single
+        // fact, and a second row for the same subject would just be ambiguous.
+        modelBuilder.Entity<TokenLimitRow>().ToTable("runtime_token_limits").HasKey(row => new { row.Scope, row.Subject });
     }
+}
+
+// Append-only: one row per model call, never updated. Spend is summed on read.
+// At this volume that is exact and simple; if a machine ever makes enough calls
+// for the sum to hurt, the fix is a monthly rollup, not a mutable counter.
+public sealed class TokenUsageRow
+{
+    public Guid Id { get; set; }
+    public DateTimeOffset OccurredAt { get; set; }
+    // The calendar month this belongs to, as yyyy-MM in UTC. Stored rather than
+    // derived because SQLite cannot compare a DateTimeOffset in a query — and it
+    // makes the monthly window a fact in the schema instead of an assumption in
+    // the code that reads it.
+    public string MonthKey { get; set; } = "";
+    public Guid UserId { get; set; }
+    public Guid AgentId { get; set; }
+    public string ProviderId { get; set; } = "";
+    public string Model { get; set; } = "";
+    public string Locality { get; set; } = "";
+    public int PromptTokens { get; set; }
+    public int CompletionTokens { get; set; }
+}
+
+public sealed class TokenLimitRow
+{
+    public string Scope { get; set; } = "";
+    public string Subject { get; set; } = "";
+    public long MonthlyTokens { get; set; }
 }
