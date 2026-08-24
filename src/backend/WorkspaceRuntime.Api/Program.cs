@@ -383,7 +383,7 @@ app.MapGet("/api/desk-profiles", async (ISessionBackend sessions, CancellationTo
 // Building a desk image is an owner's decision (it costs gigabytes and a long
 // download), and it returns immediately: the build runs in the background and the
 // list endpoint above reports its progress.
-app.MapPost("/api/desk-profiles/{id}/build", (string id, HttpContext context, ISessionBackend sessions, IRuntimeStore store) =>
+app.MapPost("/api/desk-profiles/{id}/build", async (string id, HttpContext context, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
 {
     if (!DeskProfiles.IsKnown(id))
     {
@@ -391,6 +391,13 @@ app.MapPost("/api/desk-profiles/{id}/build", (string id, HttpContext context, IS
     }
 
     var profile = DeskProfiles.Resolve(id);
+
+    // Already built is a success, not a reason to spend another twenty minutes:
+    // a stale panel must not be able to trigger a rebuild by clicking twice.
+    if (!profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken))
+    {
+        return Results.Ok(new { profile.Id, status = "built" });
+    }
     if (sessions is not SessionOrchestrator orchestrator)
     {
         return Results.Json(new { error = "This runtime cannot build images." }, statusCode: StatusCodes.Status501NotImplemented);

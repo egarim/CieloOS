@@ -140,6 +140,7 @@ function App() {
   // First-run setup: null while we ask the runtime whether it has an owner yet.
   const [setupClaimed, setSetupClaimed] = React.useState<boolean | null>(null);
   const [setupName, setSetupName] = React.useState("");
+  const [setupProfile, setSetupProfile] = React.useState("office");
   const [setupError, setSetupError] = React.useState<string | null>(null);
   const [setupBusy, setSetupBusy] = React.useState(false);
   const [agents, setAgents] = React.useState<AgentProfile[]>([]);
@@ -250,6 +251,16 @@ function App() {
         if (alive && data) setSetupClaimed(Boolean(data.claimed));
       })
       .catch(() => alive && setSetupClaimed(true)); // unreachable → fall back to login
+
+    // The desk choice has to be available BEFORE the first token exists, which is
+    // why /api/desk-profiles is public: the first owner picks their own desk in
+    // the wizard rather than being given the default and no way to change it.
+    fetch("/api/desk-profiles")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: DeskProfileView[] | null) => {
+        if (alive && data) setDeskProfiles(data);
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -361,7 +372,7 @@ function App() {
       const response = await fetch("/api/setup/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, deskProfile: setupProfile })
       });
       if (response.ok) {
         const data = (await response.json()) as { slug: string; token: string };
@@ -508,6 +519,21 @@ function App() {
       setTeammateError(String(error));
     }
   }
+
+  // A build takes minutes, so one refresh after starting it would leave the panel
+  // saying "building" forever — and the button visible, inviting a second build of
+  // something already built. Poll while anything is building, and stop when it is.
+  React.useEffect(() => {
+    if (!token || !deskProfiles.some((profile) => profile.buildStatus === "building")) return;
+    const timer = window.setInterval(async () => {
+      try {
+        setDeskProfiles(await api<DeskProfileView[]>("/api/desk-profiles"));
+      } catch {
+        // A failed poll is not worth surfacing; the next one will say the same.
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [token, deskProfiles.map((profile) => profile.buildStatus).join(",")]);
 
   async function addTeammate() {
     const name = teammateName.trim();
@@ -743,6 +769,26 @@ function App() {
                 onKeyDown={(event) => event.key === "Enter" && createOwner()}
               />
             </label>
+            {deskProfiles.length > 0 && (
+              <label>
+                Your desk
+                <select
+                  data-automation-id="setup-profile"
+                  value={setupProfile}
+                  disabled={setupBusy}
+                  onChange={(event) => setSetupProfile(event.target.value)}
+                >
+                  {deskProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}{profile.imageReady ? "" : " — image builds on first use"}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted small">
+                  {deskProfiles.find((profile) => profile.id === setupProfile)?.description}
+                </span>
+              </label>
+            )}
             <div className="setupActions">
               <button data-automation-id="setup-create" disabled={setupBusy || !setupName.trim()} onClick={createOwner}>
                 {setupBusy ? <><Loader2 size={16} className="spin" /> Creating…</> : <><UserPlus size={16} /> Create account & enter <ArrowRight size={16} /></>}
