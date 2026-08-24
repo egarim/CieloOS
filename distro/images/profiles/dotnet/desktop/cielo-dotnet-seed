@@ -1,0 +1,30 @@
+#!/usr/bin/with-contenv bash
+# First-run setup for a .NET developer desk. Like the theme seed it runs once and
+# never touches a session that already has settings — see 99-cielo-theme for why.
+set -eu
+
+MARKER=/config/.cielo-dotnet-v1
+if [[ -f "$MARKER" ]]; then
+  exit 0
+fi
+
+# Extensions are copied, not symlinked, so the person can update or remove them.
+if [[ -d /opt/cielo-vscode/extensions ]] && [[ ! -d /config/.vscode/extensions ]]; then
+  install -d /config/.vscode
+  cp -a /opt/cielo-vscode/extensions /config/.vscode/extensions
+fi
+
+install -d /config/Projects
+
+# A dock launcher for the editor, but only if the dock was seeded for this
+# session — a desk that kept its own settings keeps its own dock too.
+if [[ -d /config/.config/plank/dock1/launchers ]]; then
+  cat > /config/.config/plank/dock1/launchers/cielo-code.dockitem <<ITEM
+[PlankDockItemPreferences]
+Launcher=file:///usr/share/applications/cielo-code.desktop
+ITEM
+fi
+
+: > "$MARKER"
+chown -R "${PUID:-911}:${PGID:-911}" /config/.vscode /config/Projects "$MARKER" 2>/dev/null || true
+[[ -d /config/.config/plank ]] && chown -R "${PUID:-911}:${PGID:-911}" /config/.config/plank || true

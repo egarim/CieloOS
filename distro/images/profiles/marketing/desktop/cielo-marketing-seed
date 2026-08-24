@@ -1,0 +1,27 @@
+#!/usr/bin/with-contenv bash
+# First-run setup for a marketing desk: dock launchers for the visual tools, and
+# somewhere to put the work. Runs once and never touches a session that already
+# has settings — see 99-cielo-theme for why.
+set -eu
+
+MARKER=/config/.cielo-marketing-v1
+if [[ -f "$MARKER" ]]; then
+  exit 0
+fi
+
+install -d /config/Assets
+
+if [[ -d /config/.config/plank/dock1/launchers ]]; then
+  for app in gimp org.inkscape.Inkscape; do
+    if [[ -f "/usr/share/applications/${app}.desktop" ]]; then
+      cat > "/config/.config/plank/dock1/launchers/${app}.dockitem" <<ITEM
+[PlankDockItemPreferences]
+Launcher=file:///usr/share/applications/${app}.desktop
+ITEM
+    fi
+  done
+fi
+
+: > "$MARKER"
+chown -R "${PUID:-911}:${PGID:-911}" /config/Assets "$MARKER" 2>/dev/null || true
+[[ -d /config/.config/plank ]] && chown -R "${PUID:-911}:${PGID:-911}" /config/.config/plank || true

@@ -43,6 +43,12 @@ public sealed record DesktopSession(
 public interface ISessionBackend
 {
     Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken);
+
+    // Whether a desk profile's image is on this machine yet. Profile images are
+    // built lazily (issue #15) — installing a multi-gigabyte developer image on
+    // every machine to serve one office user is the wrong default — so the panel
+    // needs to say "not built yet" instead of offering a desk that cannot start.
+    Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken);
 }
 
 // What an agent (or a watching human) sees on a console session's screen, and

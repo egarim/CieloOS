@@ -237,5 +237,7 @@ public class OwnershipTests
         private readonly IReadOnlyList<DesktopSession> list;
         public FakeSessions(IReadOnlyList<DesktopSession> list) => this.list = list;
         public Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken) => Task.FromResult(list);
+        // No podman here: a fake backend has every image it is asked about.
+        public Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken) => Task.FromResult(true);
     }
 }

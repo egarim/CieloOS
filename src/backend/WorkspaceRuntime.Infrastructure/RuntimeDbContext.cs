@@ -8,6 +8,9 @@ public sealed class UserRow
     public string DisplayName { get; set; } = "";
     public string Email { get; set; } = "";
     public string Slug { get; set; } = "";
+    // Rows written before desk profiles existed read as "office" — the desk they
+    // have always had.
+    public string DeskProfile { get; set; } = "office";
 }
 
 public sealed class WorkspaceRow

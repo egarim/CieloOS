@@ -63,10 +63,25 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
     // identity store of its own.
     private readonly Func<string, string?>? resolveSharedOwner;
 
-    public SessionOrchestrator(SessionBackendOptions options, Func<string, string?>? resolveSharedOwner = null)
+    // Maps a session-owner slug to that desk's profile (issue #15), so a .NET
+    // developer's session starts from the developer image and an office desk from
+    // the shared one. Null keeps the single-image behaviour, which is what tests
+    // and a machine with no profiles want.
+    private readonly Func<string, DeskProfile>? resolveDeskProfile;
+
+    // Profile images are built lazily and a build takes minutes, so a build is a
+    // background job with a status the panel can read, not something a request
+    // waits on.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> imageBuilds = new(StringComparer.Ordinal);
+
+    public SessionOrchestrator(
+        SessionBackendOptions options,
+        Func<string, string?>? resolveSharedOwner = null,
+        Func<string, DeskProfile>? resolveDeskProfile = null)
     {
         this.options = options;
         this.resolveSharedOwner = resolveSharedOwner;
+        this.resolveDeskProfile = resolveDeskProfile;
     }
 
     public string SurfaceId => "session";
@@ -111,7 +126,15 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         var homeVolume = options.HomeVolumePrefix + owner;
 
         var isConsole = profile.Contains("console", StringComparison.Ordinal);
-        var image = isConsole ? options.ConsoleImage : options.Image;
+        // The console is the same lightweight terminal for every desk; only the
+        // desktop carries a toolchain, so only the desktop varies by desk profile.
+        var desk = resolveDeskProfile?.Invoke(owner) ?? DeskProfiles.Default;
+        // Only a profile with an image of its OWN overrides the configured desktop
+        // image: Sessions:Image is how a deployment or a test points the default
+        // desk somewhere else, and a desk profile must not quietly take that away.
+        var image = isConsole
+            ? desk.NeedsOwnConsoleImage ? desk.ConsoleImage : options.ConsoleImage
+            : desk.NeedsOwnImage ? desk.Image : options.Image;
         var containerPort = isConsole ? options.ConsolePort : options.ViewportPort;
         var homePath = isConsole ? options.ConsoleHomePath : options.HomePath;
 
@@ -161,6 +184,18 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             : (ExitCode: 0, Stdout: "", Stderr: "");
         if (imagePresent.ExitCode != 0)
         {
+            // A desk profile's own image is built on demand, so "not there yet" is
+            // an ordinary state with a specific remedy — say which one, rather than
+            // pointing at the session-image builder that does not build it.
+            if (isConsole ? desk.NeedsOwnConsoleImage : desk.NeedsOwnImage)
+            {
+                var status = imageBuilds.TryGetValue(desk.Id, out var state) ? state : "not built";
+                return new ToolExecutionResult(false,
+                    $"The {desk.Label} desk image is {status}. It is built on demand because it is large; " +
+                    "start it from the panel's desk list, or run " +
+                    $"/usr/local/bin/cielo-build-desk-image {desk.Id}.", null);
+            }
+
             return new ToolExecutionResult(false,
                 $"The {(isConsole ? "console" : "desktop")} session image '{image}' is not available yet. If this machine was just " +
                 "installed it is still building (systemctl status cielo-session-images); otherwise build " +
@@ -222,6 +257,125 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         return remove.ExitCode == 0
             ? new ToolExecutionResult(true, $"Destroyed session '{id}'.", null)
             : new ToolExecutionResult(false, $"Failed to destroy session '{id}': {remove.Stderr.Trim()}", null);
+    }
+
+    // Cached, because the endpoint that asks this is PUBLIC (the claim wizard has
+    // to show the desk choices before any token exists) and a headless install
+    // binds every interface. Without a cache, an anonymous caller could spawn two
+    // podman processes per request for as long as they cared to keep asking.
+    // Short TTL: an image appearing is worth noticing quickly, and a build
+    // publishes its own result the moment it finishes.
+    private static readonly TimeSpan ImageCheckTtl = TimeSpan.FromSeconds(30);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (bool Exists, DateTimeOffset Checked)> imageChecks = new(StringComparer.Ordinal);
+
+    public async Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken)
+    {
+        if (imageChecks.TryGetValue(image, out var cached) && DateTimeOffset.UtcNow - cached.Checked < ImageCheckTtl)
+        {
+            return cached.Exists;
+        }
+
+        var exists = (await RunPodmanAsync(new[] { "image", "exists", image }, cancellationToken)).ExitCode == 0;
+        imageChecks[image] = (exists, DateTimeOffset.UtcNow);
+        return exists;
+    }
+
+    public string BuildStatus(string profileId) =>
+        imageBuilds.TryGetValue(profileId, out var status) ? status : "";
+
+    // Starts a profile's image build and returns immediately: these take minutes
+    // and gigabytes, so the caller gets a status to poll rather than a request that
+    // hangs. Output goes to a log file, because a build that failed at 03:00 is
+    // only debuggable if it said why.
+    public bool StartImageBuild(DeskProfile profile, string imagesRoot, string? buildArgument = null)
+    {
+        if (!profile.NeedsOwnImage && !profile.NeedsOwnConsoleImage)
+        {
+            return false;
+        }
+
+        // One build at a time per profile — a second click must not start a second
+        // multi-gigabyte build over the first — but a build that FAILED has to be
+        // retryable, or a network blip means the desk can never be built again
+        // without a restart.
+        while (true)
+        {
+            if (imageBuilds.TryGetValue(profile.Id, out var status))
+            {
+                if (status == "building")
+                {
+                    return true;
+                }
+
+                if (imageBuilds.TryUpdate(profile.Id, "building", status))
+                {
+                    break;
+                }
+
+                continue; // Someone else changed it between the read and the write.
+            }
+
+            if (imageBuilds.TryAdd(profile.Id, "building"))
+            {
+                break;
+            }
+        }
+
+        var log = Path.Combine(Path.GetTempPath(), $"cielo-desk-image-{profile.Id}.log");
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // A desk is two images: the desktop the person uses and the console
+                // their agent works in. Both, or the profile only half exists.
+                var layers = new List<(string Layer, string Image)>();
+                if (profile.NeedsOwnImage)
+                {
+                    layers.Add(("desktop", profile.Image));
+                }
+                if (profile.NeedsOwnConsoleImage)
+                {
+                    layers.Add(("console", profile.ConsoleImage));
+                }
+
+                var transcript = new StringBuilder();
+                var ok = true;
+                foreach (var (layer, image) in layers)
+                {
+                    var arguments = new List<string> { "build", "-t", image };
+                    // Only the desktop layer takes a VS Code build arg; passing an
+                    // unknown one to the console layer is a warning, not an error,
+                    // but there is no reason to make podman print it.
+                    if (!string.IsNullOrEmpty(buildArgument) && layer == "desktop")
+                    {
+                        arguments.Add("--build-arg");
+                        arguments.Add(buildArgument);
+                    }
+                    arguments.Add(Path.Combine(imagesRoot, profile.Id, layer));
+
+                    var result = await RunPodmanAsync(arguments.ToArray(), CancellationToken.None);
+                    transcript.AppendLine($"=== {layer} ({image}) exit {result.ExitCode}");
+                    transcript.AppendLine(result.Stdout);
+                    transcript.AppendLine(result.Stderr);
+                    imageChecks[image] = (result.ExitCode == 0, DateTimeOffset.UtcNow);
+                    if (result.ExitCode != 0)
+                    {
+                        ok = false;
+                        break;
+                    }
+                }
+
+                await File.WriteAllTextAsync(log, transcript.ToString());
+                imageBuilds[profile.Id] = ok ? "built" : $"failed (see {log})";
+            }
+            catch (Exception exception)
+            {
+                imageBuilds[profile.Id] = $"failed: {exception.Message}";
+            }
+        });
+
+        return true;
     }
 
     public async Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken)

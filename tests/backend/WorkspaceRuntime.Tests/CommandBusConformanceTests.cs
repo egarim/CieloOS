@@ -22,7 +22,9 @@ public class CommandBusConformanceTests
     {
         "/api/sessions/*/agent-run",   // runs the console loop; every keystroke it makes is a policy-checked console.type
         "/api/sessions/*/desktop-run", // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
-        "/api/users"                   // add a teammate: control-plane identity creation, human-only
+        "/api/users",                  // add a teammate: control-plane identity creation, human-only
+        "/api/desk-profiles/*/build"   // build a desk image: provisioning this machine, human-only,
+                                       // not a surface mutation (nothing in the workspace changes)
     };
 
     [Fact]

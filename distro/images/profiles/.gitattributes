@@ -1,0 +1,3 @@
+# Seed scripts and Containerfiles are read by shell and by podman on Linux; a CR
+# at the end of a shebang line makes the script unrunnable.
+* text eol=lf

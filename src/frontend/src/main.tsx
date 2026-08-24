@@ -41,7 +41,8 @@ type SessionView = { id: string; owner: string; profile: string; status: string;
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
-type Whoami = { slug: string; display: string; kind: string; homes: string[] };
+type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string };
+type DeskProfileView = { id: string; label: string; description: string; isDefault: boolean; imageReady: boolean; buildStatus: string };
 type ConsoleView = { sessionId: string; screen: string; available: boolean; detail?: string | null };
 type LoopStep = { step: number; text: string | null; submit: boolean; done: boolean; note?: string | null; decision: string; reason: string };
 type AgentRunResult = { sessionId: string; goal: string; completed: boolean; stopReason: string; steps: LoopStep[] };
@@ -139,6 +140,7 @@ function App() {
   // First-run setup: null while we ask the runtime whether it has an owner yet.
   const [setupClaimed, setSetupClaimed] = React.useState<boolean | null>(null);
   const [setupName, setSetupName] = React.useState("");
+  const [setupProfile, setSetupProfile] = React.useState("office");
   const [setupError, setSetupError] = React.useState<string | null>(null);
   const [setupBusy, setSetupBusy] = React.useState(false);
   const [agents, setAgents] = React.useState<AgentProfile[]>([]);
@@ -158,6 +160,8 @@ function App() {
   const [modelsBusy, setModelsBusy] = React.useState(false);
   const [teammateOpen, setTeammateOpen] = React.useState(false);
   const [teammateName, setTeammateName] = React.useState("");
+  const [deskProfiles, setDeskProfiles] = React.useState<DeskProfileView[]>([]);
+  const [teammateProfile, setTeammateProfile] = React.useState("office");
   const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
   const [teammateError, setTeammateError] = React.useState<string | null>(null);
   const [teammateBusy, setTeammateBusy] = React.useState(false);
@@ -224,7 +228,8 @@ function App() {
       // the runtime can refuse a decision made against a sheet that has since moved.
       load<SurfaceState>("/api/surfaces/spreadsheet/state", (value) => setSpreadsheetRevision(value.revision)),
       load<ModelsData>("/api/models", setModels),
-      load<Whoami>("/api/whoami", setWhoami)
+      load<Whoami>("/api/whoami", setWhoami),
+      load<DeskProfileView[]>("/api/desk-profiles", setDeskProfiles)
     ]);
 
     if (unauthorized) signOut();
@@ -246,6 +251,16 @@ function App() {
         if (alive && data) setSetupClaimed(Boolean(data.claimed));
       })
       .catch(() => alive && setSetupClaimed(true)); // unreachable → fall back to login
+
+    // The desk choice has to be available BEFORE the first token exists, which is
+    // why /api/desk-profiles is public: the first owner picks their own desk in
+    // the wizard rather than being given the default and no way to change it.
+    fetch("/api/desk-profiles")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: DeskProfileView[] | null) => {
+        if (alive && data) setDeskProfiles(data);
+      })
+      .catch(() => undefined);
     return () => {
       alive = false;
     };
@@ -357,7 +372,7 @@ function App() {
       const response = await fetch("/api/setup/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, deskProfile: setupProfile })
       });
       if (response.ok) {
         const data = (await response.json()) as { slug: string; token: string };
@@ -491,6 +506,35 @@ function App() {
 
   // Invite a teammate. The runtime returns their bearer token for you to hand
   // over (it is also written to a 0600 file on the box).
+  // A profile image is built in the background: this starts it and the desk-profile
+  // list reports progress, rather than a request that hangs for several minutes.
+  async function buildDeskImage(id: string) {
+    try {
+      await fetch(`/api/desk-profiles/${encodeURIComponent(id)}/build`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${readToken() ?? ""}` }
+      });
+      setDeskProfiles(await api<DeskProfileView[]>("/api/desk-profiles"));
+    } catch (error) {
+      setTeammateError(String(error));
+    }
+  }
+
+  // A build takes minutes, so one refresh after starting it would leave the panel
+  // saying "building" forever — and the button visible, inviting a second build of
+  // something already built. Poll while anything is building, and stop when it is.
+  React.useEffect(() => {
+    if (!token || !deskProfiles.some((profile) => profile.buildStatus === "building")) return;
+    const timer = window.setInterval(async () => {
+      try {
+        setDeskProfiles(await api<DeskProfileView[]>("/api/desk-profiles"));
+      } catch {
+        // A failed poll is not worth surfacing; the next one will say the same.
+      }
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [token, deskProfiles.map((profile) => profile.buildStatus).join(",")]);
+
   async function addTeammate() {
     const name = teammateName.trim();
     if (!name || teammateBusy) return;
@@ -499,7 +543,7 @@ function App() {
     try {
       const result = await api<{ slug: string; token: string }>("/api/users", {
         method: "POST",
-        body: JSON.stringify({ name })
+        body: JSON.stringify({ name, deskProfile: teammateProfile })
       });
       setTeammateResult(result);
       setTeammateName("");
@@ -725,6 +769,26 @@ function App() {
                 onKeyDown={(event) => event.key === "Enter" && createOwner()}
               />
             </label>
+            {deskProfiles.length > 0 && (
+              <label>
+                Your desk
+                <select
+                  data-automation-id="setup-profile"
+                  value={setupProfile}
+                  disabled={setupBusy}
+                  onChange={(event) => setSetupProfile(event.target.value)}
+                >
+                  {deskProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}{profile.imageReady ? "" : " — image builds on first use"}
+                    </option>
+                  ))}
+                </select>
+                <span className="muted small">
+                  {deskProfiles.find((profile) => profile.id === setupProfile)?.description}
+                </span>
+              </label>
+            )}
             <div className="setupActions">
               <button data-automation-id="setup-create" disabled={setupBusy || !setupName.trim()} onClick={createOwner}>
                 {setupBusy ? <><Loader2 size={16} className="spin" /> Creating…</> : <><UserPlus size={16} /> Create account & enter <ArrowRight size={16} /></>}
@@ -869,6 +933,40 @@ function App() {
               {teammateOpen && (
                 <div className="teammateForm">
                   <p className="muted small">Create another user on this machine — you'll get a token to hand them.</p>
+                  <label className="profileChoice">
+                    Desk
+                    <select
+                      data-automation-id="teammate-profile"
+                      value={teammateProfile}
+                      disabled={teammateBusy}
+                      onChange={(event) => setTeammateProfile(event.target.value)}
+                    >
+                      {deskProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.label}{profile.imageReady ? "" : " — image not built"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {deskProfiles.find((profile) => profile.id === teammateProfile) && (
+                    <p className="muted small">
+                      {deskProfiles.find((profile) => profile.id === teammateProfile)!.description}
+                    </p>
+                  )}
+                  {/* A desk whose image is missing can be created, but it cannot open a
+                      desktop session until the image exists — so offer the build here
+                      rather than letting the person discover it later. */}
+                  {deskProfiles.some((profile) => profile.id === teammateProfile && !profile.imageReady) && (
+                    <button
+                      className="ghost"
+                      data-automation-id="build-desk-image"
+                      onClick={() => buildDeskImage(teammateProfile)}
+                    >
+                      {deskProfiles.find((profile) => profile.id === teammateProfile)?.buildStatus === "building"
+                        ? <><Loader2 size={14} className="spin" /> building this desk's image…</>
+                        : "Build this desk's image (large download)"}
+                    </button>
+                  )}
                   <input
                     data-automation-id="teammate-name"
                     value={teammateName}
@@ -935,6 +1033,9 @@ function App() {
                 <h2>
                   {desk.isSelf ? <User size={18} /> : <Bot size={18} />} {desk.label}
                   <span className="deskTag">{desk.isSelf ? "your desk" : "agent you own"}</span>
+                  {/* An agent shows its owner's desk profile because it works on
+                      that desk — same toolchain, same image. */}
+                  {whoami?.deskProfileLabel && <span className="deskTag">{whoami.deskProfileLabel}</span>}
                 </h2>
                 <p className="muted small">
                   Home volume <code>lunos-home-{desk.slug}</code> — it outlives every session; this is where this desk's work lives.

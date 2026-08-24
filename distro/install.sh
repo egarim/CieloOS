@@ -230,16 +230,57 @@ echo
 EOF
 cat > /usr/local/bin/cielo-add-user <<EOF
 #!/usr/bin/env bash
-# Add a teammate. Usage: cielo-add-user "Their Name" <owner-token>
+# Add a teammate. Usage: cielo-add-user "Their Name" <owner-token> [desk-profile]
+# The desk profile decides their toolchain (office, dotnet, marketing); omitted
+# means office, which is the desk everyone had before profiles existed.
 set -euo pipefail
-name="\${1:?Usage: cielo-add-user \"Name\" <owner-token>}"
+name="\${1:?Usage: cielo-add-user \"Name\" <owner-token> [desk-profile]}"
 token="\${2:?owner token required}"
+desk="\${3:-office}"
 curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/users" \
   -H "Authorization: Bearer \${token}" \
-  -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\"}"
+  -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 echo
 EOF
-chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user
+cat > /usr/local/bin/cielo-build-desk-image <<'EOF'
+#!/usr/bin/env bash
+# Build a desk profile's image on this machine. Usage: cielo-build-desk-image dotnet
+#
+# These are built on demand rather than at install (issue #15): a developer desk
+# is several gigabytes, and installing it on every machine to serve one office
+# user is the wrong default. The panel starts this too; it is here for the box.
+set -euo pipefail
+id="${1:?Usage: cielo-build-desk-image <profile>}"
+
+# Rootless podman keeps a store PER USER. Built as root, the image would land in
+# root's store and be invisible to the runtime, which runs as cielo — so the
+# session would still say the image is missing, with the image sitting right
+# there. Drop to cielo the way the session-image builder does.
+if [[ "$(id -u)" -eq 0 ]]; then
+  exec runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" \
+    /usr/local/bin/cielo-build-desk-image "$id"
+fi
+
+root="/var/lib/cielo/images/profiles/${id}"
+test -d "$root" || { echo "No desk profile '${id}' under /var/lib/cielo/images/profiles." >&2; exit 2; }
+
+# VS Code ships a per-architecture .deb, like ONLYOFFICE in the session image.
+case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+  arm64|aarch64) VSCODE_DEB="https://update.code.visualstudio.com/latest/linux-deb-arm64/stable" ;;
+  *)             VSCODE_DEB="https://update.code.visualstudio.com/latest/linux-deb-x64/stable" ;;
+esac
+
+# A desk is two images: the desktop the person uses, and the console their AGENT
+# works in. Building only the desktop would give a .NET desk whose agent cannot
+# run dotnet — the toolchain present for the human and missing for the machine.
+if [ -d "$root/desktop" ]; then
+  podman build --build-arg "VSCODE_DEB=${VSCODE_DEB}" -t "localhost/cielo-desk-${id}:latest" "$root/desktop"
+fi
+if [ -d "$root/console" ]; then
+  podman build -t "localhost/cielo-console-${id}:latest" "$root/console"
+fi
+EOF
+chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
 echo "==> [8/9] Chat UI (Open WebUI against /v1/agent)"

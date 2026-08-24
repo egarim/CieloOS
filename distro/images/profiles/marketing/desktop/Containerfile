@@ -1,0 +1,19 @@
+# The marketing desk: the CieloOS desktop plus the visual tools. Small compared
+# with the developer desk — everything here is in Ubuntu, nothing is downloaded
+# from a vendor — but it is still built on demand rather than shipped to every
+# machine (issue #15).
+ARG BASE=localhost/lunos-desktop:latest
+FROM ${BASE}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# GIMP for raster, Inkscape for vector, the XFCE screenshot tool for capture, and
+# ImageMagick so the agent can do the same work from a console session rather than
+# needing the GUI for a resize or a format conversion.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        gimp inkscape xfce4-screenshooter imagemagick \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY cielo-marketing-seed /custom-cont-init.d/99z-cielo-marketing
+RUN chmod +x /custom-cont-init.d/99z-cielo-marketing

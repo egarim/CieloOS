@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -97,7 +98,16 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
         ChatUrl = builder.Configuration["Sessions:ChatUrl"]
             ?? SessionReachableChatUrl(builder.Configuration["Chat:Url"])
     },
-    owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>())));
+    owner => Ownership.RootUserSlug(owner, sp.GetRequiredService<IRuntimeStore>()),
+    // A session's desktop image follows the desk profile of the USER who owns it —
+    // an agent inherits its owner's toolchain, because it works on the same desk.
+    owner =>
+    {
+        var store = sp.GetRequiredService<IRuntimeStore>();
+        var rootSlug = Ownership.RootUserSlug(owner, store) ?? owner;
+        var user = store.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug);
+        return DeskProfiles.Resolve(user?.DeskProfile);
+    }));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IDesktopBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
@@ -334,9 +344,17 @@ app.MapGet("/api/setup/status", (HttpContext context, ISetupService setup) => Re
     owner = IsLoopback(context.Connection.RemoteIpAddress) ? setup.OwnerSlug() : null
 }));
 
-app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup) =>
+app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup, ISessionBackend sessions) =>
 {
-    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress));
+    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress), request?.DeskProfile);
+    if (result.Outcome == ClaimOutcome.Ok)
+    {
+        // "Built on first use" has to mean it: choosing a developer desk in the
+        // wizard and then being told the image is missing, with the only build
+        // button hidden in a form about teammates, is not a first use.
+        StartDeskImageBuildIfMissing(request?.DeskProfile, sessions);
+    }
+
     return result.Outcome switch
     {
         ClaimOutcome.Ok => Results.Ok(new { result.Slug, result.Token }),
@@ -346,14 +364,94 @@ app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISe
     };
 });
 
+// What a desk can be created as. Public, like /api/branding: the claim wizard has
+// to offer the choice before anyone has a token.
+app.MapGet("/api/desk-profiles", async (ISessionBackend sessions, CancellationToken cancellationToken) =>
+{
+    var profiles = new List<object>();
+    foreach (var profile in DeskProfiles.All)
+    {
+        // The panel says "this desk needs an image that is not built yet" rather
+        // than letting a person pick a profile and meet a failure at session time.
+        // Ready means BOTH halves of the desk: the desktop the person opens and
+        // the console their agent works in.
+        var ready = (!profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken))
+            && (!profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken));
+        profiles.Add(new
+        {
+            profile.Id,
+            profile.Label,
+            profile.Description,
+            isDefault = profile.Id == DeskProfiles.DefaultId,
+            imageReady = ready,
+            buildStatus = (sessions as SessionOrchestrator)?.BuildStatus(profile.Id) ?? ""
+        });
+    }
+
+    return Results.Ok(profiles);
+});
+
+// Building a desk image is an owner's decision (it costs gigabytes and a long
+// download), and it returns immediately: the build runs in the background and the
+// list endpoint above reports its progress.
+app.MapPost("/api/desk-profiles/{id}/build", async (string id, HttpContext context, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    if (!DeskProfiles.IsKnown(id))
+    {
+        return Results.NotFound(new { error = $"No desk profile '{id}'." });
+    }
+
+    var profile = DeskProfiles.Resolve(id);
+
+    // Already built is a success, not a reason to spend another twenty minutes:
+    // a stale panel must not be able to trigger a rebuild by clicking twice.
+    var desktopReady = !profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken);
+    var consoleReady = !profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken);
+    if (desktopReady && consoleReady)
+    {
+        return Results.Ok(new { profile.Id, status = "built" });
+    }
+    if (sessions is not SessionOrchestrator orchestrator)
+    {
+        return Results.Json(new { error = "This runtime cannot build images." }, statusCode: StatusCodes.Status501NotImplemented);
+    }
+
+    var imagesRoot = builder.Configuration["Sessions:ProfileImagesPath"] ?? "/var/lib/cielo/images/profiles";
+    if (!Directory.Exists(Path.Combine(imagesRoot, profile.Id)))
+    {
+        return Results.Json(new { error = $"No build context for '{profile.Id}' under {imagesRoot}." }, statusCode: StatusCodes.Status409Conflict);
+    }
+
+    var caller = Caller(context);
+    orchestrator.StartImageBuild(profile, imagesRoot, VsCodeDebForThisMachine());
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "desk.image.build", AuditOutcome.Success, $"Started building the '{profile.Id}' desk image."));
+
+    return Results.Accepted($"/api/desk-profiles", new { profile.Id, status = orchestrator.BuildStatus(profile.Id) });
+});
+
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
 
 // Add a teammate (an existing owner invites another user). Human-only (enforced
 // in AccessPolicy). Returns the new user's slug + bearer token for the owner to
 // hand over; the token file is also written 0600 on the box.
-app.MapPost("/api/users", (AddUserRequest? request, ISetupService setup) =>
+app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions) =>
 {
-    var result = setup.AddUser(request?.Name);
+    var result = setup.AddUser(request?.Name, request?.DeskProfile);
+    if (result.Outcome == AddUserOutcome.Ok)
+    {
+        // Same as the claim: a desk created is a desk that should become usable
+        // without anyone having to know an image needs building.
+        StartDeskImageBuildIfMissing(request?.DeskProfile, sessions);
+
+        // What kind of desk someone was given is part of who did what: it decides
+        // the toolchain they get and what their agent may do.
+        var profile = DeskProfiles.Resolve(request?.DeskProfile);
+        var caller = Caller(context);
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+            "user.add", AuditOutcome.Success, $"Added '{result.Slug}' as a {profile.Label} desk."));
+    }
+
     return result.Outcome switch
     {
         AddUserOutcome.Ok => Results.Ok(new { result.Slug, result.Token }),
@@ -627,7 +725,23 @@ app.MapGet("/api/whoami", (HttpContext context) =>
                 .Where(agent => agent.OwnerUserId == caller.Subject)
                 .Select(agent => agent.Slug))
         : new[] { caller.Slug };
-    return Results.Ok(new { caller.Slug, caller.Display, kind = caller.Kind.ToString(), homes = ownedHomes });
+    // The desk profile travels with whoami so the panel can say what kind of desk
+    // this is without a second call, and an agent reports its owner's profile
+    // because it works on that owner's desk.
+    var runtimeStore = context.RequestServices.GetRequiredService<IRuntimeStore>();
+    var rootSlug = Ownership.RootUserSlug(caller.Slug, runtimeStore) ?? caller.Slug;
+    var deskProfile = DeskProfiles.Resolve(
+        runtimeStore.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug)?.DeskProfile);
+
+    return Results.Ok(new
+    {
+        caller.Slug,
+        caller.Display,
+        kind = caller.Kind.ToString(),
+        homes = ownedHomes,
+        deskProfile = deskProfile.Id,
+        deskProfileLabel = deskProfile.Label
+    });
 });
 
 // A read-only view of a principal's persistent home volume — the direct answer
@@ -1110,6 +1224,57 @@ static async Task<IResult> ResolveAsync(
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
 
+// Creating a desk starts its image build if the machine does not have it yet.
+//
+// Detached from the request on purpose, and it never throws. The identity is
+// already persisted and its token minted by the time this runs, so anything that
+// could abort the response — a client that disconnects, a podman that hangs — must
+// not be on this path: a claimed machine whose owner never received the token
+// cannot be claimed again, which is a bricked first install.
+static void StartDeskImageBuildIfMissing(string? deskProfileId, ISessionBackend sessions)
+{
+    var profile = DeskProfiles.Resolve(deskProfileId);
+    if ((!profile.NeedsOwnImage && !profile.NeedsOwnConsoleImage) || sessions is not SessionOrchestrator orchestrator)
+    {
+        return;
+    }
+
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var desktopReady = !profile.NeedsOwnImage
+                || await orchestrator.ImageExistsAsync(profile.Image, CancellationToken.None);
+            var consoleReady = !profile.NeedsOwnConsoleImage
+                || await orchestrator.ImageExistsAsync(profile.ConsoleImage, CancellationToken.None);
+            if (desktopReady && consoleReady)
+            {
+                return;
+            }
+
+            var imagesRoot = Environment.GetEnvironmentVariable("Sessions__ProfileImagesPath")
+                ?? "/var/lib/cielo/images/profiles";
+            if (Directory.Exists(Path.Combine(imagesRoot, profile.Id)))
+            {
+                orchestrator.StartImageBuild(profile, imagesRoot, VsCodeDebForThisMachine());
+            }
+        }
+        catch
+        {
+            // A desk that has to be built by hand is a nuisance; a user creation
+            // that fails because of it is worse.
+        }
+    });
+}
+
+// VS Code ships a .deb per architecture, and the developer desk image is built on
+// the target, so the build has to be told which one — the same problem the
+// ONLYOFFICE package has in the session image, solved the same way.
+static string VsCodeDebForThisMachine() =>
+    RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+        ? "VSCODE_DEB=https://update.code.visualstudio.com/latest/linux-deb-arm64/stable"
+        : "VSCODE_DEB=https://update.code.visualstudio.com/latest/linux-deb-x64/stable";
+
 // Loopback = the request originates on the box itself (a local browser, the SSH
 // tunnel the panel uses, or the CLI). IPv4-mapped IPv6 (::ffff:127.0.0.1) is
 // unwrapped first so a mapped loopback still counts.
@@ -1190,10 +1355,12 @@ public sealed record SurfaceCommandRequest(
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
 
 public sealed record ClaimRequest(
-    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
+    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null);
 
 public sealed record AddUserRequest(
-    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
+    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null);
 
 public sealed record AddProviderRequest(
     string? DisplayName,

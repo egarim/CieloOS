@@ -36,8 +36,12 @@ public static class AccessPolicy
         // /api/setup/* is the first-run claim: on a fresh, unclaimed machine no
         // token exists yet, so these must pass the auth gate. The claim's real
         // guard is in the handler (loopback-only + at-most-one-owner), not here.
+        // /api/desk-profiles is public for the same reason as the claim itself:
+        // the first-run wizard has to offer the choice of desk before any token
+        // exists. It returns names and readiness, nothing about who lives here.
         if (path == "/" || path == "/api/branding" || path == "/api/inference/status"
-            || path == "/api/setup/status" || path == "/api/setup/claim")
+            || path == "/api/setup/status" || path == "/api/setup/claim"
+            || path == "/api/desk-profiles")
         {
             return AccessLevel.Public;
         }
@@ -53,6 +57,12 @@ public static class AccessPolicy
         var isPost = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);
         var isDelete = string.Equals(method, "DELETE", StringComparison.OrdinalIgnoreCase);
         if (isPost && path == "/api/users")
+        {
+            return AccessLevel.HumanOnly;
+        }
+        // Building a desk image costs gigabytes of disk and a long download, so it
+        // is an owner's decision, not something an agent can set off.
+        if (isPost && path.StartsWith("/api/desk-profiles/", StringComparison.OrdinalIgnoreCase))
         {
             return AccessLevel.HumanOnly;
         }
