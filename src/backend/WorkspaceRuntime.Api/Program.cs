@@ -636,22 +636,20 @@ app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRun
     var password = request?.Password ?? "";
     var now = DateTimeOffset.UtcNow;
 
-    // Checked before anything is verified: a blocked attempt must cost no PBKDF2,
-    // or the throttle becomes the denial-of-service it exists to prevent. Both the
-    // desk and the source are counted — one attacker must not be able to lock out
-    // a desk by guessing at it, and one source must not get unlimited guesses by
-    // rotating names.
-    var source = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    var throttleKeys = new[] { $"desk:{slug}", $"source:{source}" };
-    foreach (var key in throttleKeys)
+    // Counted by SOURCE, never by desk. Blocking per account looks prudent and is
+    // an own goal: anyone who knows a desk name could then lock its owner out for
+    // fifteen minutes at a time, from anywhere, forever. Throttling the source
+    // costs the attacker their own address instead.
+    //
+    // Checked before anything is verified, so a blocked attempt costs no PBKDF2 —
+    // otherwise the throttle becomes the denial-of-service it exists to prevent.
+    var throttleKey = $"source:{context.Connection.RemoteIpAddress?.ToString() ?? "unknown"}";
+    if (throttle.RetryAfter(throttleKey, now) is { } wait)
     {
-        if (throttle.RetryAfter(key, now) is { } wait)
-        {
-            context.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
-            return Results.Json(
-                new { error = $"Too many failed sign-ins. Try again in {Math.Ceiling(wait.TotalMinutes)} minute(s)." },
-                statusCode: StatusCodes.Status429TooManyRequests);
-        }
+        context.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
+        return Results.Json(
+            new { error = $"Too many failed sign-ins from here. Try again in {Math.Ceiling(wait.TotalMinutes)} minute(s)." },
+            statusCode: StatusCodes.Status429TooManyRequests);
     }
     var user = store.Users.FirstOrDefault(candidate => candidate.Slug == slug);
     var hash = user is null ? null : store.PasswordHashFor(user.Id);
@@ -667,18 +665,21 @@ app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRun
             hasher.Verify(password, hasher.DummyHash);
         }
 
-        foreach (var key in throttleKeys)
+        throttle.Failed(throttleKey, now);
+
+        // Recorded even though it does not lock anything: an owner should be able
+        // to see that someone is guessing at their desk, which is the part of
+        // per-account tracking worth keeping.
+        if (user is not null)
         {
-            throttle.Failed(key, now);
+            store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, null,
+                "auth.login", AuditOutcome.Blocked, $"Failed sign-in for '{user.Slug}'."));
         }
 
         return Results.Json(new { error = "That name and password do not match." }, statusCode: StatusCodes.Status401Unauthorized);
     }
 
-    foreach (var key in throttleKeys)
-    {
-        throttle.Succeeded(key);
-    }
+    throttle.Succeeded(throttleKey);
 
     var (session, secret) = sessions.Create(user.Id, TimeSpan.FromDays(14));
     context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt));

@@ -424,7 +424,7 @@ function App() {
 
   // Poll the selected desk's running console screen so the watch view stays live.
   React.useEffect(() => {
-    if (!token || !selectedDesk) return;
+    if ((!token && !session) || !selectedDesk) return;
     const consoleSession = sessions.find(
       (session) => session.owner === selectedDesk && session.kind === "console" && session.status === "running");
     if (!consoleSession) {
@@ -434,7 +434,7 @@ function App() {
     observeConsole(consoleSession.id);
     const timer = setInterval(() => observeConsole(consoleSession.id), 2500);
     return () => clearInterval(timer);
-  }, [token, selectedDesk, sessions, observeConsole]);
+  }, [token, session, selectedDesk, sessions, observeConsole]);
 
   // The real login: name + password in exchange for a server-side session. No
   // credential is kept in localStorage — the cookie is httpOnly, so a script in
