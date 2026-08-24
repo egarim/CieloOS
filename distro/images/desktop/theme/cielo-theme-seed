@@ -15,6 +15,17 @@ if [[ -f "$MARKER" ]]; then
   exit 0
 fi
 
+# A session that predates this image has a populated /config and no marker, and
+# copying over it would destroy settings the person already has — the very thing
+# the marker exists to prevent, missed by one release. An existing XFCE config is
+# the tell: this init runs before the desktop starts, so on a genuinely new
+# volume nothing has created it yet. Mark it and leave it alone.
+if [[ -d /config/.config/xfce4 ]]; then
+  echo "existing session: leaving its settings alone" > "$MARKER"
+  chown "${PUID:-911}:${PGID:-911}" "$MARKER"
+  exit 0
+fi
+
 install -d /config/.config/xfce4/xfconf/xfce-perchannel-xml
 install -d /config/.config/autostart
 install -d /config/.config/plank/dock1/launchers
