@@ -53,6 +53,9 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 - **Desktop loop** — the agent uses the GUI: **AT-SPI-first grounding** (exact element boxes → click the element, not a guessed pixel), with a **vision-model fallback** only for what the accessibility tree can't see. Clicks are autonomous; **typing/keys require the owner's consent**.
 - **Input grant** — a human leases input on a session for N minutes; while live, the agent **types autonomously**; revocable, time-boxed, audited (the V0.6 consent model).
 
+**Chat**
+- **Open WebUI**, installed and started by `install.sh` against the OpenAI-compatible `/v1/agent` endpoint and authenticated as the owner: every message runs the console loop, so the agent uses its tools and operates the OS, and the reply streams back as it works. Loopback-only until there is a login (issue #9) — tunnel to reach it from elsewhere.
+
 **Models — layered & replaceable** ([docs/model-config.md](docs/model-config.md))
 - One capability-based registry resolves a provider per capability (**chat / vision / embedding**) through a cascade **agent → user → OS**. Providers are tagged by capability and **locality** (`on-box` / `remote-self-hosted` / `cloud`).
 - Ships with **DeepSeek** and **Azure OpenAI gpt-4.1-mini** (cloud) and **local Bonsai-4B** (llama.cpp, on-box). AT-SPI-first means the **default desktop path needs no vision model and nothing leaves the box**.

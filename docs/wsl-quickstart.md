@@ -78,6 +78,24 @@ Health check from a second Ubuntu shell while it runs:
 ./cielo/cielo-selftest.sh --url http://127.0.0.1:5148
 ```
 
+## Optional: the chat UI
+
+`install.sh` installs Open WebUI as a service, but `run.sh` has no systemd, so under
+WSL you start it yourself. It needs podman (see the next section) and your owner
+token — the panel's own token, which `.data/secrets/<you>.token` also holds:
+
+```bash
+podman run -d --rm --name cielo-chat --network host \
+  -e HOST=127.0.0.1 -e PORT=8080 -e WEBUI_AUTH=False -e WEBUI_NAME="CieloOS Chat" \
+  -e OPENAI_API_BASE_URL=http://127.0.0.1:5148/v1/agent \
+  -e OPENAI_API_KEY="$(cat ~/cielo/.data/secrets/$USER.token)" \
+  -v cielo-chat-data:/app/backend/data ghcr.io/open-webui/open-webui:main
+```
+
+Then open `http://localhost:8080/` in Windows, and set `Chat__Url=http://localhost:8080/`
+in the environment `run.sh` inherits so the panel links to it. `WEBUI_AUTH=False` means
+anyone who reaches the page acts as you, which is why `HOST` pins it to loopback.
+
 ## Optional: sessions (console / desktop) need podman
 
 The control plane — panel, claim, Models, spreadsheet, audit — runs with **no

@@ -48,6 +48,33 @@ claim your box. Do it on the box:
 
 Add a teammate later: `cielo-add-user "Their Name" <owner-token>` (or the panel).
 
+## Chat with your agent
+
+`install.sh` installs **Open WebUI** as `cielo-chat.service`, pointed at this box's
+`/v1/agent` endpoint and authenticated as the owner. Every message runs the console
+loop: the agent uses its tools and operates the OS, and you get its reply.
+
+It starts by itself once the box is claimed — before that there is no owner to act
+as, so the service exits and retries every 15 seconds. First start downloads the
+image (~1 GB), so give it a few minutes.
+
+```
+http://127.0.0.1:8080/
+```
+
+**It is loopback-only on purpose.** The chat has no login of its own yet, so whoever
+opens it acts as the owner. From another machine, tunnel rather than exposing it:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 you@box
+```
+
+`/etc/cielo/chat.env` holds the host, port and image. Install without it entirely
+with `./install.sh --no-chat`; the panel then shows no chat link.
+
+Reply quality tracks the chat model: a small local model will do things like type
+`Hello!` into its own shell instead of answering. A capable cloud model behaves.
+
 ## Notes
 
 - Provider-free and single SQLite DB under `/opt/cielo/.data` (or `<bundle>/.data` with

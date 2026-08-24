@@ -69,6 +69,11 @@ public sealed record AddUserResult(AddUserOutcome Outcome, string? Slug = null, 
 public interface ISetupService
 {
     bool IsClaimed();
+
+    // The slug of the first owner, or null on an unclaimed box. On-box services
+    // (the chat UI) need it to find whose token to act as; it is never returned
+    // to a remote caller.
+    string? OwnerSlug();
     ClaimResult Claim(string? name, bool fromLoopback);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
@@ -92,6 +97,15 @@ public sealed class SetupService : ISetupService
     // demo image (seeded joche/yulia) is already "claimed", so its setup wizard
     // never appears — exactly right.
     public bool IsClaimed() => store.Users.Count > 0;
+
+    // Nothing in the database records WHO claimed the box — every user row looks
+    // alike — and the order an EF query returns rows in is not defined, so taking
+    // "the first" would be a guess a teammate could win, and an on-box service
+    // would then act as them. So answer only when the answer cannot be a guess:
+    // one human means one possible owner. With several, say nothing and let the
+    // caller refuse (or be told explicitly, via CHAT_OWNER). A real owner column
+    // belongs with the login work in #9.
+    public string? OwnerSlug() => store.Users.Count == 1 ? store.Users[0].Slug : null;
 
     public ClaimResult Claim(string? name, bool fromLoopback)
     {
