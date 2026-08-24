@@ -263,6 +263,17 @@ class Confinement:
     are left alone, because a page fetching its own CDN is what the web is; that
     ambient traffic is the phase-2 allowlist's problem, not something to break
     every site over.
+
+    KNOWN LIMIT, and the reason the phase-2 egress proxy is not optional: this
+    guard exists only while a command is running. The helper is one process per
+    command, so CDP interception is torn down when it exits, and a page that
+    schedules work for later — setTimeout(() => fetch(...), 11000), or a delayed
+    location change — runs it with nothing watching. Confinement therefore bounds
+    what a click DOES, not what the page does afterwards, which is the same
+    boundary that already applies to any approved page's ambient behaviour. Making
+    it hold continuously needs enforcement that outlives the command: a proxy the
+    browser is launched behind, which is also how the per-desk allowlist should be
+    built. See docs/release-checklist.md.
     """
 
     # Request kinds worth naming to a person. The rest (fonts, stylesheets) are
@@ -513,10 +524,13 @@ async def click(cdp, ref):
     # back before it can carry on. Returning to the page it was already on is not
     # egress: that document was fetched before the click.
     if guard.blocked and origin and origin_of(here["u"]) != origin:
-        cdp.mark()
-        await cdp.call("Page.navigate", {"url": was})
-        await cdp.settle(timeout=10.0)
-        here = await cdp.where()
+        # Under the same guard as any other navigation. Going back to a page the
+        # agent was already on sounds unimpeachable, but re-asking that URL re-asks
+        # its server, which may now answer 302 — and reaching an unapproved origin
+        # while RECOVERING from a blocked click would be a bitter way to lose the
+        # argument.
+        recovered = await navigate(cdp, was)
+        here = {"t": recovered.get("title", ""), "u": recovered.get("url", "")}
 
     detail = f"Clicked {target['role']} '{target['name']}'."
     if refused:

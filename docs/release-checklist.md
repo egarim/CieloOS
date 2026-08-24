@@ -214,10 +214,20 @@ model story is provider-free (add your own key in the Models tab, no restart).
     - **Same-origin submission.** A click that posts to the site the agent is
       already on is indistinguishable from ordinary use of that site. Read "the
       agent may visit X" as "the agent may post to X".
-    - **Ambient page traffic.** Outside the click window a loaded page may talk to
-      whatever it likes; blocking that would break the web (every CDN, font and
-      analytics call). Confinement makes the AGENT's action bounded, not the
-      page's. The per-desk allowlist is the phase-2 answer.
+    - **Anything the page does after the command ends.** This is the structural
+      one. The helper is one process per command, so CDP interception is torn down
+      when it exits: ambient traffic, a `setTimeout` scheduled by a click, or a
+      delayed `location` change all run with nothing watching. Confinement bounds
+      what the agent's action DOES, not what the page does afterwards.
+- ⬜ **Egress proxy for the agent browser (phase 2, and the real fix).** Launch the
+  agent's Chromium behind a local proxy in the session container
+  (`--proxy-server=127.0.0.1:<port>`) that enforces the per-desk allowlist for
+  every request, including CONNECT for TLS. This is the only enforcement that
+  outlives a command, and it subsumes four separate holes review found one at a
+  time in the CDP-window approach: cross-origin redirects, popups, delayed
+  requests, and ambient page traffic. Until it exists, "navigation is the
+  human-approved egress decision" is true *of the agent's commands*, not of the
+  browser as a whole — say so in release notes rather than implying more.
   - **No `type` on the web.** Filling a form is phase 2, behind the existing
     `ISessionInputGrants` lease.
   - **No auto-waiting beyond the load event.** The helper waits for
