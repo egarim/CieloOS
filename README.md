@@ -39,6 +39,11 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 
 ## Features (what works today)
 
+**Sign-in and credentials**
+- **Password login** with server-side sessions in an httpOnly, SameSite cookie — so signing out actually ends the session, and "sign out everywhere" exists. Passwords are PBKDF2-SHA256 with a per-password salt.
+- **Named, revocable API keys** for programs, so an integration never holds a person's own credential: the packaged chat mints its own key and you can revoke it without touching anything else.
+- The deterministic identity token still works for agents and the CLI. It is a capability, not a login, and the panel says so.
+
 **Identity, policy, audit**
 - Human identities each **own** an agent — you **claim** the first owner on the box (provider-free, no hardcoded users). The acting user/agent is derived from a per-identity bearer token, never the request body. An agent may only act as itself; a human only through agents it owns; approvals are human-only.
 - **Surfaces** (schema-2 manifests in `surfaces/`): `spreadsheet`, `session`, `console`, `desktop`, `session-input`. One `ManifestPolicyEngine` is the sole policy source; mutating commands are `RequireApproval`, bound to a **hash of the exact previewed request**.

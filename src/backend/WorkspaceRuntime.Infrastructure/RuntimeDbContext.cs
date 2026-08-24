@@ -11,6 +11,10 @@ public sealed class UserRow
     // Rows written before desk profiles existed read as "office" — the desk they
     // have always had.
     public string DeskProfile { get; set; } = "office";
+    // Empty until a password is set. Existing installs upgrade with no password:
+    // they can still sign in with their identity token, and are asked to set one.
+    public string PasswordHash { get; set; } = "";
+    public DateTimeOffset? PasswordSetAt { get; set; }
 }
 
 public sealed class WorkspaceRow
@@ -85,6 +89,8 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<SpreadsheetRow> Spreadsheets => Set<SpreadsheetRow>();
     public DbSet<TokenUsageRow> TokenUsage => Set<TokenUsageRow>();
     public DbSet<TokenLimitRow> TokenLimits => Set<TokenLimitRow>();
+    public DbSet<SessionRow> Sessions => Set<SessionRow>();
+    public DbSet<ApiKeyRow> ApiKeys => Set<ApiKeyRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,6 +105,13 @@ public sealed class RuntimeDbContext : DbContext
         // One limit per (scope, subject): "the cap for this agent" is a single
         // fact, and a second row for the same subject would just be ambiguous.
         modelBuilder.Entity<TokenLimitRow>().ToTable("runtime_token_limits").HasKey(row => new { row.Scope, row.Subject });
+        // A credential is looked up BY ITS HASH on every request, so that column
+        // is indexed and unique — a duplicate would mean two sessions sharing one
+        // secret, which should be impossible rather than merely unlikely.
+        modelBuilder.Entity<SessionRow>().ToTable("runtime_sessions")
+            .HasIndex(row => row.SecretHash).IsUnique();
+        modelBuilder.Entity<ApiKeyRow>().ToTable("runtime_api_keys")
+            .HasIndex(row => row.SecretHash).IsUnique();
     }
 }
 
@@ -132,4 +145,35 @@ public sealed class TokenLimitRow
     public string Scope { get; set; } = "";
     public string Subject { get; set; } = "";
     public long MonthlyTokens { get; set; }
+}
+
+// A browser session. The secret itself is never stored — only its hash — so a
+// copy of this table is a list of who is signed in, not a way to become them.
+public sealed class SessionRow
+{
+    public Guid Id { get; set; }
+    public Guid UserId { get; set; }
+    public string SecretHash { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    // Ticks alongside the timestamp, because SQLite cannot order a
+    // DateTimeOffset in a query (the same lesson as the usage ledger).
+    public long CreatedAtTicks { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset LastSeenAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+}
+
+// A named credential for a program — the thing that means an integration never
+// has to hold a person's own credential (issue #9, point 6).
+public sealed class ApiKeyRow
+{
+    public Guid Id { get; set; }
+    public Guid OwnerUserId { get; set; }
+    public string Name { get; set; } = "";
+    public string SecretHash { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+    public DateTimeOffset? ExpiresAt { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public DateTimeOffset? LastUsedAt { get; set; }
 }

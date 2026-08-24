@@ -39,9 +39,11 @@ public static class AccessPolicy
         // /api/desk-profiles is public for the same reason as the claim itself:
         // the first-run wizard has to offer the choice of desk before any token
         // exists. It returns names and readiness, nothing about who lives here.
+        // /api/auth/login is public for the obvious reason: it is what you use
+        // when you have no session yet. Its own guard is the password.
         if (path == "/" || path == "/api/branding" || path == "/api/inference/status"
             || path == "/api/setup/status" || path == "/api/setup/claim"
-            || path == "/api/desk-profiles")
+            || path == "/api/desk-profiles" || path == "/api/auth/login")
         {
             return AccessLevel.Public;
         }
@@ -62,6 +64,13 @@ public static class AccessPolicy
         }
         // Building a desk image costs gigabytes of disk and a long download, so it
         // is an owner's decision, not something an agent can set off.
+        // Sessions and keys belong to the person, so these are human-only: an
+        // agent must not be able to mint a credential or end a session.
+        if ((isPost || isDelete) && (path.StartsWith("/api/auth/", StringComparison.OrdinalIgnoreCase)
+            || path == "/api/keys" || path.StartsWith("/api/keys/", StringComparison.OrdinalIgnoreCase)))
+        {
+            return AccessLevel.HumanOnly;
+        }
         if (isPost && path == "/api/usage/limits")
         {
             return AccessLevel.HumanOnly;

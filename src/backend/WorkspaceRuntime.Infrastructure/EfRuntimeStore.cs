@@ -122,6 +122,18 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return context.Spreadsheets.AsNoTracking().Single(sheet => sheet.Id == 1).Revision;
         }
     }
+    public string? PasswordHashFor(Guid userId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        return EfPasswords.Read(context, userId);
+    }
+
+    public void SetPasswordHash(Guid userId, string hash)
+    {
+        using var context = contextFactory.CreateDbContext();
+        EfPasswords.Write(context, userId, hash);
+    }
+
 
     public PlatformUser GetUser(Guid id)
     {

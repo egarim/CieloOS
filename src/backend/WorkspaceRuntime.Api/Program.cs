@@ -132,6 +132,13 @@ builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequi
 builder.Services.AddSingleton<AgentRuntime>();
 // The ledger behind issue #14: every model call recorded, per-desk and per-agent
 // ceilings enforced. Registered before the loops so they can take it.
+builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+builder.Services.AddSingleton<ISessionStore>(sp => databaseProvider == "memory"
+    ? new InMemorySessionStore()
+    : new EfSessionStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
+builder.Services.AddSingleton<IApiKeyStore>(sp => databaseProvider == "memory"
+    ? new InMemoryApiKeyStore()
+    : new EfApiKeyStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
 builder.Services.AddSingleton<ITokenLedger>(sp => databaseProvider == "memory"
     // The memory provider registers no DbContext at all, and the loops ask the
     // ledger about the budget on every step — an unresolvable service there would
@@ -292,16 +299,65 @@ app.Use(async (context, next) =>
     var level = AccessPolicy.Required(context.Request.Path, context.Request.Method);
     if (level != AccessLevel.Public)
     {
-        var authenticator = context.RequestServices.GetRequiredService<ITokenAuthenticator>();
+        var store = context.RequestServices.GetRequiredService<IRuntimeStore>();
+        var now = DateTimeOffset.UtcNow;
+        RuntimePrincipal? principal = null;
+
+        // 1. A signed-in person, via the session cookie. Only honoured with the
+        //    panel header: a cross-site form post cannot set a custom header
+        //    without a preflight we never grant, so this is what stops the cookie
+        //    from being a CSRF hole (issue #9).
+        var cookie = context.Request.Cookies[CredentialFormat.SessionCookie];
+        if (!string.IsNullOrEmpty(cookie) && context.Request.Headers.ContainsKey(CredentialFormat.PanelHeader))
+        {
+            var sessions = context.RequestServices.GetRequiredService<ISessionStore>();
+            if (sessions.Resolve(cookie, now) is { } session)
+            {
+                var user = store.Users.FirstOrDefault(candidate => candidate.Id == session.UserId);
+                if (user is not null)
+                {
+                    sessions.Touch(session.Id, now);
+                    principal = new RuntimePrincipal(PrincipalKind.Human, user.Id, user.Slug, user.DisplayName);
+                    context.Items["session"] = session.Id;
+                }
+            }
+        }
+
         var header = context.Request.Headers.Authorization.ToString();
-        var principal = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
-            ? authenticator.Authenticate(header["Bearer ".Length..])
-            : null;
+        var bearer = header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+            ? header["Bearer ".Length..].Trim()
+            : "";
+
+        // 2. A program, via a named revocable key. Checked before the legacy token
+        //    so an integration never needs the owner's own credential.
+        if (principal is null && bearer.StartsWith(CredentialFormat.ApiKeyPrefix, StringComparison.Ordinal))
+        {
+            var keys = context.RequestServices.GetRequiredService<IApiKeyStore>();
+            if (keys.Resolve(bearer, now) is { } key)
+            {
+                var user = store.Users.FirstOrDefault(candidate => candidate.Id == key.OwnerUserId);
+                if (user is not null)
+                {
+                    keys.MarkUsed(key.Id, now);
+                    principal = new RuntimePrincipal(PrincipalKind.Human, user.Id, user.Slug, user.DisplayName);
+                    context.Items["apiKey"] = key.Id;
+                }
+            }
+        }
+
+        // 3. The legacy identity token: still how AGENTS authenticate, and still
+        //    accepted for people so an upgrade does not lock anyone out. It is a
+        //    capability, not a login — deterministic and eternal — which is the
+        //    whole reason the two above exist.
+        if (principal is null && bearer.Length > 0)
+        {
+            principal = context.RequestServices.GetRequiredService<ITokenAuthenticator>().Authenticate(bearer);
+        }
 
         if (principal is null)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsJsonAsync(new { error = "A valid bearer token is required." });
+            await context.Response.WriteAsJsonAsync(new { error = "Sign in, or present an API key or identity token." });
             return;
         }
 
@@ -548,6 +604,177 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
             : $"Removed the {scope} model budget{(scope == TokenLimit.OsScope ? "" : $" for {canonical}")}."));
 
     return Results.Ok(new { scope, subject = canonical, monthlyTokens = tokens });
+});
+
+// --- Sign in, sign out, and the credentials programs use (issue #9) ---------
+//
+// A password proves a person is who they say they are; a session carries that
+// proof and can be ended; an API key lets a program act without holding the
+// person's own credential. The legacy identity token still works — agents use
+// it — but it is a capability, not a login.
+
+app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions) =>
+{
+    var slug = (request?.Slug ?? "").Trim().ToLowerInvariant();
+    var password = request?.Password ?? "";
+    var user = store.Users.FirstOrDefault(candidate => candidate.Slug == slug);
+    var hash = user is null ? null : store.PasswordHashFor(user.Id);
+
+    // One message for "no such user", "no password set" and "wrong password":
+    // telling them apart tells an attacker which desks exist and which are
+    // unprotected. The failure is also deliberately slow — verifying against a
+    // dummy hash — so a missing user is not measurably faster than a wrong one.
+    if (user is null || hash is null || !hasher.Verify(password, hash))
+    {
+        if (user is null || hash is null)
+        {
+            hasher.Verify(password, hasher.DummyHash);
+        }
+
+        return Results.Json(new { error = "That name and password do not match." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    var (session, secret) = sessions.Create(user.Id, TimeSpan.FromDays(14));
+    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt));
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, null,
+        "auth.login", AuditOutcome.Success, $"'{user.Slug}' signed in."));
+
+    return Results.Ok(new { user.Slug, user.DisplayName, expiresAt = session.ExpiresAt });
+});
+
+app.MapPost("/api/auth/logout", (HttpContext context, ISessionStore sessions, IRuntimeStore store) =>
+{
+    // Actually ends the session server-side, which is the point: clearing local
+    // storage never invalidated anything.
+    if (context.Items.TryGetValue("session", out var raw) && raw is Guid sessionId)
+    {
+        sessions.Revoke(sessionId);
+    }
+
+    context.Response.Cookies.Delete(CredentialFormat.SessionCookie);
+    var caller = Caller(context);
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "auth.logout", AuditOutcome.Success, $"'{caller.Slug}' signed out."));
+    return Results.Ok(new { signedOut = true });
+});
+
+app.MapPost("/api/auth/logout-all", (HttpContext context, ISessionStore sessions, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var count = sessions.RevokeAllFor(caller.Subject);
+    context.Response.Cookies.Delete(CredentialFormat.SessionCookie);
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "auth.logout-all", AuditOutcome.Success, $"'{caller.Slug}' ended {count} session(s)."));
+    return Results.Ok(new { endedSessions = count });
+});
+
+app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions) =>
+{
+    var caller = Caller(context);
+    var next = request?.NewPassword ?? "";
+    if (next.Length < 10)
+    {
+        // Length over composition rules: a long passphrase beats a short one with
+        // a digit and a symbol, and nothing here can check a breach corpus.
+        return Results.BadRequest(new { error = "A password needs at least 10 characters." });
+    }
+
+    var existing = store.PasswordHashFor(caller.Subject);
+    if (existing is not null)
+    {
+        if (!hasher.Verify(request?.CurrentPassword ?? "", existing))
+        {
+            return Results.Json(new { error = "The current password does not match." }, statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+    else if (!IsLoopback(context.Connection.RemoteIpAddress))
+    {
+        // Upgrading an install: the owner has no password yet and cannot prove one.
+        // Setting the first one is therefore loopback-only, the same gate the
+        // first-owner claim uses — otherwise anyone holding the (permanent, and
+        // possibly leaked) identity token could set it from anywhere.
+        return Results.Json(
+            new { error = "Set your first password on the machine itself (localhost or your SSH tunnel)." },
+            statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    store.SetPasswordHash(caller.Subject, hasher.Hash(next));
+
+    // Changing a password ends every other session: that is what a person expects
+    // it to do after losing a laptop.
+    var ended = sessions.RevokeAllFor(caller.Subject);
+    var (session, secret) = sessions.Create(caller.Subject, TimeSpan.FromDays(14));
+    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt));
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "auth.password", AuditOutcome.Success,
+        existing is null
+            ? $"'{caller.Slug}' set a password for the first time."
+            : $"'{caller.Slug}' changed their password, ending {ended} other session(s)."));
+
+    return Results.Ok(new { passwordSet = true, endedSessions = Math.Max(0, ended - 1) });
+});
+
+// Named, revocable credentials for programs — the fix for an integration having
+// to embed the owner's master token (issue #9, point 6; #8's chat is the case).
+app.MapGet("/api/keys", (HttpContext context, IApiKeyStore keys, ISessionStore sessions) =>
+{
+    var caller = Caller(context);
+    return Results.Ok(new
+    {
+        keys = keys.For(caller.Subject).Select(key => new
+        {
+            key.Id,
+            key.Name,
+            key.CreatedAt,
+            key.ExpiresAt,
+            key.RevokedAt,
+            key.LastUsedAt,
+            live = key.IsLive(DateTimeOffset.UtcNow)
+        }),
+        sessions = sessions.For(caller.Subject).Select(session => new
+        {
+            session.Id,
+            session.CreatedAt,
+            session.LastSeenAt,
+            session.ExpiresAt,
+            session.RevokedAt,
+            live = session.IsLive(DateTimeOffset.UtcNow)
+        })
+    });
+});
+
+app.MapPost("/api/keys", (CreateApiKeyRequest? request, HttpContext context, IApiKeyStore keys, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var name = (request?.Name ?? "").Trim();
+    if (name.Length == 0)
+    {
+        // A key nobody can identify is a key nobody will ever dare revoke.
+        return Results.BadRequest(new { error = "Give the key a name, so you know what to revoke later." });
+    }
+
+    var lifetime = request?.ExpiresInDays is > 0 ? TimeSpan.FromDays(request.ExpiresInDays.Value) : (TimeSpan?)null;
+    var (key, secret) = keys.Create(caller.Subject, name, lifetime);
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "auth.key.create", AuditOutcome.Success, $"'{caller.Slug}' created API key '{key.Name}'."));
+
+    // The secret is returned exactly once and never stored — only its hash is.
+    return Results.Ok(new { key.Id, key.Name, key.ExpiresAt, secret });
+});
+
+app.MapDelete("/api/keys/{id}", (Guid id, HttpContext context, IApiKeyStore keys, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    if (!keys.Revoke(id, caller.Subject))
+    {
+        return Results.NotFound(new { error = "No such key of yours." });
+    }
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "auth.key.revoke", AuditOutcome.Success, $"'{caller.Slug}' revoked API key {id}."));
+    return Results.Ok(new { revoked = id });
 });
 
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
@@ -1363,6 +1590,19 @@ static async Task<IResult> ResolveAsync(
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
 
+// HttpOnly so a script in the panel's origin cannot read it — the flaw the token
+// in localStorage had. Strict so it does not ride along on a cross-site request.
+// Secure only under HTTPS, because the default deployment is plain HTTP on
+// loopback and a Secure cookie would simply never be sent there.
+static CookieOptions SessionCookieOptions(HttpContext context, DateTimeOffset expires) => new()
+{
+    HttpOnly = true,
+    SameSite = SameSiteMode.Strict,
+    Secure = context.Request.IsHttps,
+    Path = "/",
+    Expires = expires
+};
+
 // What a run is about to be billed for. Null when the provider is not one the
 // registry knows (the recipe fallback, for instance), which is exactly when
 // there is nothing to bill.
@@ -1504,6 +1744,12 @@ public sealed record SurfaceCommandRequest(
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
 
 public sealed record SetTokenLimitRequest(string? Scope, string? Subject, long? MonthlyTokens);
+
+public sealed record LoginRequest(string? Slug, string? Password);
+
+public sealed record SetPasswordRequest(string? CurrentPassword, string? NewPassword);
+
+public sealed record CreateApiKeyRequest(string? Name, int? ExpiresInDays);
 
 public sealed record ClaimRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,

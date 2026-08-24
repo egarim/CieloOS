@@ -49,6 +49,14 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     public SpreadsheetState Spreadsheet => spreadsheet;
     public long SpreadsheetRevision => spreadsheetRevision;
 
+    // In-memory mode keeps passwords in memory too: it exists for tests and
+    // ephemeral runs, where nothing survives a restart by design.
+    private readonly Dictionary<Guid, string> passwords = new();
+
+    public string? PasswordHashFor(Guid userId) => passwords.TryGetValue(userId, out var hash) ? hash : null;
+
+    public void SetPasswordHash(Guid userId, string hash) => passwords[userId] = hash;
+
     public PlatformUser GetUser(Guid id) => users.Single(user => user.Id == id);
 
     public AgentProfile GetAgent(Guid id) => agents.Single(agent => agent.Id == id);

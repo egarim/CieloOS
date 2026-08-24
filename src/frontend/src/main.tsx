@@ -43,6 +43,15 @@ type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
 type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string };
 type DeskProfileView = { id: string; label: string; description: string; isDefault: boolean; imageReady: boolean; buildStatus: string };
+type ApiKeyView = {
+  id: string;
+  name: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  live: boolean;
+};
 type UsageView = {
   month: string;
   deskSubject: string;
@@ -127,8 +136,13 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const token = readToken();
   const response = await fetch(path, {
     ...init,
+    // same-origin so the session cookie travels; the panel header is what makes
+    // the runtime honour that cookie at all — a cross-site form post cannot set a
+    // custom header, so this is the CSRF defence (issue #9).
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
+      "X-Cielo-Panel": "1",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init?.headers ?? {})
     }
@@ -146,6 +160,11 @@ function App() {
   const [branding, setBranding] = React.useState<Branding>(emptyBranding);
   const [token, setToken] = React.useState<string | null>(readToken());
   const [tokenDraft, setTokenDraft] = React.useState("");
+  const [loginSlug, setLoginSlug] = React.useState("");
+  const [loginPassword, setLoginPassword] = React.useState("");
+  // A cookie session cannot be read from JavaScript, so "am I signed in" is a
+  // question only the runtime can answer — asked once on load.
+  const [session, setSession] = React.useState(false);
   const [loginError, setLoginError] = React.useState<string | null>(null);
   // First-run setup: null while we ask the runtime whether it has an owner yet.
   const [setupClaimed, setSetupClaimed] = React.useState<boolean | null>(null);
@@ -173,6 +192,14 @@ function App() {
   const [teammateName, setTeammateName] = React.useState("");
   const [deskProfiles, setDeskProfiles] = React.useState<DeskProfileView[]>([]);
   const [usage, setUsage] = React.useState<UsageView | null>(null);
+  const [keys, setKeys] = React.useState<ApiKeyView[]>([]);
+  const [keyName, setKeyName] = React.useState("");
+  // Shown once, never stored: after this render the secret exists nowhere but
+  // wherever the person pasted it.
+  const [newKeySecret, setNewKeySecret] = React.useState<string | null>(null);
+  const [passwordCurrent, setPasswordCurrent] = React.useState("");
+  const [passwordNew, setPasswordNew] = React.useState("");
+  const [securityMessage, setSecurityMessage] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [teammateProfile, setTeammateProfile] = React.useState("office");
   const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
   const [teammateError, setTeammateError] = React.useState<string | null>(null);
@@ -188,10 +215,34 @@ function App() {
   const [agentRunning, setAgentRunning] = React.useState(false);
   const [agentRun, setAgentRun] = React.useState<AgentRunResult | null>(null);
 
+  // Signing out now ENDS the session server-side. Clearing local storage never
+  // invalidated anything: the token stayed valid forever (issue #9, point 3).
   const signOut = React.useCallback(() => {
+    const stored = readToken();
+    void fetch("/api/auth/logout", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "X-Cielo-Panel": "1", ...(stored ? { Authorization: `Bearer ${stored}` } : {}) }
+    }).catch(() => undefined);
     window.localStorage.removeItem(TOKEN_KEY);
     setToken(null);
+    setSession(false);
   }, []);
+
+  // A cookie session is invisible to JavaScript, so ask the runtime once on load
+  // whether this browser is already signed in.
+  React.useEffect(() => {
+    if (token) return;
+    let alive = true;
+    fetch("/api/whoami", { credentials: "same-origin", headers: { "X-Cielo-Panel": "1" } })
+      .then((response) => {
+        if (alive && response.ok) setSession(true);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [token]);
 
   // Session listing is fetched separately: it shells out to the container
   // backend and can be slower than the in-memory surface reads, and a backend
@@ -242,7 +293,8 @@ function App() {
       load<ModelsData>("/api/models", setModels),
       load<Whoami>("/api/whoami", setWhoami),
       load<DeskProfileView[]>("/api/desk-profiles", setDeskProfiles),
-      load<UsageView>("/api/usage", setUsage)
+      load<UsageView>("/api/usage", setUsage),
+      load<{ keys: ApiKeyView[] }>("/api/keys", (data) => setKeys(data.keys))
     ]);
 
     if (unauthorized) signOut();
@@ -280,7 +332,7 @@ function App() {
   }, [token]);
 
   React.useEffect(() => {
-    if (!token) return;
+    if (!token && !session) return;
     refresh();
     refreshSessions();
 
@@ -319,7 +371,7 @@ function App() {
       closed = true;
       controller.abort();
     };
-  }, [token, refresh, refreshSessions]);
+  }, [token, session, refresh, refreshSessions]);
 
   // Once we know who is signed in, land on a desk: prefer the first owned agent,
   // since the whole point is to make the agent's work visible. Fall back to self.
@@ -357,6 +409,35 @@ function App() {
     const timer = setInterval(() => observeConsole(consoleSession.id), 2500);
     return () => clearInterval(timer);
   }, [token, selectedDesk, sessions, observeConsole]);
+
+  // The real login: name + password in exchange for a server-side session. No
+  // credential is kept in localStorage — the cookie is httpOnly, so a script in
+  // this origin cannot read it, which is the flaw the token had (issue #9).
+  async function signInWithPassword() {
+    const slug = loginSlug.trim().toLowerCase();
+    if (!slug || !loginPassword) return;
+    try {
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-Cielo-Panel": "1" },
+        body: JSON.stringify({ slug, password: loginPassword })
+      });
+      if (!response.ok) {
+        setLoginError(response.status === 401
+          ? "That name and password do not match."
+          : "The runtime is unreachable.");
+        return;
+      }
+      // A session, not a token: nothing to store, so remove any legacy one.
+      window.localStorage.removeItem(TOKEN_KEY);
+      setLoginPassword("");
+      setLoginError(null);
+      setToken("session");
+    } catch {
+      setLoginError("The runtime is unreachable.");
+    }
+  }
 
   async function signIn() {
     const candidate = tokenDraft.trim();
@@ -567,6 +648,65 @@ function App() {
     }
   }
 
+  async function setPassword() {
+    try {
+      await api("/api/auth/password", {
+        method: "POST",
+        body: JSON.stringify({ currentPassword: passwordCurrent, newPassword: passwordNew })
+      });
+      setPasswordCurrent("");
+      setPasswordNew("");
+      // The runtime issued a fresh session as part of this, so the panel is still
+      // signed in — but every OTHER session is now gone.
+      setSession(true);
+      setSecurityMessage({ kind: "ok", text: "Password set. Every other session has been signed out." });
+    } catch (error) {
+      setSecurityMessage({ kind: "err", text: extractError(error) });
+    }
+  }
+
+  async function signOutEverywhere() {
+    try {
+      await api("/api/auth/logout-all", { method: "POST" });
+      signOut();
+    } catch (error) {
+      setSecurityMessage({ kind: "err", text: extractError(error) });
+    }
+  }
+
+  async function loadKeys() {
+    try {
+      const data = await api<{ keys: ApiKeyView[] }>("/api/keys");
+      setKeys(data.keys);
+    } catch (error) {
+      if (error instanceof UnauthorizedError) signOut();
+    }
+  }
+
+  async function createKey() {
+    if (!keyName.trim()) return;
+    try {
+      const created = await api<{ secret: string }>("/api/keys", {
+        method: "POST",
+        body: JSON.stringify({ name: keyName.trim() })
+      });
+      setNewKeySecret(created.secret);
+      setKeyName("");
+      await loadKeys();
+    } catch (error) {
+      setSecurityMessage({ kind: "err", text: extractError(error) });
+    }
+  }
+
+  async function revokeKey(id: string) {
+    try {
+      await api(`/api/keys/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadKeys();
+    } catch (error) {
+      setSecurityMessage({ kind: "err", text: extractError(error) });
+    }
+  }
+
   async function addTeammate() {
     const name = teammateName.trim();
     if (!name || teammateBusy) return;
@@ -755,7 +895,7 @@ function App() {
     }
   }
 
-  if (!token) {
+  if (!token && !session) {
     const topbar = (
       <header className="topbar">
         <div>
@@ -841,27 +981,61 @@ function App() {
       <main>
         {topbar}
         <section className="login panel" data-automation-id="login">
-          <h2>Session</h2>
+          <h2>Sign in</h2>
           <p className="muted">
-            Paste your session token. The runtime writes each identity's token to{" "}
-            <code>.data/secrets/&lt;slug&gt;.token</code>; the <code>create-owner</code> CLI also prints it on claim.
+            Your desk name and password. The session lives in an httpOnly cookie and can be ended —
+            from here or from any other browser you left it in.
           </p>
           <div className="inline">
             <label>
-              Session token
+              Desk
               <input
-                data-automation-id="token-input"
-                type="password"
-                value={tokenDraft}
-                onChange={(event) => setTokenDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && signIn()}
+                data-automation-id="login-slug"
+                value={loginSlug}
+                placeholder="e.g. joche"
+                onChange={(event) => setLoginSlug(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && signInWithPassword()}
               />
             </label>
-            <button data-automation-id="token-submit" onClick={signIn}>
-              <KeyRound size={16} /> Unlock
+            <label>
+              Password
+              <input
+                data-automation-id="login-password"
+                type="password"
+                value={loginPassword}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && signInWithPassword()}
+              />
+            </label>
+            <button data-automation-id="login-submit" onClick={signInWithPassword}>
+              <KeyRound size={16} /> Sign in
             </button>
           </div>
           {loginError && <p className="decision deny">{loginError}</p>}
+
+          {/* The identity token still works — agents and the CLI use it, and an
+              install upgraded from before passwords has nothing else yet. It is a
+              capability, not a login, so it is the second option, not the first. */}
+          <details className="tokenFallback">
+            <summary className="muted small">Sign in with an identity token instead</summary>
+            <p className="muted small">
+              Each identity's token is written to <code>.data/secrets/&lt;slug&gt;.token</code>. If this machine
+              predates passwords, sign in with the token and set a password from the Models tab.
+            </p>
+            <div className="inline">
+              <label>
+                Identity token
+                <input
+                  data-automation-id="token-input"
+                  type="password"
+                  value={tokenDraft}
+                  onChange={(event) => setTokenDraft(event.target.value)}
+                  onKeyDown={(event) => event.key === "Enter" && signIn()}
+                />
+              </label>
+              <button data-automation-id="token-submit" onClick={signIn}>Unlock</button>
+            </div>
+          </details>
         </section>
       </main>
     );
@@ -922,6 +1096,19 @@ function App() {
 
       {view === "models" ? (
         <ModelsView
+          keys={keys}
+          keyName={keyName}
+          setKeyName={setKeyName}
+          createKey={createKey}
+          revokeKey={revokeKey}
+          newKeySecret={newKeySecret}
+          passwordCurrent={passwordCurrent}
+          setPasswordCurrent={setPasswordCurrent}
+          passwordNew={passwordNew}
+          setPasswordNew={setPasswordNew}
+          setPassword={setPassword}
+          signOutEverywhere={signOutEverywhere}
+          securityMessage={securityMessage}
           usage={usage}
           budgetDraft={budgetDraft}
           setBudgetDraft={setBudgetDraft}
@@ -1364,6 +1551,19 @@ function App() {
 }
 
 function ModelsView({
+  keys,
+  keyName,
+  setKeyName,
+  createKey,
+  revokeKey,
+  newKeySecret,
+  passwordCurrent,
+  setPasswordCurrent,
+  passwordNew,
+  setPasswordNew,
+  setPassword,
+  signOutEverywhere,
+  securityMessage,
   usage,
   budgetDraft,
   setBudgetDraft,
@@ -1379,6 +1579,19 @@ function ModelsView({
   message,
   busy
 }: {
+  keys: ApiKeyView[];
+  keyName: string;
+  setKeyName: (value: string) => void;
+  createKey: () => void;
+  revokeKey: (id: string) => void;
+  newKeySecret: string | null;
+  passwordCurrent: string;
+  setPasswordCurrent: (value: string) => void;
+  passwordNew: string;
+  setPasswordNew: (value: string) => void;
+  setPassword: () => void;
+  signOutEverywhere: () => void;
+  securityMessage: { kind: "ok" | "err"; text: string } | null;
   usage: UsageView | null;
   budgetDraft: string;
   setBudgetDraft: (value: string) => void;
@@ -1399,6 +1612,92 @@ function ModelsView({
 
   return (
     <section className="grid" data-automation-id="models">
+      <div className="panel" data-automation-id="security">
+        <h2><KeyRound size={15} /> Sign-in and keys</h2>
+        <p className="muted small">
+          A password proves who you are; a session carries that and can be ended; an API key lets a
+          program act without holding your own credential. Identity tokens still work for agents and
+          the CLI — they never expire, which is why they are not a login.
+        </p>
+
+        <div className="inline">
+          <label>
+            Current password
+            <input
+              data-automation-id="password-current"
+              type="password"
+              value={passwordCurrent}
+              placeholder="leave empty if you have none yet"
+              onChange={(event) => setPasswordCurrent(event.target.value)}
+            />
+          </label>
+          <label>
+            New password
+            <input
+              data-automation-id="password-new"
+              type="password"
+              value={passwordNew}
+              placeholder="at least 10 characters"
+              onChange={(event) => setPasswordNew(event.target.value)}
+            />
+          </label>
+          <button data-automation-id="password-set" onClick={setPassword}>Set password</button>
+        </div>
+        <p className="muted small">
+          Setting your first password must be done on the machine itself. Changing it ends every other session.
+        </p>
+        {securityMessage && (
+          <p className={`decision ${securityMessage.kind === "ok" ? "allow" : "deny"} small`}>{securityMessage.text}</p>
+        )}
+
+        <div className="inline">
+          <button className="ghost" data-automation-id="logout-all" onClick={signOutEverywhere}>
+            Sign out everywhere
+          </button>
+        </div>
+
+        <h3 className="muted small">API keys</h3>
+        <div className="inline">
+          <label>
+            Name
+            <input
+              data-automation-id="key-name"
+              value={keyName}
+              placeholder="e.g. open-webui"
+              onChange={(event) => setKeyName(event.target.value)}
+            />
+          </label>
+          <button data-automation-id="key-create" onClick={createKey}>Create key</button>
+        </div>
+        {newKeySecret && (
+          <div className="teammateToken" data-automation-id="key-secret">
+            <p className="muted small">Copy it now — it is shown once and only its hash is stored:</p>
+            <code className="tokenValue">{newKeySecret}</code>
+          </div>
+        )}
+        {keys.length > 0 && (
+          <div className="fileTree">
+            {keys.map((key) => (
+              <div className="fileRowWrap" key={key.id}>
+                <span className="fileRow">
+                  <span className="fileKind">·</span>
+                  <span className="fileName">
+                    {key.name} <span className="muted small">{key.live ? "live" : "revoked"}</span>
+                  </span>
+                  <span className="fileSize">{key.lastUsedAt ? "used" : "unused"}</span>
+                </span>
+                {key.live && (
+                  <button className="fileDownload" data-automation-id={`key-revoke-${key.id}`} onClick={() => revokeKey(key.id)}>
+                    <X size={14} />
+                    <span className="srOnly">Revoke {key.name}</span>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {usage && (
         <div className="panel" data-automation-id="usage">
           <h2>Model spend — {usage.month}</h2>

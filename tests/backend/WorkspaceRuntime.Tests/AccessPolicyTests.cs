@@ -20,6 +20,14 @@ public class AccessPolicyTests
     // why it stopped); only an owner may change a ceiling.
     [InlineData("/api/usage", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/usage/limits", "POST", AccessLevel.HumanOnly)]
+    // Signing in is public — it is what you use when you have no session. The
+    // rest of auth, and every key operation, is human-only: an agent must never
+    // mint a credential or end a person's session.
+    [InlineData("/api/auth/login", "POST", AccessLevel.Public)]
+    [InlineData("/api/auth/logout", "POST", AccessLevel.HumanOnly)]
+    [InlineData("/api/auth/password", "POST", AccessLevel.HumanOnly)]
+    [InlineData("/api/keys", "POST", AccessLevel.HumanOnly)]
+    [InlineData("/api/keys/00000000-0000-0000-0000-000000000001", "DELETE", AccessLevel.HumanOnly)]
     [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]
