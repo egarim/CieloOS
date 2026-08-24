@@ -241,7 +241,7 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         // any bytes exist. It writes one 0x01 byte first: reading that here is how
         // we learn the open passed while the response is still ours to refuse —
         // otherwise a rejected download would arrive as a silent empty file.
-        var process = StartPodman(new[] { "unshare", "bash", "-c", Guard + "\nprintf '\\001'\ncat <&3", "cielo-download", mount, relative });
+        var process = StartPodman(new[] { "unshare", "bash", "-c", Script("printf '\\001'\ncat <&3"), "cielo-download", mount, relative });
         if (process is null)
         {
             return null;
@@ -304,12 +304,22 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         return real.Length == 0 ? null : real;
     }
 
+    // A multi-line C# literal keeps the LINE ENDINGS OF ITS SOURCE FILE, so on a
+    // checkout that uses CRLF this script reaches bash as `set -eu\r` — a syntax
+    // error, and every listing, preview and download silently returns nothing.
+    // Nothing in the tests catches it either, because a Linux checkout is LF: it
+    // only appears when the binary is built from a Windows working tree. The
+    // script is data for another program, so it is normalised where it is built
+    // rather than left to depend on how git happened to write the file.
+    private static string Script(string operation) =>
+        (Guard + "\n" + operation).Replace("\r\n", "\n").Replace("\r", "\n");
+
     // `timeout` is the backstop for the one thing the guard cannot prevent by
     // itself: if the target turns into a FIFO between the type check and the open,
     // the open blocks forever. Listing and previewing are meant to be instant, so a
     // ceiling costs nothing and turns a hung request into a plain "not readable".
     private Task<(int ExitCode, string Stdout, string Stderr)> RunGuardedAsync(string mount, string relative, string operation, CancellationToken cancellationToken) =>
-        RunPodmanAsync(new[] { "unshare", "timeout", "15", "bash", "-c", Guard + "\n" + operation, "cielo-browse", mount, relative }, cancellationToken);
+        RunPodmanAsync(new[] { "unshare", "timeout", "15", "bash", "-c", Script(operation), "cielo-browse", mount, relative }, cancellationToken);
 
     private Process? StartPodman(string[] arguments)
     {
