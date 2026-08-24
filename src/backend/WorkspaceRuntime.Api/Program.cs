@@ -326,7 +326,8 @@ app.MapGet("/api/branding", (IConfiguration configuration) =>
 // `owner` is for on-box services that must act as the owner (the chat UI reads it
 // to find whose token to present) and is withheld from remote callers, on the same
 // loopback rule that governs the claim itself — a name is not a secret, but an
-// unclaimed box should not announce who lives there.
+// unclaimed box should not announce who lives there. It is null once the box has
+// more than one human: see SetupService.OwnerSlug for why guessing is worse.
 app.MapGet("/api/setup/status", (HttpContext context, ISetupService setup) => Results.Ok(new
 {
     claimed = setup.IsClaimed(),

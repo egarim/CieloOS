@@ -149,7 +149,15 @@ echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
   grep -q "onlyoffice-desktopeditors_${want}.deb" /usr/local/bin/cielo-build-session-images \
     || { echo "image builder would install the wrong ONLYOFFICE architecture"; exit 1; }
 
-  echo "  offline install OK (image build + restart policy deferred to first boot)"
+  # Opting out must UNDO, not just skip: this box already has the chat installed.
+  bash ./install.sh --offline --mode headless --no-chat >/dev/null 2>&1
+  test ! -e /usr/local/bin/cielo-chat-run || { echo "--no-chat left the chat runner behind"; exit 1; }
+  test ! -e /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
+    || { echo "--no-chat left the chat enabled for first boot"; exit 1; }
+  grep -q "^Chat__Url=" /etc/cielo/cielo.env \
+    && { echo "--no-chat left the panel advertising a chat that is gone"; exit 1; } || true
+
+  echo "  offline install OK (image build + restart policy deferred to first boot, --no-chat undoes chat)"
 '
 
 

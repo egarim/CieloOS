@@ -184,6 +184,12 @@ install -d /etc/cielo
 sed -e "s#UID_PLACEHOLDER#${CIELO_UID}#" \
     -e "s#^ASPNETCORE_URLS=.*#ASPNETCORE_URLS=${BIND}#" \
     "$BUNDLE/cielo.env.example" > /etc/cielo/cielo.env
+# The panel reads Chat:Url at startup, so it has to be in the file BEFORE stage 7
+# starts the runtime — appending it later would leave the panel without a chat
+# link until the next restart.
+if [[ "$NO_CHAT" -eq 0 ]]; then
+  printf '\n# The chat UI installed by stage 8 (loopback; see /etc/cielo/chat.env).\nChat__Url=http://localhost:8080/\n' >> /etc/cielo/cielo.env
+fi
 chmod 0640 /etc/cielo/cielo.env
 
 echo "==> [7/9] systemd service"
@@ -234,7 +240,22 @@ echo "==> [8/9] Chat UI (Open WebUI against /v1/agent)"
 # that is no longer true; on a headless box, tunnel instead:
 #   ssh -N -L 8080:127.0.0.1:8080 you@box
 if [[ "$NO_CHAT" -eq 1 ]]; then
-  echo "    (skipped: --no-chat)"
+  # Opting out has to UNDO a previous install, not merely skip this one: a running
+  # cielo-chat is an unauthenticated page holding the owner's token, and leaving it
+  # up on a machine whose operator just said "no chat" would be the worst outcome.
+  if [[ "$LIVE" -eq 1 ]]; then
+    systemctl disable --now cielo-chat.service >/dev/null 2>&1 || true
+    runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+      podman rm -f cielo-chat >/dev/null 2>&1 || true
+  fi
+  rm -f /etc/systemd/system/cielo-chat.service \
+        /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
+        /usr/local/bin/cielo-chat-run
+  # The panel must stop advertising a chat that is no longer there.
+  sed -i '/^Chat__Url=/d' /etc/cielo/cielo.env 2>/dev/null || true
+  [[ "$LIVE" -eq 1 ]] && systemctl daemon-reload || true
+  echo "    (--no-chat: not installed; any previous chat service removed)"
+  echo "    (its data volume, cielo-chat-data, is left alone — remove it yourself if you mean to)"
 else
   install -d /etc/cielo
   if [[ ! -f /etc/cielo/chat.env ]]; then
@@ -244,6 +265,10 @@ else
 CHAT_HOST=127.0.0.1
 CHAT_PORT=8080
 CHAT_IMAGE=ghcr.io/open-webui/open-webui:main
+# Whose agent the chat talks to. Empty = ask the runtime, which answers only while
+# this box has exactly one human — with teammates it cannot know who you meant, so
+# name the slug here (as printed by cielo-claim / cielo-add-user).
+CHAT_OWNER=
 ENV
     chmod 0644 /etc/cielo/chat.env
   fi
@@ -256,16 +281,24 @@ ENV
 # yet — because the token it needs does not exist until someone claims the box.
 # systemd restarts it, so claiming is all it takes for chat to come up.
 set -euo pipefail
-# shellcheck disable=SC1091
-[[ -f /etc/cielo/chat.env ]] && . /etc/cielo/chat.env
+if [[ -f /etc/cielo/chat.env ]]; then
+  # shellcheck disable=SC1091
+  . /etc/cielo/chat.env
+fi
 CHAT_HOST="\${CHAT_HOST:-127.0.0.1}"
 CHAT_PORT="\${CHAT_PORT:-8080}"
 CHAT_IMAGE="\${CHAT_IMAGE:-ghcr.io/open-webui/open-webui:main}"
 
-status="\$(curl -fsS "http://127.0.0.1:${PORT}/api/setup/status")" || {
-  echo "runtime not answering on ${PORT} yet" >&2; exit 1; }
-owner="\$(printf '%s' "\$status" | sed -n 's/.*"owner":"\\([^"]*\\)".*/\\1/p')"
-[[ -n "\$owner" ]] || { echo "not claimed yet — run: cielo-claim \"Your Name\"" >&2; exit 1; }
+owner="\${CHAT_OWNER:-}"
+if [[ -z "\$owner" ]]; then
+  status="\$(curl -fsS "http://127.0.0.1:${PORT}/api/setup/status")" || {
+    echo "runtime not answering on ${PORT} yet" >&2; exit 1; }
+  owner="\$(printf '%s' "\$status" | sed -n 's/.*"owner":"\\([^"]*\\)".*/\\1/p')"
+fi
+[[ -n "\$owner" ]] || {
+  echo "no owner to act as: claim the box (cielo-claim \"Your Name\"), or if it" >&2
+  echo "already has several users, set CHAT_OWNER in /etc/cielo/chat.env" >&2
+  exit 1; }
 token_file="/opt/cielo/.data/secrets/\${owner}.token"
 [[ -r "\$token_file" ]] || { echo "no token file for '\$owner'" >&2; exit 1; }
 
@@ -303,11 +336,6 @@ RestartSec=15
 [Install]
 WantedBy=multi-user.target
 UNIT
-
-  # The panel links to the chat; without this it shows nothing (Chat:Url empty).
-  if ! grep -q '^Chat__Url=' /etc/cielo/cielo.env 2>/dev/null; then
-    printf '\n# The chat UI installed by install.sh (loopback; see /etc/cielo/chat.env).\nChat__Url=http://localhost:8080/\n' >> /etc/cielo/cielo.env
-  fi
 
   if [[ "$CI" -eq 1 ]]; then
     echo "    (--ci: unit installed but not enabled; no podman in this mode)"
