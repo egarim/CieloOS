@@ -51,8 +51,16 @@ public sealed class TokenMeteringHandler : DelegatingHandler
 
             if (TryReadUsage(body, out var prompt, out var completion))
             {
+                // The run's scope says WHO; the request says WHAT was called. A
+                // desktop run can use an on-box brain for grounding and a cloud one
+                // for vision, so taking locality from the run would let the cloud
+                // call inherit "on-box" and escape every ceiling.
+                var called = request.Options.TryGetValue(TokenAccountingRequest.Key, out var stamped)
+                    ? stamped
+                    : new ModelIdentity(scope.ProviderId, scope.Model, scope.Locality);
+
                 ledger.Record(new TokenUsage(
-                    scope.UserId, scope.AgentId, scope.ProviderId, scope.Model, scope.Locality,
+                    scope.UserId, scope.AgentId, called.ProviderId, called.Model, called.Locality,
                     prompt, completion, DateTimeOffset.UtcNow));
             }
         }

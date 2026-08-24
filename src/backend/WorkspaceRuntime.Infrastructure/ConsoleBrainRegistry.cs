@@ -50,7 +50,14 @@ public sealed class ConsoleBrainRegistry : IConsoleBrainRegistry
     private IConsoleAgentBrain BrainFor(ProviderProfile provider) =>
         brains.GetOrAdd(provider.Id, _ => new ModelConsoleBrain(
             NewClient(),
-            new ModelBrainOptions { BaseUrl = provider.BaseUrl, Model = provider.Model, ApiKey = provider.ApiKey ?? "" }));
+            new ModelBrainOptions
+            {
+                BaseUrl = provider.BaseUrl,
+                Model = provider.Model,
+                ApiKey = provider.ApiKey ?? "",
+                ProviderId = provider.Id,
+                Locality = provider.Locality
+            }));
 
     public BrainSelection Resolve(AgentProfile agent)
     {

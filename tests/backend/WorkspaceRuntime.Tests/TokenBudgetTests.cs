@@ -108,7 +108,7 @@ public class TokenBudgetTests
         {
         }
 
-        public TokenSpend SpentThisMonth(Guid userId, Guid agentId) => spend;
+        public TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true) => spend;
 
         public IReadOnlyList<TokenUsage> Recent(int limit) => Array.Empty<TokenUsage>();
 

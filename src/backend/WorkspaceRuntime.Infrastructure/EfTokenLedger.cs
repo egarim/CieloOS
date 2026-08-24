@@ -33,11 +33,18 @@ public sealed class EfTokenLedger : ITokenLedger
         context.SaveChanges();
     }
 
-    public TokenSpend SpentThisMonth(Guid userId, Guid agentId)
+    public TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true)
     {
         var key = MonthKeyOf(DateTimeOffset.UtcNow);
         using var context = contextFactory.CreateDbContext();
         var month = context.TokenUsage.AsNoTracking().Where(row => row.MonthKey == key);
+        if (billableOnly)
+        {
+            // On-box spend is recorded but never billed, so counting it toward a
+            // ceiling would mean a month of local use could exhaust a cloud budget
+            // the moment someone switched provider.
+            month = month.Where(row => row.Locality != TokenBudget.OnBoxLocality);
+        }
 
         // Three sums rather than one grouped query: the numbers answer three
         // different questions ("this desk", "this agent", "this machine") and the

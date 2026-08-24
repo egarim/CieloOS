@@ -34,7 +34,10 @@ public interface ITokenLedger
     // Spend in the current calendar month. A rolling window would be defensible
     // too; a calendar month is what a provider's invoice uses, so a number here
     // can be compared with a number there.
-    TokenSpend SpentThisMonth(Guid userId, Guid agentId);
+    // billableOnly excludes on-box spend, which is what a ceiling acts on. The
+    // full total is still available for display: a machine that has run a local
+    // model hard should be able to see that, it just should not be billed for it.
+    TokenSpend SpentThisMonth(Guid userId, Guid agentId, bool billableOnly = true);
 
     IReadOnlyList<TokenUsage> Recent(int limit);
 
@@ -63,7 +66,7 @@ public static class TokenBudget
             return null;
         }
 
-        var spent = ledger.SpentThisMonth(userId, agentId);
+        var spent = ledger.SpentThisMonth(userId, agentId, billableOnly: true);
         foreach (var limit in ledger.Limits)
         {
             var (used, subject) = limit.Scope switch
@@ -123,3 +126,10 @@ public sealed class TokenAccountingScope : IDisposable
 // because a brain is cached per provider and shared by every desk that resolves
 // to it — the identity of the call belongs to the run, not to the brain.
 public sealed record ModelIdentity(string ProviderId, string Model, string Locality);
+
+// The per-request stamp a brain puts on its HTTP call, so metering reflects the
+// provider that was actually used rather than whichever one the run started with.
+public static class TokenAccountingRequest
+{
+    public static readonly HttpRequestOptionsKey<ModelIdentity> Key = new("cielo.model");
+}

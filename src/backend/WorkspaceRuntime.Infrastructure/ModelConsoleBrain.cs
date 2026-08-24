@@ -11,6 +11,14 @@ public sealed class ModelBrainOptions
     public string BaseUrl { get; init; } = "https://api.deepseek.com";
     public string Model { get; init; } = "deepseek-chat";
     public required string ApiKey { get; init; }
+
+    // Which provider this brain speaks to, stamped on every request it makes so
+    // the metering handler knows what was actually called. A run can use two
+    // providers — an on-box brain for grounding and a cloud one for vision — and
+    // deciding locality per RUN would let the cloud call inherit "on-box" and
+    // skip every ceiling (issue #14).
+    public string ProviderId { get; init; } = "";
+    public string Locality { get; init; } = "";
 }
 
 // A model-backed brain for the console loop: it shows the model the goal and the
@@ -78,6 +86,9 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
                 Content = JsonContent.Create(payload)
             };
             httpRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", options.ApiKey);
+            // Which provider this call actually goes to, for metering.
+            httpRequest.Options.Set(TokenAccountingRequest.Key,
+                new ModelIdentity(options.ProviderId, options.Model, options.Locality));
 
             using var response = await http.SendAsync(httpRequest, cancellationToken);
             if (!response.IsSuccessStatusCode)

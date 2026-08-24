@@ -73,5 +73,14 @@ public sealed class DesktopBrainRegistry : IDesktopBrainRegistry
             : new HttpClient(new TokenMeteringHandler(ledger, new HttpClientHandler())) { Timeout = TimeSpan.FromSeconds(seconds) };
 
     private static ModelBrainOptions Options(ProviderProfile profile) =>
-        new() { BaseUrl = profile.BaseUrl, Model = profile.Model, ApiKey = profile.ApiKey ?? "" };
+        new()
+        {
+            BaseUrl = profile.BaseUrl,
+            Model = profile.Model,
+            ApiKey = profile.ApiKey ?? "",
+            // The vision brain gets the VISION provider's identity here, which is
+            // what makes a cloud vision call inside an on-box run countable.
+            ProviderId = profile.Id,
+            Locality = profile.Locality
+        };
 }

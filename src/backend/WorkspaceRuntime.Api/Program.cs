@@ -444,7 +444,10 @@ app.MapGet("/api/usage", (HttpContext context, ITokenLedger ledger, IRuntimeStor
 {
     var caller = Caller(context);
     var (userId, agentId) = ActingAgent(caller, null, store);
-    var spent = ledger.SpentThisMonth(userId, agentId);
+    // Two numbers, because they answer different questions: what counts against
+    // a ceiling, and what the machine actually did.
+    var spent = ledger.SpentThisMonth(userId, agentId, billableOnly: true);
+    var all = ledger.SpentThisMonth(userId, agentId, billableOnly: false);
     var limits = ledger.Limits;
 
     return Results.Ok(new
@@ -456,6 +459,9 @@ app.MapGet("/api/usage", (HttpContext context, ITokenLedger ledger, IRuntimeStor
         desk = spent.User,
         agent = spent.Agent,
         machine = spent.Machine,
+        // Including on-box, which never counts against a ceiling.
+        deskAll = all.User,
+        machineAll = all.Machine,
         limits = limits.Select(limit => new { limit.Scope, limit.Subject, limit.MonthlyTokens }),
         deskLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.UserScope && limit.Subject == userId.ToString())?.MonthlyTokens ?? 0,
         machineLimit = limits.FirstOrDefault(limit => limit.Scope == TokenLimit.OsScope)?.MonthlyTokens ?? 0,
@@ -481,16 +487,19 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
         return Results.BadRequest(new { error = "scope must be 'user', 'agent' or 'os'." });
     }
 
-    var subject = (request?.Subject ?? "").Trim();
-    if (scope != TokenLimit.OsScope && !Guid.TryParse(subject, out var subjectId))
-    {
-        return Results.BadRequest(new { error = $"a '{scope}' limit needs the subject's id." });
-    }
-
     // Canonical form, not what was typed: a limit stored as "{ABC...}" or in
-    // uppercase parses fine here and then never matches the id the budget check
+    // uppercase parses fine and then never matches the id the budget check
     // compares against — a ceiling that silently does nothing.
-    var canonical = scope == TokenLimit.OsScope ? "" : subjectId.ToString();
+    var canonical = "";
+    if (scope != TokenLimit.OsScope)
+    {
+        var subject = (request?.Subject ?? "").Trim();
+        if (!Guid.TryParse(subject, out var subjectId))
+        {
+            return Results.BadRequest(new { error = $"a '{scope}' limit needs the subject's id." });
+        }
+        canonical = subjectId.ToString();
+    }
     var tokens = request?.MonthlyTokens ?? 0;
     ledger.SetLimit(new TokenLimit(scope, canonical, tokens));
 
@@ -786,15 +795,22 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
     var cloudVisionAllowed = visionConsent.IsAllowed(id, DateTimeOffset.UtcNow);
     var brain = desktopBrains.Resolve(store.GetAgent(agentId), cloudVisionAllowed);
-    // A desktop run can call two providers (text grounding and, with consent,
-    // vision). The scope names the chat one, so a vision call inside the run is
-    // counted correctly but labelled with the desk's chat provider. The number is
-    // what the ceiling acts on; the label is cosmetic.
+    // A desktop run can call two providers: the text brain for grounding and,
+    // with consent, a vision one. Each request is metered with its own provider
+    // (the brains stamp it), but the run-level budget check needs one locality —
+    // and it has to be the most expensive possibility, or an on-box grounding
+    // brain would exempt a cloud vision run from every ceiling.
     var chatProvider = models.Resolve("chat", store.GetAgent(agentId));
+    var visionProvider = cloudVisionAllowed ? models.Resolve("vision", store.GetAgent(agentId)) : null;
+    var billedLocality = new[] { chatProvider?.Profile.Locality, visionProvider?.Profile.Locality }
+        .Any(locality => locality is not null && !string.Equals(locality, TokenBudget.OnBoxLocality, StringComparison.OrdinalIgnoreCase))
+            ? "cloud"
+            : TokenBudget.OnBoxLocality;
+
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken,
         model: chatProvider is null
             ? null
-            : new ModelIdentity(chatProvider.Profile.Id, chatProvider.Profile.Model, chatProvider.Profile.Locality));
+            : new ModelIdentity(chatProvider.Profile.Id, chatProvider.Profile.Model, billedLocality));
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
