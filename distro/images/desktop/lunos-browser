@@ -90,6 +90,14 @@ def launch(timeout=25.0):
             f"--remote-debugging-port={PORT}",
             "--no-first-run", "--no-default-browser-check",
             "--disable-background-networking",
+            # A target="_blank" link opens a SECOND CDP target, which the click
+            # path's request interception never sees — so the popup's first
+            # request, query string and all, completes before anything can close
+            # it. Closing it afterwards is theatre: the data has already left.
+            # This refuses to create the new contents at all, which keeps the
+            # agent on one page and keeps every navigation inside the interception
+            # the click path installs.
+            "--block-new-web-contents",
             "about:blank",
         ],
         stdout=subprocess.DEVNULL,
@@ -116,14 +124,29 @@ def page_socket():
 
 
 def origin_of(url):
-    """Scheme + host + port, or "" for anything without one (about:blank, data:)."""
+    """The browser's notion of an origin, or "" for anything without one.
+
+    Normalised, because the comparison decides whether a click is refused: a page
+    on https://example.com linking to https://EXAMPLE.com:443 is the SAME origin
+    to the browser, and comparing the two strings would refuse an ordinary
+    same-site link and tell the person it needs approval. An egress control that
+    fires on links that were never leaving is a control people learn to disable.
+    """
     try:
         parsed = urllib.parse.urlsplit(url)
     except ValueError:
         return ""
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
         return ""
-    return f"{parsed.scheme}://{parsed.netloc}"
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return ""
+    try:
+        port = parsed.port or (443 if scheme == "https" else 80)
+    except ValueError:
+        return ""
+    return f"{scheme}://{host}:{port}"
 
 
 def ref_of(backend, role, name):
@@ -338,9 +361,11 @@ async def click(cdp, ref):
         except (RuntimeError, TimeoutError):
             pass
 
-    # A target="_blank" link opens a SECOND page, which our interception never
-    # saw because it belongs to a different CDP target. Closing it is the honest
-    # bound: the agent gets one page, and a click cannot quietly spawn another.
+    # Popups are refused at the browser level (--block-new-web-contents), because
+    # by the time a new target is visible here its first request has already gone.
+    # This loop is the backstop for a browser that was started without the flag —
+    # an older process still alive from a previous version of this helper — and it
+    # reports rather than pretending the click was contained.
     escaped = []
     for target_page in pages():
         if target_page.get("id") in before:
