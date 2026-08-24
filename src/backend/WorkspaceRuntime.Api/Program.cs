@@ -757,9 +757,14 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
         "auth.password", AuditOutcome.Success,
         existing is null
             ? $"'{caller.Slug}' set a password for the first time."
-            : $"'{caller.Slug}' changed their password, ending {ended} other session(s)."));
+            : $"'{caller.Slug}' changed their password, ending {ended} session(s)."));
 
-    return Results.Ok(new { passwordSet = true, endedSessions = Math.Max(0, ended - 1) });
+    // "Other" sessions means other than the one being used — and there only IS a
+    // current session when the caller came in on a cookie. Called with a legacy
+    // identity token, every revoked session was somebody's browser, so subtracting
+    // one would under-report it (and say zero when a browser really was signed out).
+    var endedOthers = context.Items.ContainsKey("session") ? Math.Max(0, ended - 1) : ended;
+    return Results.Ok(new { passwordSet = true, endedSessions = endedOthers });
 });
 
 // Named, revocable credentials for programs — the fix for an integration having
