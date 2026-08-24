@@ -500,20 +500,47 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
     // Canonical form, not what was typed: a limit stored as "{ABC...}" or in
     // uppercase parses fine and then never matches the id the budget check
     // compares against — a ceiling that silently does nothing.
+    var caller = Caller(context);
+
+    // The same ownership boundary as everything else: a human sets budgets for
+    // their own desk and the agents they own, and nobody sets one for a desk they
+    // do not own. Without this, one teammate could cut off another's agent.
     var canonical = "";
-    if (scope != TokenLimit.OsScope)
+    if (scope == TokenLimit.OsScope)
+    {
+        // Machine-wide policy is set ON the machine, the same rule the first-owner
+        // claim uses — there is no administrator role to check against yet (#9).
+        if (!IsLoopback(context.Connection.RemoteIpAddress))
+        {
+            return Results.Json(
+                new { error = "A machine-wide budget can only be set from the machine itself (localhost or your SSH tunnel)." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+    else
     {
         var subject = (request?.Subject ?? "").Trim();
         if (!Guid.TryParse(subject, out var subjectId))
         {
             return Results.BadRequest(new { error = $"a '{scope}' limit needs the subject's id." });
         }
+
+        var owned = scope == TokenLimit.UserScope
+            ? subjectId == caller.Subject
+            : store.Agents.Any(agent => agent.Id == subjectId && agent.OwnerUserId == caller.Subject);
+
+        if (!owned)
+        {
+            return Results.Json(
+                new { error = $"'{caller.Slug}' may only set a budget for its own desk and the agents it owns." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+
         canonical = subjectId.ToString();
     }
     var tokens = request?.MonthlyTokens ?? 0;
     ledger.SetLimit(new TokenLimit(scope, canonical, tokens));
 
-    var caller = Caller(context);
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
         "usage.limit", AuditOutcome.Success,
         tokens > 0
