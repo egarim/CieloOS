@@ -170,7 +170,15 @@ public sealed class PodmanHomeBrowser : IHomeBrowser
         // worst it looks like the file is corrupt. Say it is binary and let the
         // caller offer the download instead of a preview of mojibake. NUL means
         // binary outright; U+FFFD is what bytes that are not UTF-8 decode to.
-        if (content.Contains('\0') || content.Contains('�'))
+        // `head -c` cuts at a byte, so a large text file can be severed mid-character
+        // and the decoder renders that tail as U+FFFD. That is truncation, not a
+        // binary file, so ignore replacement characters at the very end of a read
+        // that was cut short.
+        var scan = truncated || size > MaxReadBytes
+            ? content.AsSpan().TrimEnd('�')
+            : content.AsSpan();
+
+        if (scan.Contains('\0') || scan.Contains('�'))
         {
             return new HomeFile(owner, relative, "", false, size, Binary: true);
         }
