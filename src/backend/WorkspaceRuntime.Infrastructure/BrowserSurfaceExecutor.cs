@@ -43,10 +43,10 @@ public sealed class BrowserSurfaceExecutor : ISurfaceExecutor
 
             case "click":
             {
-                var raw = Required(request, "element");
-                if (!int.TryParse(raw, NumberStyles.None, CultureInfo.InvariantCulture, out var element) || element <= 0)
+                var element = Required(request, "element");
+                if (!BrowserRef.IsWellFormed(element))
                 {
-                    return new ToolExecutionResult(false, $"Element '{raw}' is not a positive element id.", null);
+                    return new ToolExecutionResult(false, $"'{element}' is not an element reference from this page.", null);
                 }
                 var result = await browser.ClickAsync(id, element, cancellationToken);
                 return new ToolExecutionResult(result.Ok, Describe(result), null);

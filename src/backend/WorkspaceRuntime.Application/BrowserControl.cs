@@ -13,7 +13,11 @@ namespace WorkspaceRuntime.Application;
 // display, so the human watching the desktop sees what the agent is doing and
 // can take the mouse. That co-presence is the point; a headless sidecar would be
 // easier and would throw it away.
-public sealed record BrowserElement(int Id, string Role, string Name, int X, int Y, int W, int H)
+// `Id` is for a person reading the list; `Ref` is what you act on. The ref
+// carries the node's identity and the role+name it had when observed, so a page
+// that reorders or replaces controls between looking and clicking produces a
+// refusal instead of a click on whatever now occupies position 3.
+public sealed record BrowserElement(int Id, string Ref, string Role, string Name, int X, int Y, int W, int H)
 {
     public int CenterX => X + (W / 2);
     public int CenterY => Y + (H / 2);
@@ -42,8 +46,23 @@ public interface IBrowserBackend
     Task<BrowserText> ReadAsync(string sessionId, CancellationToken cancellationToken);
 
     Task<BrowserActionResult> NavigateAsync(string sessionId, string url, CancellationToken cancellationToken);
-    Task<BrowserActionResult> ClickAsync(string sessionId, int elementId, CancellationToken cancellationToken);
+
+    // Clicks stay on the page's own origin. A link reaches any host on the
+    // internet, so allowing clicks while gating `navigate` behind approval would
+    // make the gate decorative — the agent could click its way off the box. The
+    // backend fails cross-origin document requests during the click and reports
+    // the destination, which the agent may then ask for through `navigate`.
+    Task<BrowserActionResult> ClickAsync(string sessionId, string elementRef, CancellationToken cancellationToken);
     Task<BrowserActionResult> BackAsync(string sessionId, CancellationToken cancellationToken);
+}
+
+// The shape of a click token, enforced before it reaches a shell argv.
+public static class BrowserRef
+{
+    public static bool IsWellFormed(string? value) =>
+        !string.IsNullOrEmpty(value) && System.Text.RegularExpressions.Regex.IsMatch(
+            value, "^e[0-9]{1,9}-[0-9a-f]{6}$", System.Text.RegularExpressions.RegexOptions.None,
+            TimeSpan.FromSeconds(1));
 }
 
 // What an agent is allowed to navigate to.

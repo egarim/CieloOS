@@ -803,7 +803,7 @@ Categories=Network;
             foreach (var item in list.EnumerateArray())
             {
                 elements.Add(new BrowserElement(
-                    Number(item, "id"), Text(item, "role"), Text(item, "name"),
+                    Number(item, "id"), Text(item, "ref"), Text(item, "role"), Text(item, "name"),
                     Number(item, "x"), Number(item, "y"), Number(item, "w"), Number(item, "h")));
             }
         }
@@ -833,9 +833,16 @@ Categories=Network;
             : new BrowserActionResult(true, $"Opened {Text(json, "url")}.", Text(json, "title"), Text(json, "url"));
     }
 
-    async Task<BrowserActionResult> IBrowserBackend.ClickAsync(string sessionId, int elementId, CancellationToken cancellationToken)
+    async Task<BrowserActionResult> IBrowserBackend.ClickAsync(string sessionId, string elementRef, CancellationToken cancellationToken)
     {
-        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "click", elementId.ToString(CultureInfo.InvariantCulture));
+        // Checked here as well as in the executor: the backend is reachable from
+        // the agent loop directly, and a shape guard only one caller honours is
+        // not a guard.
+        if (!BrowserRef.IsWellFormed(elementRef))
+        {
+            return new BrowserActionResult(false, $"'{elementRef}' is not an element reference from this page.");
+        }
+        var (json, error) = await BrowserAsync(sessionId, cancellationToken, "click", elementRef);
         return error is not null
             ? new BrowserActionResult(false, error)
             : new BrowserActionResult(true, Text(json, "detail"), Text(json, "title"), Text(json, "url"));

@@ -47,14 +47,14 @@
         "type": "object",
         "properties": {
           "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
-          "element": { "type": "string", "pattern": "^[0-9]{1,4}$" }
+          "element": { "type": "string", "pattern": "^e[0-9]{1,9}-[0-9a-f]{6}$" }
         },
         "required": ["id", "element"],
         "additionalProperties": false
       },
       "policy": {
         "defaultDecision": "Allow",
-        "reason": "A click is grounded on an element id from the page's own accessibility tree, so the agent names a button rather than a pixel and a stale target fails loudly instead of hitting whatever moved under it. Each click is audited and the blast radius is that session's browser profile, which is deliberately not the human's."
+        "reason": "Allowed only because the executor confines a click to the page's own origin: a link reaches any host on the internet, so allowing clicks while gating `navigate` behind approval would have made that gate decorative. Cross-origin document requests are failed during the click and the destination is reported back, so leaving the site still goes through `navigate` and a human. The target is named by a reference carrying the node's identity and the role+name it had when observed, so a page that changes in between is refused rather than clicked blind; each click is audited, and the blast radius is that session's browser profile, which is deliberately not the human's."
       }
     },
     "back": {
