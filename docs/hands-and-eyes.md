@@ -112,6 +112,12 @@ only. Decided — recorded, not up for re-litigation.)
 - Electron/Chrome a11y: Chromium only populates AT-SPI with accessibility flags —
   the distro can set `ACCESSIBILITY_ENABLED=1` / `--force-renderer-accessibility`
   globally, which shrinks the vision-fallback surface a lot.
+  **Superseded for the web itself (#16).** Rather than coax a browser window into
+  AT-SPI and then read a flattened widget tree with no URL, no load state and no
+  way to tell whether a click navigated, the `browser` surface talks to Chromium
+  over CDP through the in-container `lunos-browser` helper: real roles, real
+  boxes, and the page's identity. This note still applies to Electron apps that
+  are not the browser.
 - R1-distill latency: planner only, out of the inner loop.
 - VRAM budget: Qwen2.5-VL 7B Q4 ≈ 6–8 GB; executor 3B if GPU-poor; everything can
   run CPU-only, just slower.

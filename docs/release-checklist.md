@@ -190,6 +190,25 @@ model story is provider-free (add your own key in the Models tab, no restart).
   so fresh sessions have the agent's hands/eyes without a manual step.
 - ⬜ **Bake console + desktop images into the distro** so console/desktop sessions
   work on first boot instead of being built ad-hoc (see backlog in ai-native-ui.md).
+- 🟡 **`browser` surface, phase 1 (#16).** `lunos-browser` is in the desktop
+  Containerfile, so a rebuilt `localhost/lunos-desktop:latest` carries it; the
+  profile images inherit it through `FROM ${BASE}`. Open, and deliberately not
+  done in phase 1:
+  - **An existing agent does not get the grant.** `OwnerDefaults.AgentTools` gains
+    `browser`, but that only applies when an identity is created, so on a machine
+    that already exists every agent is denied `browser` until its
+    `GrantedToolsJson` is updated. There is no endpoint for this and no
+    reconciliation on startup — widening an agent's capabilities during an upgrade
+    is the owner's decision, not a migration's.
+  - **No egress allowlist yet.** `navigate` is `RequireApproval` for every URL,
+    which is safe but means routine browsing asks a human every time. The per-desk
+    domain allowlist (phase 2) is what turns the common case back into `Allow`.
+  - **No `type` on the web.** Filling a form is phase 2, behind the existing
+    `ISessionInputGrants` lease.
+  - **No auto-waiting beyond the load event.** The helper waits for
+    `Page.loadEventFired` plus a short settle; a client-rendered page that paints
+    late can be read a beat early. This is the visible cost of not shipping
+    Playwright — revisit with numbers if it bites.
 - ⬜ **Local model on first boot.** `local-inference.service` pulls Bonsai-4B
   if missing; confirm the pull + sha256 verify path on a clean install, or ship
   the Bonsai ISO edition with weights bundled (model-selection.md).

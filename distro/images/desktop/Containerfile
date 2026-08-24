@@ -28,6 +28,14 @@ COPY atspi_gi.py /usr/local/lib/lunos/atspi_gi.py
 COPY lunos-atspi /usr/local/bin/lunos-atspi
 RUN chmod +x /usr/local/bin/lunos-atspi
 
+# The `browser` surface's hands and eyes. Chromium is already in the webtop base
+# (151 at the time of writing) and `websockets` is already in its python3, so this
+# layer is one script: the helper drives the page over CDP on the container's own
+# loopback, which is why the DevTools endpoint never has to be published to the
+# host and one owner's browser stays out of another's reach.
+COPY lunos-browser /usr/local/bin/lunos-browser
+RUN chmod +x /usr/local/bin/lunos-browser
+
 # The CieloOS look: light, macOS-adjacent, and all from Ubuntu universe, so it
 # builds identically on both architectures with nothing fetched from GitHub.
 # Exact names matter and are easy to get wrong — the light variants are

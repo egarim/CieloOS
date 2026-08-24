@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""The agent's browser, driven over CDP from inside the session container.
+
+Invoked by the runtime as:
+    podman exec -u abc -e DISPLAY=:1 <container> lunos-browser <verb> [args...]
+
+Why in-container rather than a host-side Playwright client: the DevTools endpoint
+is unauthenticated and confers full control of the profile (cookies included), so
+it must never leave the session's network namespace. Publishing it to the host
+would let any local account drive another owner's browser, which is exactly the
+per-owner isolation the runtime enforces everywhere else. Here, loopback IS the
+session, so the endpoint is reachable by this session and nothing else.
+
+The profile is deliberately NOT the human's. Chromium 136+ refuses remote
+debugging on the default user-data-dir, and a running browser hands new launches
+off to the existing singleton instead - so the separation the threat model wants
+is also the only thing that works. A poisoned page therefore cannot reach the
+human's logged-in sessions; to give the agent a site, the human signs in inside
+the agent's profile while watching.
+
+Every verb prints one line of JSON on stdout and exits 0; failures print
+{"ok": false, "detail": ...} and exit non-zero.
+"""
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+import websockets
+
+PORT = int(os.environ.get("CIELO_BROWSER_PORT", "9333"))
+PROFILE = os.environ.get("CIELO_BROWSER_PROFILE", "/config/.cielo-agent-browser")
+BINARY = "/usr/bin/chromium-browser"
+
+# The roles worth showing an agent: things you can act on. The full AX tree is
+# mostly structural noise (generic containers, text runs), and handing a model
+# 4000 nodes to pick from is how grounding degrades back into guessing.
+ACTIONABLE = {
+    "button", "link", "textbox", "searchbox", "combobox", "checkbox",
+    "radio", "menuitem", "menuitemcheckbox", "menuitemradio",
+    "tab", "option", "slider", "switch", "spinbutton",
+}
+
+MAX_ELEMENTS = 200
+READ_LIMIT = 20000
+
+
+def fail(detail, code=1):
+    print(json.dumps({"ok": False, "detail": str(detail)}))
+    sys.exit(code)
+
+
+def endpoint(path):
+    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=5) as response:
+        return json.load(response)
+
+
+def running():
+    try:
+        endpoint("/json/version")
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def launch(timeout=25.0):
+    """Start the agent browser on the session's own display, or confirm it is up."""
+    if running():
+        return
+    if not os.path.exists(BINARY):
+        fail(f"No browser at {BINARY}.")
+    os.makedirs(PROFILE, exist_ok=True)
+    subprocess.Popen(
+        [
+            BINARY,
+            # The webtop containers are unprivileged, so the Chromium sandbox
+            # cannot start; this mirrors the image's own wrapped-chromium launcher.
+            "--no-sandbox", "--test-type", "--password-store=basic",
+            f"--user-data-dir={PROFILE}",
+            "--remote-debugging-address=127.0.0.1",
+            f"--remote-debugging-port={PORT}",
+            "--no-first-run", "--no-default-browser-check",
+            "--disable-background-networking",
+            "about:blank",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if running():
+            return
+        time.sleep(0.25)
+    fail("The browser did not expose a DevTools endpoint in time.")
+
+
+def page_socket():
+    targets = [t for t in endpoint("/json/list") if t.get("type") == "page"]
+    if not targets:
+        fail("The browser has no open page.")
+    return targets[0]["webSocketDebuggerUrl"]
+
+
+class Cdp:
+    """A minimal CDP client: correlate replies by id, remember events by name."""
+
+    def __init__(self, socket):
+        self.socket = socket
+        self.counter = 0
+        self.events = []
+
+    async def call(self, method, params=None, timeout=30.0):
+        self.counter += 1
+        mine = self.counter
+        await self.socket.send(json.dumps({"id": mine, "method": method, "params": params or {}}))
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"{method} did not answer in {timeout:.0f}s")
+            message = json.loads(await asyncio.wait_for(self.socket.recv(), remaining))
+            if message.get("id") == mine:
+                if "error" in message:
+                    raise RuntimeError(f"{method}: {message['error'].get('message', message['error'])}")
+                return message.get("result", {})
+            if "method" in message:
+                self.events.append(message["method"])
+
+    async def settle(self, timeout=15.0):
+        """Wait for the page to finish loading, rather than sleeping and hoping.
+
+        A hand-rolled client has no auto-waiting, so this is where that absence
+        gets paid for. It is deliberately forgiving: a page that never fires a
+        load event (a long poll, a stalled subresource) should still be readable,
+        so timing out here is not an error.
+        """
+        deadline = time.monotonic() + timeout
+        while "Page.loadEventFired" not in self.events:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                message = json.loads(await asyncio.wait_for(self.socket.recv(), remaining))
+            except (asyncio.TimeoutError, TimeoutError):
+                break
+            if message.get("method") == "Page.loadEventFired":
+                break
+        self.events.clear()
+        # A brief settle for what the load event does not cover: client-side
+        # rendering that paints just after it fires.
+        await asyncio.sleep(0.4)
+
+    async def where(self):
+        result = await self.call("Runtime.evaluate", {
+            "expression": "JSON.stringify({t: document.title, u: location.href})",
+            "returnByValue": True,
+        })
+        try:
+            return json.loads(result["result"]["value"])
+        except (KeyError, TypeError, ValueError):
+            return {"t": "", "u": ""}
+
+
+async def actionable(cdp):
+    await cdp.call("DOM.enable")
+    await cdp.call("Accessibility.enable")
+    tree = await cdp.call("Accessibility.getFullAXTree", {"depth": -1})
+    elements = []
+    for node in tree.get("nodes", []):
+        if node.get("ignored"):
+            continue
+        role = (node.get("role") or {}).get("value")
+        backend = node.get("backendDOMNodeId")
+        if role not in ACTIONABLE or backend is None:
+            continue
+        try:
+            box = await cdp.call("DOM.getBoxModel", {"backendNodeId": backend}, timeout=5.0)
+        except (RuntimeError, TimeoutError):
+            continue  # off-screen or detached: not something to click
+        quad = box["model"]["content"]
+        xs, ys = quad[0::2], quad[1::2]
+        x, y = int(min(xs)), int(min(ys))
+        width, height = int(max(xs)) - x, int(max(ys)) - y
+        if width <= 0 or height <= 0:
+            continue
+        name = ((node.get("name") or {}).get("value") or "").strip()
+        elements.append({
+            "id": len(elements) + 1,
+            "role": role,
+            "name": " ".join(name.split())[:120],
+            "x": x, "y": y, "w": width, "h": height,
+        })
+        if len(elements) >= MAX_ELEMENTS:
+            break
+    return elements
+
+
+async def run(verb, args):
+    launch()
+    async with websockets.connect(page_socket(), max_size=64 * 1024 * 1024) as socket:
+        cdp = Cdp(socket)
+        await cdp.call("Page.enable")
+        await cdp.call("Runtime.enable")
+
+        if verb == "status":
+            here = await cdp.where()
+            return {"ok": True, "title": here["t"], "url": here["u"]}
+
+        if verb == "navigate":
+            if not args:
+                return {"ok": False, "detail": "navigate needs a URL."}
+            await cdp.call("Page.navigate", {"url": args[0]})
+            await cdp.settle()
+            here = await cdp.where()
+            return {"ok": True, "title": here["t"], "url": here["u"]}
+
+        if verb == "elements":
+            return {"ok": True, "elements": await actionable(cdp)}
+
+        if verb == "read":
+            result = await cdp.call("Runtime.evaluate", {
+                "expression": f"document.body ? document.body.innerText.slice(0, {READ_LIMIT}) : ''",
+                "returnByValue": True,
+            })
+            here = await cdp.where()
+            return {"ok": True, "url": here["u"], "text": result["result"].get("value") or ""}
+
+        if verb == "click":
+            if not args or not args[0].isdigit():
+                return {"ok": False, "detail": "click needs an element id."}
+            wanted = int(args[0])
+            elements = await actionable(cdp)
+            target = next((e for e in elements if e["id"] == wanted), None)
+            if target is None:
+                return {"ok": False, "detail": f"No element {wanted} on this page ({len(elements)} available)."}
+            x = target["x"] + target["w"] // 2
+            y = target["y"] + target["h"] // 2
+            for kind in ("mousePressed", "mouseReleased"):
+                await cdp.call("Input.dispatchMouseEvent", {
+                    "type": kind, "x": x, "y": y, "button": "left", "clickCount": 1,
+                })
+            await cdp.settle(timeout=10.0)
+            here = await cdp.where()
+            return {"ok": True, "detail": f"Clicked {target['role']} '{target['name']}'.",
+                    "title": here["t"], "url": here["u"]}
+
+        if verb == "back":
+            history = await cdp.call("Page.getNavigationHistory")
+            index = history["currentIndex"]
+            if index <= 0:
+                return {"ok": False, "detail": "Nothing to go back to."}
+            await cdp.call("Page.navigateToHistoryEntry", {"entryId": history["entries"][index - 1]["id"]})
+            await cdp.settle(timeout=10.0)
+            here = await cdp.where()
+            return {"ok": True, "title": here["t"], "url": here["u"]}
+
+        return {"ok": False, "detail": f"Unknown verb '{verb}'."}
+
+
+def main():
+    if len(sys.argv) < 2:
+        fail("usage: lunos-browser <status|navigate|elements|read|click|back> [args]")
+    verb = sys.argv[1]
+    try:
+        result = asyncio.run(run(verb, sys.argv[2:]))
+    except SystemExit:
+        raise
+    except Exception as error:  # one process per command: report and die
+        fail(f"{type(error).__name__}: {error}")
+    print(json.dumps(result))
+    sys.exit(0 if result.get("ok") else 1)
+
+
+if __name__ == "__main__":
+    main()
