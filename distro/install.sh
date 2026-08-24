@@ -6,7 +6,7 @@
 #   sudo ./install.sh --mode app             # your own machine, localhost only
 #   sudo ./install.sh --mode kiosk           # boot into a fullscreen panel browser
 #
-# Options: --mode <headless|app|kiosk>  --port <5148>
+# Options: --mode <headless|app|kiosk>  --port <5148>  --no-chat
 #
 # The three modes differ ONLY in bind address and whether a kiosk browser is
 # installed — the runtime is identical. The first-owner claim is loopback-only, so
@@ -22,6 +22,7 @@ PORT="5148"
 CI=0        # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
 SKIP_IMAGES=0 # --skip-images: do not build the session images (faster install; sessions
             # will not start until someone builds them)
+NO_CHAT=0   # --no-chat: do not install the Open WebUI chat service or link it from the panel
 OFFLINE=0   # --offline: install into a not-yet-running system (autoinstall in-target/chroot):
             # enable units + linger via files, never start/daemon-reload — first boot activates.
 while [[ $# -gt 0 ]]; do
@@ -31,6 +32,7 @@ while [[ $# -gt 0 ]]; do
     --ci) CI=1; shift ;;
     --offline) OFFLINE=1; shift ;;
     --skip-images) SKIP_IMAGES=1; shift ;;
+    --no-chat) NO_CHAT=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -60,7 +62,7 @@ test -x "$BUNDLE/bin/WorkspaceRuntime.Api" || { echo "Run this from the unpacked
 # app/kiosk are single-machine → bind loopback; headless → bind all interfaces.
 if [[ "$MODE" == "headless" ]]; then BIND="http://0.0.0.0:$PORT"; else BIND="http://127.0.0.1:$PORT"; fi
 
-echo "==> [1/8] Dependencies"
+echo "==> [1/9] Dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 if [[ "$CI" -eq 1 ]]; then
@@ -71,7 +73,7 @@ else
   apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
 fi
 
-echo "==> [2/8] Service user 'cielo' + rootless podman prerequisites"
+echo "==> [2/9] Service user 'cielo' + rootless podman prerequisites"
 if ! id -u cielo >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/cielo --shell /bin/bash cielo
 fi
@@ -86,7 +88,7 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
 fi
 CIELO_UID="$(id -u cielo)"
 
-echo "==> [3/8] Session images (built here so they match this machine's architecture)"
+echo "==> [3/9] Session images (built here so they match this machine's architecture)"
 # The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
 # to arm64; on an x64 target that would install a foreign-architecture .deb, which
 # either fails or gets masked by apt-get -f and silently ships no editor.
@@ -151,7 +153,7 @@ else
       echo "    WARNING: image build failed here; cielo-session-images.service retries at boot." >&2; }
 fi
 
-echo "==> [4/8] Session restart policy"
+echo "==> [4/9] Session restart policy"
 # Sessions are created with --restart=unless-stopped; podman-restart.service is what
 # acts on that after a reboot. Without it the runtime comes back and every session is
 # dead. This is a USER unit for cielo, so offline installs get the wants-symlink
@@ -171,20 +173,20 @@ else
     || echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
 fi
 
-echo "==> [5/8] Install to /opt/cielo"
+echo "==> [5/9] Install to /opt/cielo"
 install -d /opt/cielo
 cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cielo/
 install -d -o cielo -g cielo /opt/cielo/.data
 chown -R cielo:cielo /opt/cielo
 
-echo "==> [6/8] Environment ($MODE, $BIND)"
+echo "==> [6/9] Environment ($MODE, $BIND)"
 install -d /etc/cielo
 sed -e "s#UID_PLACEHOLDER#${CIELO_UID}#" \
     -e "s#^ASPNETCORE_URLS=.*#ASPNETCORE_URLS=${BIND}#" \
     "$BUNDLE/cielo.env.example" > /etc/cielo/cielo.env
 chmod 0640 /etc/cielo/cielo.env
 
-echo "==> [7/8] systemd service"
+echo "==> [7/9] systemd service"
 cp "$BUNDLE/systemd/cielo-runtime.service" /etc/systemd/system/cielo-runtime.service
 if [[ "$CI" -eq 1 ]]; then
   echo "    (--ci: service file installed but not started; the harness runs the binary directly)"
@@ -222,7 +224,108 @@ EOF
 chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
-echo "==> [8/8] Presentation mode: $MODE"
+echo "==> [8/9] Chat UI (Open WebUI against /v1/agent)"
+# The agent endpoint has existed since V0.6 and nothing ever started a client for
+# it, so the best chat in the product was invisible (issue #8). This installs one.
+#
+# Loopback only, deliberately. WEBUI_AUTH=False makes whoever opens the page the
+# owner, because the runtime has no login yet (issue #9) — so it must not be
+# reachable from the network. Change CHAT_HOST in /etc/cielo/chat.env only once
+# that is no longer true; on a headless box, tunnel instead:
+#   ssh -N -L 8080:127.0.0.1:8080 you@box
+if [[ "$NO_CHAT" -eq 1 ]]; then
+  echo "    (skipped: --no-chat)"
+else
+  install -d /etc/cielo
+  if [[ ! -f /etc/cielo/chat.env ]]; then
+    cat > /etc/cielo/chat.env <<ENV
+# CieloOS chat (Open WebUI). CHAT_HOST is loopback because the chat has no login
+# of its own: anyone who reaches it acts as the owner. See issue #9.
+CHAT_HOST=127.0.0.1
+CHAT_PORT=8080
+CHAT_IMAGE=ghcr.io/open-webui/open-webui:main
+ENV
+    chmod 0644 /etc/cielo/chat.env
+  fi
+
+  cat > /usr/local/bin/cielo-chat-run <<SCRIPT
+#!/usr/bin/env bash
+# Runs the chat UI against this box's agent endpoint, as the owner.
+#
+# It exits rather than waits when the box is not ready — no runtime, or no owner
+# yet — because the token it needs does not exist until someone claims the box.
+# systemd restarts it, so claiming is all it takes for chat to come up.
+set -euo pipefail
+# shellcheck disable=SC1091
+[[ -f /etc/cielo/chat.env ]] && . /etc/cielo/chat.env
+CHAT_HOST="\${CHAT_HOST:-127.0.0.1}"
+CHAT_PORT="\${CHAT_PORT:-8080}"
+CHAT_IMAGE="\${CHAT_IMAGE:-ghcr.io/open-webui/open-webui:main}"
+
+status="\$(curl -fsS "http://127.0.0.1:${PORT}/api/setup/status")" || {
+  echo "runtime not answering on ${PORT} yet" >&2; exit 1; }
+owner="\$(printf '%s' "\$status" | sed -n 's/.*"owner":"\\([^"]*\\)".*/\\1/p')"
+[[ -n "\$owner" ]] || { echo "not claimed yet — run: cielo-claim \"Your Name\"" >&2; exit 1; }
+token_file="/opt/cielo/.data/secrets/\${owner}.token"
+[[ -r "\$token_file" ]] || { echo "no token file for '\$owner'" >&2; exit 1; }
+
+# --network host so the container reaches a loopback-bound runtime (app and kiosk
+# modes bind 127.0.0.1); HOST then keeps the chat itself off the network.
+exec podman run --rm --replace --name cielo-chat \\
+  --network host \\
+  -e HOST="\$CHAT_HOST" \\
+  -e PORT="\$CHAT_PORT" \\
+  -e WEBUI_NAME="CieloOS Chat" \\
+  -e WEBUI_AUTH=False \\
+  -e OPENAI_API_BASE_URL="http://127.0.0.1:${PORT}/v1/agent" \\
+  -e OPENAI_API_KEY="\$(cat "\$token_file")" \\
+  -v cielo-chat-data:/app/backend/data \\
+  "\$CHAT_IMAGE"
+SCRIPT
+  chmod +x /usr/local/bin/cielo-chat-run
+
+  cat > /etc/systemd/system/cielo-chat.service <<UNIT
+[Unit]
+Description=CieloOS chat (Open WebUI) against the agent endpoint
+After=network-online.target cielo-runtime.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cielo
+Environment=XDG_RUNTIME_DIR=/run/user/${CIELO_UID}
+ExecStart=/usr/local/bin/cielo-chat-run
+# Always, not on-failure: before the box is claimed this exits cleanly with
+# nothing to do, and claiming is what makes the next attempt succeed.
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+  # The panel links to the chat; without this it shows nothing (Chat:Url empty).
+  if ! grep -q '^Chat__Url=' /etc/cielo/cielo.env 2>/dev/null; then
+    printf '\n# The chat UI installed by install.sh (loopback; see /etc/cielo/chat.env).\nChat__Url=http://localhost:8080/\n' >> /etc/cielo/cielo.env
+  fi
+
+  if [[ "$CI" -eq 1 ]]; then
+    echo "    (--ci: unit installed but not enabled; no podman in this mode)"
+  else
+    enable_unit cielo-chat.service || true
+    if [[ "$LIVE" -eq 1 ]]; then
+      systemctl daemon-reload
+      # The image is ~1 GB and podman pulls it on first run, so this can take a
+      # while; it is not something the install should block on.
+      systemctl restart cielo-chat.service || true
+      echo "    starting (first run downloads the image) → http://127.0.0.1:8080/"
+    else
+      echo "    (--offline: enabled; pulls the image and starts on first boot)"
+    fi
+  fi
+fi
+
+echo "==> [9/9] Presentation mode: $MODE"
 if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
   # Minimal Wayland kiosk: `cage` runs a single fullscreen app (chromium) as cielo.
   # (Least-packages GUI; shake this out on the actual hardware/GPU.)

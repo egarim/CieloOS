@@ -73,6 +73,14 @@ echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
   done
   if [ "$ok" != "1" ]; then echo "RUNTIME NEVER BECAME READY:"; tail -40 /tmp/runtime.log; exit 1; fi
 
+  # The chat service is what makes /v1/agent reachable by a human, and every part
+  # of it is invisible until first boot — so assert the pieces exist and that the
+  # chat is bound to loopback, since it has no login of its own yet.
+  test -x /usr/local/bin/cielo-chat-run || { echo "no chat runner installed"; exit 1; }
+  grep -q "^CHAT_HOST=127.0.0.1" /etc/cielo/chat.env || { echo "chat is not loopback-bound"; exit 1; }
+  grep -q "^Chat__Url=" /etc/cielo/cielo.env || { echo "panel would show no chat link"; exit 1; }
+  grep -q "WEBUI_AUTH=False" /usr/local/bin/cielo-chat-run || { echo "chat auth expectation changed"; exit 1; }
+
   set +e
   cielo-selftest --claim
   rc=$?
@@ -133,6 +141,8 @@ echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
   test -L /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service \
     || { echo "podman-restart not enabled for cielo: sessions would not survive a reboot"; exit 1; }
   test -f /var/lib/systemd/linger/cielo || { echo "no linger marker"; exit 1; }
+  test -L /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
+    || { echo "chat not enabled for first boot"; exit 1; }
 
   # The ONLYOFFICE package must match the target, not the Containerfile default.
   want=amd64; [ "$(dpkg --print-architecture)" = arm64 ] && want=arm64

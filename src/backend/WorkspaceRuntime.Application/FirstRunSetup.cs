@@ -69,6 +69,11 @@ public sealed record AddUserResult(AddUserOutcome Outcome, string? Slug = null, 
 public interface ISetupService
 {
     bool IsClaimed();
+
+    // The slug of the first owner, or null on an unclaimed box. On-box services
+    // (the chat UI) need it to find whose token to act as; it is never returned
+    // to a remote caller.
+    string? OwnerSlug();
     ClaimResult Claim(string? name, bool fromLoopback);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
@@ -92,6 +97,8 @@ public sealed class SetupService : ISetupService
     // demo image (seeded joche/yulia) is already "claimed", so its setup wizard
     // never appears — exactly right.
     public bool IsClaimed() => store.Users.Count > 0;
+
+    public string? OwnerSlug() => store.Users.FirstOrDefault()?.Slug;
 
     public ClaimResult Claim(string? name, bool fromLoopback)
     {
