@@ -133,6 +133,7 @@ builder.Services.AddSingleton<AgentRuntime>();
 // The ledger behind issue #14: every model call recorded, per-desk and per-agent
 // ceilings enforced. Registered before the loops so they can take it.
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
+builder.Services.AddSingleton<LoginThrottle>();
 builder.Services.AddSingleton<ISessionStore>(sp => databaseProvider == "memory"
     ? new InMemorySessionStore()
     : new EfSessionStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
@@ -365,6 +366,22 @@ app.Use(async (context, next) =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new { error = "This operation requires a human principal." });
+            return;
+        }
+
+        // An API key acts AS a person but is not one. Human-only routes are the
+        // owner's own decisions — minting and revoking credentials, signing out
+        // everywhere, adding users, approving an agent's request — and a leaked
+        // integration key must not be able to make them. Otherwise the key that
+        // exists so the chat need not hold the owner's credential would be able
+        // to do everything that credential could.
+        if (level == AccessLevel.HumanOnly && context.Items.ContainsKey("apiKey"))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "An API key cannot do this. Sign in as yourself for credential and owner actions."
+            });
             return;
         }
 
@@ -613,10 +630,29 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
 // person's own credential. The legacy identity token still works — agents use
 // it — but it is a capability, not a login.
 
-app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions) =>
+app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions, LoginThrottle throttle) =>
 {
     var slug = (request?.Slug ?? "").Trim().ToLowerInvariant();
     var password = request?.Password ?? "";
+    var now = DateTimeOffset.UtcNow;
+
+    // Checked before anything is verified: a blocked attempt must cost no PBKDF2,
+    // or the throttle becomes the denial-of-service it exists to prevent. Both the
+    // desk and the source are counted — one attacker must not be able to lock out
+    // a desk by guessing at it, and one source must not get unlimited guesses by
+    // rotating names.
+    var source = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var throttleKeys = new[] { $"desk:{slug}", $"source:{source}" };
+    foreach (var key in throttleKeys)
+    {
+        if (throttle.RetryAfter(key, now) is { } wait)
+        {
+            context.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
+            return Results.Json(
+                new { error = $"Too many failed sign-ins. Try again in {Math.Ceiling(wait.TotalMinutes)} minute(s)." },
+                statusCode: StatusCodes.Status429TooManyRequests);
+        }
+    }
     var user = store.Users.FirstOrDefault(candidate => candidate.Slug == slug);
     var hash = user is null ? null : store.PasswordHashFor(user.Id);
 
@@ -631,7 +667,17 @@ app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRun
             hasher.Verify(password, hasher.DummyHash);
         }
 
+        foreach (var key in throttleKeys)
+        {
+            throttle.Failed(key, now);
+        }
+
         return Results.Json(new { error = "That name and password do not match." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+
+    foreach (var key in throttleKeys)
+    {
+        throttle.Succeeded(key);
     }
 
     var (session, secret) = sessions.Create(user.Id, TimeSpan.FromDays(14));

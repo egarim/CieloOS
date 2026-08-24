@@ -117,3 +117,59 @@ public class LoginTests
         Assert.Equal(200, secrets.Count);
     }
 }
+
+public class LoginThrottleTests
+{
+    [Fact]
+    public void Repeated_failures_lock_the_door_for_a_while()
+    {
+        var throttle = new LoginThrottle(limit: 3, window: TimeSpan.FromMinutes(15));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.Null(throttle.RetryAfter("desk:joche", now));
+        throttle.Failed("desk:joche", now);
+        throttle.Failed("desk:joche", now);
+        Assert.Null(throttle.RetryAfter("desk:joche", now));
+
+        throttle.Failed("desk:joche", now);
+        Assert.NotNull(throttle.RetryAfter("desk:joche", now));
+    }
+
+    [Fact]
+    public void The_window_expires_on_its_own()
+    {
+        var throttle = new LoginThrottle(limit: 1, window: TimeSpan.FromMinutes(15));
+        var now = DateTimeOffset.UtcNow;
+        throttle.Failed("desk:joche", now);
+
+        Assert.NotNull(throttle.RetryAfter("desk:joche", now));
+        Assert.Null(throttle.RetryAfter("desk:joche", now.AddMinutes(16)));
+    }
+
+    [Fact]
+    public void A_success_forgives_earlier_mistakes()
+    {
+        // Someone who mistypes twice and then signs in should not carry those
+        // failures around for the rest of the window.
+        var throttle = new LoginThrottle(limit: 3, window: TimeSpan.FromMinutes(15));
+        var now = DateTimeOffset.UtcNow;
+        throttle.Failed("desk:joche", now);
+        throttle.Failed("desk:joche", now);
+
+        throttle.Succeeded("desk:joche");
+
+        throttle.Failed("desk:joche", now);
+        Assert.Null(throttle.RetryAfter("desk:joche", now));
+    }
+
+    [Fact]
+    public void One_desk_being_attacked_does_not_block_another()
+    {
+        var throttle = new LoginThrottle(limit: 1, window: TimeSpan.FromMinutes(15));
+        var now = DateTimeOffset.UtcNow;
+        throttle.Failed("desk:joche", now);
+
+        Assert.NotNull(throttle.RetryAfter("desk:joche", now));
+        Assert.Null(throttle.RetryAfter("desk:yulia", now));
+    }
+}
