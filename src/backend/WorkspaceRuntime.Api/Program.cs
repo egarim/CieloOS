@@ -229,7 +229,8 @@ builder.Services.AddSingleton<IConsoleAgentBrain>(sp =>
 builder.Services.AddSingleton<DesktopAgentLoop>();
 builder.Services.AddSingleton<IDesktopBrainRegistry>(sp => new DesktopBrainRegistry(
     sp.GetRequiredService<IModelRegistry>(),
-    sp.GetRequiredService<ILoggerFactory>()));
+    sp.GetRequiredService<ILoggerFactory>(),
+    sp.GetRequiredService<ITokenLedger>()));
 
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
@@ -481,22 +482,26 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
     }
 
     var subject = (request?.Subject ?? "").Trim();
-    if (scope != TokenLimit.OsScope && !Guid.TryParse(subject, out _))
+    if (scope != TokenLimit.OsScope && !Guid.TryParse(subject, out var subjectId))
     {
         return Results.BadRequest(new { error = $"a '{scope}' limit needs the subject's id." });
     }
 
+    // Canonical form, not what was typed: a limit stored as "{ABC...}" or in
+    // uppercase parses fine here and then never matches the id the budget check
+    // compares against — a ceiling that silently does nothing.
+    var canonical = scope == TokenLimit.OsScope ? "" : subjectId.ToString();
     var tokens = request?.MonthlyTokens ?? 0;
-    ledger.SetLimit(new TokenLimit(scope, scope == TokenLimit.OsScope ? "" : subject, tokens));
+    ledger.SetLimit(new TokenLimit(scope, canonical, tokens));
 
     var caller = Caller(context);
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
         "usage.limit", AuditOutcome.Success,
         tokens > 0
-            ? $"Set the {scope} model budget to {tokens:N0} tokens a month{(scope == TokenLimit.OsScope ? "" : $" for {subject}")}."
-            : $"Removed the {scope} model budget{(scope == TokenLimit.OsScope ? "" : $" for {subject}")}."));
+            ? $"Set the {scope} model budget to {tokens:N0} tokens a month{(scope == TokenLimit.OsScope ? "" : $" for {canonical}")}."
+            : $"Removed the {scope} model budget{(scope == TokenLimit.OsScope ? "" : $" for {canonical}")}."));
 
-    return Results.Ok(new { scope, subject, monthlyTokens = tokens });
+    return Results.Ok(new { scope, subject = canonical, monthlyTokens = tokens });
 });
 
 app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
@@ -765,7 +770,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
 // + a screenshot, asks the vision brain for the next action, and submits each
 // click/keystroke as a policy-checked, audited `desktop.*` command. Gated on the
 // session owner like the console loop; per-action ownership/policy still apply.
-app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionVisionConsent visionConsent, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunRequest request, HttpContext context, DesktopAgentLoop loop, IDesktopBrainRegistry desktopBrains, ISessionVisionConsent visionConsent, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, IModelRegistry models, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -781,7 +786,15 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
     var cloudVisionAllowed = visionConsent.IsAllowed(id, DateTimeOffset.UtcNow);
     var brain = desktopBrains.Resolve(store.GetAgent(agentId), cloudVisionAllowed);
-    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken);
+    // A desktop run can call two providers (text grounding and, with consent,
+    // vision). The scope names the chat one, so a vision call inside the run is
+    // counted correctly but labelled with the desk's chat provider. The number is
+    // what the ceiling acts on; the label is cosmetic.
+    var chatProvider = models.Resolve("chat", store.GetAgent(agentId));
+    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 8, caller, userId, agentId, brain, cancellationToken,
+        model: chatProvider is null
+            ? null
+            : new ModelIdentity(chatProvider.Profile.Id, chatProvider.Profile.Model, chatProvider.Profile.Locality));
     events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
