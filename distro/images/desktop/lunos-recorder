@@ -24,6 +24,8 @@ able to see it without being told, so `start` puts a marker on the desktop and
 failed indicator must not deny the capability — but the state file records that it
 was missing, and the runtime reports it.
 """
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -34,6 +36,7 @@ import time
 
 HOME = os.environ.get("HOME", "/config")
 STATE = os.path.join(HOME, ".cielo-recorder.json")
+LOCK = os.path.join(HOME, ".cielo-recorder.lock")
 OUTPUT_DIR = os.path.join(HOME, "recordings")
 DISPLAY = os.environ.get("DISPLAY", ":1")
 
@@ -79,6 +82,48 @@ def geometry():
     return None
 
 
+@contextlib.contextmanager
+def exclusive():
+    """One recorder command at a time, per session.
+
+    The state file alone is not enough: two `start` requests can both read "not
+    recording" before either writes, and then BOTH launch ffmpeg. The second write
+    hides the first PID, so `stop` kills one capture and the other keeps running,
+    invisible, until its own time limit — filling the owner's home with footage
+    nobody asked for and nobody can stop.
+    """
+    handle = os.open(LOCK, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            fail("Another recorder command is already running on this session.")
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(handle, fcntl.LOCK_UN)
+        os.close(handle)
+
+
+def claim(directory, base):
+    """Take a filename nobody else holds, atomically.
+
+    Two recordings started in the same second derive the same name, and ffmpeg's
+    -y would overwrite the first one that already finished. O_EXCL makes the claim
+    the filesystem's decision rather than a check-then-write race.
+    """
+    for suffix in [""] + [f"-{n}" for n in range(2, 100)]:
+        path = os.path.join(directory, f"{base}{suffix}.mp4")
+        try:
+            os.close(os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+            return path
+        except FileExistsError:
+            continue
+        except OSError:
+            return None
+    return None
+
+
 def read_state():
     try:
         with open(STATE, encoding="utf-8") as handle:
@@ -106,22 +151,40 @@ def duration_of(path):
         return None
 
 
-def indicator(on):
-    """A visible recording marker on the desktop. Best effort by design."""
+def indicator(on, seconds=MAX_SECONDS):
+    """A visible recording marker on the desktop.
+
+    Best effort in that a failure must not deny the recording — but the ANSWER
+    must be true, because the caller reports "no marker" as a privacy warning and
+    a false yes is worse than no marker at all. (It was a false yes: the check was
+    an always-true expression, so a marker that never reached the display still
+    claimed success.)
+
+    The timeout is the recording's own length, not the ceiling: ffmpeg stops
+    itself at -t, and a marker pinned to the maximum would sit on the desktop
+    announcing a recording that ended half an hour ago.
+    """
+    if not on:
+        try:
+            run(["pkill", "-f", "xmessage.*RECORDING"], timeout=5)
+            return True
+        except (OSError, subprocess.SubprocessError):
+            return False
+
     try:
-        if on:
-            subprocess.Popen(
-                ["xmessage", "-display", DISPLAY, "-geometry", "+20+20",
-                 "-bg", "#b00020", "-fg", "white", "-timeout", str(MAX_SECONDS),
-                 " ●  RECORDING — this desktop is being captured "],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                start_new_session=True)
-            time.sleep(0.3)
-            return os.path.exists("/usr/bin/xmessage") or True
-        run(["pkill", "-f", "xmessage.*RECORDING"], timeout=5)
-        return True
+        marker = subprocess.Popen(
+            ["xmessage", "-display", DISPLAY, "-geometry", "+20+20",
+             "-bg", "#b00020", "-fg", "white", "-timeout", str(int(seconds)),
+             " ●  RECORDING — this desktop is being captured "],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            start_new_session=True)
     except (OSError, subprocess.SubprocessError):
         return False
+
+    # xmessage exits immediately if it cannot reach the display, so the only
+    # honest check is whether it is still alive a moment later.
+    time.sleep(0.4)
+    return marker.poll() is None
 
 
 def start(argv):
@@ -145,9 +208,11 @@ def start(argv):
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
-    path = os.path.join(OUTPUT_DIR, f"{name}-{stamp}.mp4")
+    path = claim(OUTPUT_DIR, f"{name}-{stamp}")
+    if path is None:
+        return fail(f"Could not create a recording file in {OUTPUT_DIR}.")
 
-    marked = indicator(True)
+    marked = indicator(True, seconds)
 
     started = time.time()
     process = subprocess.Popen(
@@ -180,7 +245,7 @@ def start(argv):
         return fail(f"ffmpeg exited immediately: {detail or 'no output'}")
 
     state = {
-        "id": f"{name}-{stamp}",
+        "id": os.path.splitext(os.path.basename(path))[0],
         "path": path,
         "pid": process.pid,
         "startedAtUnix": started,
@@ -309,7 +374,13 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] not in verbs:
         fail("usage: lunos-recorder <start [seconds] [name] | stop | status>")
     try:
-        verbs[sys.argv[1]](sys.argv[2:])
+        if sys.argv[1] == "status":
+            verbs["status"](sys.argv[2:])
+        else:
+            # start and stop both read-then-write the state file; the lock is what
+            # stops two of them interleaving into an untracked second recording.
+            with exclusive():
+                verbs[sys.argv[1]](sys.argv[2:])
     except SystemExit:
         raise
     except Exception as error:

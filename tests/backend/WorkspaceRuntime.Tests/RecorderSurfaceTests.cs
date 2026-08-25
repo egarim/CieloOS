@@ -141,6 +141,36 @@ public class RecorderSurfaceTests
         Assert.Contains("SIGINT", helper);
     }
 
+    [Fact]
+    public void Two_recordings_cannot_race_each_other()
+    {
+        // Found in review. Two `start` requests could both read "not recording"
+        // before either wrote, and both launch ffmpeg; the second write hid the
+        // first PID, so `stop` killed one and the other kept running invisibly
+        // until its own time limit. And two recordings named the same in the same
+        // second derived the same path, where ffmpeg's -y silently overwrote a
+        // finished capture.
+        var helper = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "lunos-recorder"));
+
+        Assert.Contains("fcntl.flock", helper);
+        Assert.Contains("os.O_EXCL", helper);
+    }
+
+    [Fact]
+    public void The_recording_marker_reports_what_actually_happened()
+    {
+        // Also found in review, and squarely my own bug: the check read
+        // `os.path.exists(...) or True`, which is always True, so a marker that
+        // never reached the display still reported success — defeating the privacy
+        // warning that is the entire reason the field exists.
+        var helper = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "lunos-recorder"));
+
+        Assert.DoesNotContain("or True", helper);
+        Assert.Contains("marker.poll() is None", helper);
+    }
+
     private static ToolRequest Request(string operation, params (string Key, string Value)[] arguments) =>
         new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "recorder", operation,
             arguments.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal),
