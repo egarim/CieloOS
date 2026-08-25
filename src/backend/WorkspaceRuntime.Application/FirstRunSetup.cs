@@ -10,7 +10,7 @@ public static class OwnerDefaults
 {
     public static HashSet<string> AgentTools => new()
     {
-        "spreadsheet", "session", "console", "desktop", "session-input", "browser"
+        "spreadsheet", "session", "console", "desktop", "session-input", "browser", "recorder"
     };
 }
 

@@ -112,6 +112,7 @@ builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredS
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IDesktopBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IBrowserBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
+builder.Services.AddSingleton<IRecorderBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IHomeBrowser>(provider => new PodmanHomeBrowser(new SessionBackendOptions
 {
     PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman"
@@ -121,6 +122,7 @@ builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequired
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceExecutor(provider.GetRequiredService<IDesktopBackend>()));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new BrowserSurfaceExecutor(provider.GetRequiredService<IBrowserBackend>()));
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new RecorderSurfaceExecutor(provider.GetRequiredService<IRecorderBackend>()));
 // V0.6 per-session input grant: a time-boxed lease that upgrades desktop
 // typing/keys to Allow (in-memory: a restart drops all input authority).
 builder.Services.AddSingleton<ISessionInputGrants, InMemorySessionInputGrants>();
@@ -1066,6 +1068,27 @@ app.MapGet("/api/sessions/{id}/elements", async (string id, HttpContext context,
     return elements.Ok
         ? Results.Ok(new { elements.SessionId, count = elements.Elements.Count, elements.Elements })
         : Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
+});
+
+// Is this session being recorded, and what has it captured so far? The gated read
+// that pairs with the `recorder` surface — and the answer a person deserves before
+// they take a seat at someone else's desktop.
+app.MapGet("/api/sessions/{id}/recording", async (string id, HttpContext context, IRecorderBackend recorder, ISessionBackend sessions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = $"Session '{id}' not found." });
+    }
+    if (!Ownership.CanAccessHome(caller, target.Owner, store))
+    {
+        return Results.Json(new { error = $"'{caller.Slug}' may not observe a session owned by '{target.Owner}'." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+    var status = await recorder.RecordingStatusAsync(id, cancellationToken);
+    return status.Ok
+        ? Results.Ok(new { sessionId = id, status.Running, status.Current })
+        : Results.Json(new { error = status.Error }, statusCode: StatusCodes.Status409Conflict);
 });
 
 // Observe the BROWSER open in a desktop session: where it is, and the actionable

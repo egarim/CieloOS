@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Record the session's desktop to an MP4, for tutorials the agent narrates later.
+
+Invoked by the runtime as:
+    podman exec -u abc -e DISPLAY=:1 <container> lunos-recorder <verb> [args...]
+
+Verbs: start [seconds] [name] | stop | status
+
+Two things here are not incidental.
+
+TRUNCATION IS SILENT. Selkies resizes the shared X display via RandR whenever a
+viewer connects or changes size, and an in-flight x11grab does not survive the
+reconfiguration: it dies on XShmGetImage BadMatch, stops early, and STILL EXITS
+ZERO. Measured on this hardware: 3.97s written of a requested 12s, exit 0. So the
+recorder never trusts ffmpeg's exit code — it compares the encoded duration
+against wall-clock elapsed and reports a short file as a failure, with the reason.
+A tutorial built from footage that quietly stops half way is worse than no
+tutorial, because nobody checks.
+
+THE RECORDING LIGHT IS PART OF THE FEATURE. A person can take a seat at a session
+that is already recording (that is what `session.inhabit` is for). They must be
+able to see it without being told, so `start` puts a marker on the desktop and
+`stop` removes it. If the marker cannot be drawn, the recording still runs — a
+failed indicator must not deny the capability — but the state file records that it
+was missing, and the runtime reports it.
+"""
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HOME = os.environ.get("HOME", "/config")
+STATE = os.path.join(HOME, ".cielo-recorder.json")
+OUTPUT_DIR = os.path.join(HOME, "recordings")
+DISPLAY = os.environ.get("DISPLAY", ":1")
+
+# A hard ceiling, not a suggestion: ffmpeg is given -t, so a runtime that dies
+# without calling stop cannot leave a process filling the home volume forever.
+MAX_SECONDS = 1800
+DEFAULT_SECONDS = 300
+FPS = 30
+
+# How much shorter than wall-clock an encode may be before it is called truncated.
+# Encoders trail the clock slightly at shutdown; a RandR abort loses whole seconds.
+TOLERANCE_SECONDS = 1.5
+
+NAME_OK = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def emit(payload, code=0):
+    print(json.dumps(payload))
+    sys.exit(code)
+
+
+def fail(detail, **extra):
+    emit({"ok": False, "detail": str(detail), **extra}, code=1)
+
+
+def run(argv, timeout=20):
+    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+
+
+def geometry():
+    """The display's CURRENT size. Never assume: three live sessions on this box
+    had three different geometries, and one had drifted through six modes."""
+    try:
+        out = run(["xdpyinfo", "-display", DISPLAY]).stdout
+        found = re.search(r"dimensions:\s+(\d+)x(\d+)", out)
+        if found:
+            width, height = int(found.group(1)), int(found.group(2))
+            # x264 needs even dimensions; an odd-sized display is not a reason to
+            # refuse to record.
+            return width - (width % 2), height - (height % 2)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def read_state():
+    try:
+        with open(STATE, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, ValueError):
+        return None
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, TypeError):
+        return False
+
+
+def duration_of(path):
+    try:
+        out = run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=nw=1:nk=1", path,
+        ]).stdout.strip()
+        return float(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def indicator(on):
+    """A visible recording marker on the desktop. Best effort by design."""
+    try:
+        if on:
+            subprocess.Popen(
+                ["xmessage", "-display", DISPLAY, "-geometry", "+20+20",
+                 "-bg", "#b00020", "-fg", "white", "-timeout", str(MAX_SECONDS),
+                 " ●  RECORDING — this desktop is being captured "],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True)
+            time.sleep(0.3)
+            return os.path.exists("/usr/bin/xmessage") or True
+        run(["pkill", "-f", "xmessage.*RECORDING"], timeout=5)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def start(argv):
+    existing = read_state()
+    if existing and alive(existing.get("pid")):
+        return emit({"ok": False, "detail": "A recording is already running on this session.",
+                     "recording": describe(existing)}, code=1)
+
+    seconds = DEFAULT_SECONDS
+    if argv and argv[0].isdigit():
+        seconds = max(1, min(MAX_SECONDS, int(argv[0])))
+        argv = argv[1:]
+    name = argv[0] if argv else "session"
+    if not NAME_OK.match(name):
+        return fail(f"'{name}' is not a usable recording name.")
+
+    size = geometry()
+    if size is None:
+        return fail(f"Could not read the geometry of display {DISPLAY}.")
+    width, height = size
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    path = os.path.join(OUTPUT_DIR, f"{name}-{stamp}.mp4")
+
+    marked = indicator(True)
+
+    started = time.time()
+    process = subprocess.Popen(
+        [
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+            "-f", "x11grab", "-draw_mouse", "1",
+            "-framerate", str(FPS), "-video_size", f"{width}x{height}",
+            "-i", DISPLAY,
+            "-t", str(seconds),
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+            path,
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=open(path + ".log", "wb"),
+        start_new_session=True,
+    )
+
+    # Give it a beat to fail loudly (a bad display, a full disk) rather than
+    # reporting a recording that died a tenth of a second later.
+    time.sleep(1.0)
+    if process.poll() is not None:
+        indicator(False)
+        detail = ""
+        try:
+            with open(path + ".log", encoding="utf-8", errors="replace") as handle:
+                detail = handle.read().strip()[:400]
+        except OSError:
+            pass
+        return fail(f"ffmpeg exited immediately: {detail or 'no output'}")
+
+    state = {
+        "id": f"{name}-{stamp}",
+        "path": path,
+        "pid": process.pid,
+        "startedAtUnix": started,
+        "startedAtIso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+        "requestedSeconds": seconds,
+        "width": width,
+        "height": height,
+        "fps": FPS,
+        "display": DISPLAY,
+        "indicator": bool(marked),
+    }
+    with open(STATE, "w", encoding="utf-8") as handle:
+        json.dump(state, handle)
+
+    return emit({"ok": True, "detail": f"Recording {width}x{height} at {FPS}fps for up to {seconds}s.",
+                 "recording": describe(state)})
+
+
+def describe(state, extra=None):
+    out = {
+        "id": state.get("id"),
+        "path": state.get("path"),
+        "startedAt": state.get("startedAtIso"),
+        "startedAtUnix": state.get("startedAtUnix"),
+        "requestedSeconds": state.get("requestedSeconds"),
+        "width": state.get("width"),
+        "height": state.get("height"),
+        "fps": state.get("fps"),
+        "indicator": state.get("indicator", False),
+    }
+    if extra:
+        out.update(extra)
+    return out
+
+
+def stop(_argv):
+    state = read_state()
+    if state is None:
+        return fail("No recording has been started on this session.")
+
+    pid = state.get("pid")
+    elapsed = time.time() - float(state.get("startedAtUnix", time.time()))
+    if alive(pid):
+        # SIGINT, not SIGKILL: ffmpeg must write the moov atom or the file is
+        # unplayable, which would turn every stop into a lost recording.
+        try:
+            os.kill(pid, signal.SIGINT)
+        except OSError:
+            pass
+        deadline = time.monotonic() + 15
+        while alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if alive(pid):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+    indicator(False)
+    try:
+        os.remove(STATE)
+    except OSError:
+        pass
+
+    path = state.get("path", "")
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    encoded = duration_of(path)
+    log = ""
+    try:
+        with open(path + ".log", encoding="utf-8", errors="replace") as handle:
+            log = handle.read().strip()[:400]
+    except OSError:
+        pass
+
+    if size == 0 or encoded is None:
+        return emit({"ok": False, "detail": f"The recording produced no playable video. {log}".strip(),
+                     "recording": describe(state, {"bytes": size})}, code=1)
+
+    # The whole point: ffmpeg exits 0 after a RandR abort, so the duration is the
+    # only honest witness. `expected` is capped by the requested length because a
+    # recording that hit its own -t limit is complete, not short.
+    expected = min(elapsed, float(state.get("requestedSeconds", elapsed)))
+    truncated = encoded + TOLERANCE_SECONDS < expected
+    result = describe(state, {
+        "bytes": size,
+        "seconds": round(encoded, 2),
+        "expectedSeconds": round(expected, 2),
+        "truncated": truncated,
+    })
+    if truncated:
+        return emit({
+            "ok": False,
+            "detail": (f"The recording stopped early: {encoded:.1f}s of {expected:.1f}s. "
+                       "The X display was almost certainly resized while recording — "
+                       "connecting or resizing a viewer does that. " + log).strip(),
+            "recording": result,
+        }, code=1)
+
+    # The ffmpeg log is evidence when something went wrong and litter when it did
+    # not. On success it is empty and would sit in the owner's home next to every
+    # recording forever, so it goes; on failure it is kept and quoted above.
+    try:
+        os.remove(path + ".log")
+    except OSError:
+        pass
+
+    return emit({"ok": True, "detail": f"Recorded {encoded:.1f}s to {path}.", "recording": result})
+
+
+def status(_argv):
+    state = read_state()
+    if state is None:
+        return emit({"ok": True, "recording": None, "detail": "Not recording."})
+    running = alive(state.get("pid"))
+    path = state.get("path", "")
+    return emit({"ok": True, "running": running,
+                 "recording": describe(state, {
+                     "bytes": os.path.getsize(path) if os.path.exists(path) else 0,
+                     "elapsedSeconds": round(time.time() - float(state.get("startedAtUnix", time.time())), 1),
+                 }),
+                 "detail": "Recording." if running else "The recording has finished; call stop to close it out."})
+
+
+def main():
+    verbs = {"start": start, "stop": stop, "status": status}
+    if len(sys.argv) < 2 or sys.argv[1] not in verbs:
+        fail("usage: lunos-recorder <start [seconds] [name] | stop | status>")
+    try:
+        verbs[sys.argv[1]](sys.argv[2:])
+    except SystemExit:
+        raise
+    except Exception as error:
+        fail(f"{type(error).__name__}: {error}")
+
+
+if __name__ == "__main__":
+    main()

@@ -54,7 +54,7 @@ public sealed class SessionBackendOptions
 // through the same policy-checked bus as every other command. The production
 // target (docs/ai-native-ui.md D3) swaps podman for Incus system containers;
 // the command shape and policy path are identical, so only this executor moves.
-public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend, IDesktopBackend, IBrowserBackend
+public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, IConsoleBackend, IDesktopBackend, IBrowserBackend, IRecorderBackend
 {
     private readonly SessionBackendOptions options;
 
@@ -916,4 +916,118 @@ Categories=Network;
 
     private static string Truncate(string value, int limit) =>
         value.Length <= limit ? value : value[..limit] + "…";
+
+    // --- Recorder backend: capture the session's desktop to an MP4 in the owner's
+    // home, via the in-container `lunos-recorder` helper.
+    //
+    // Implemented explicitly, like IBrowserBackend, because StatusAsync and
+    // ListAsync already mean other things on this class. ---
+    private const string RecorderHelper = "lunos-recorder";
+
+    async Task<RecorderStatus> IRecorderBackend.RecordingStatusAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error) = await RecorderAsync(sessionId, cancellationToken, "status");
+        if (error is not null)
+        {
+            return new RecorderStatus(sessionId, false, null, false, error);
+        }
+        var running = json.TryGetProperty("running", out var flag) && flag.ValueKind == JsonValueKind.True;
+        return new RecorderStatus(sessionId, running, ReadRecording(json), true);
+    }
+
+    async Task<RecorderResult> IRecorderBackend.StartRecordingAsync(string sessionId, int seconds, string name, CancellationToken cancellationToken)
+    {
+        var (json, error) = await RecorderAsync(sessionId, cancellationToken,
+            "start", seconds.ToString(CultureInfo.InvariantCulture), name);
+        return error is not null
+            ? new RecorderResult(false, error)
+            : new RecorderResult(true, Text(json, "detail"), ReadRecording(json));
+    }
+
+    async Task<RecorderResult> IRecorderBackend.StopRecordingAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var (json, error, failure) = await RecorderWithBodyAsync(sessionId, cancellationToken, "stop");
+        if (error is not null)
+        {
+            // A short recording is a REFUSAL that still carries its evidence: the
+            // helper reports ok:false and the file it managed to write, because
+            // ffmpeg exits 0 after the X display is resized out from under it and
+            // the encoded duration is the only honest witness.
+            return new RecorderResult(false, error, failure is null ? null : ReadRecording(failure.Value));
+        }
+        return new RecorderResult(true, Text(json, "detail"), ReadRecording(json));
+    }
+
+    private static Recording? ReadRecording(JsonElement json)
+    {
+        if (!json.TryGetProperty("recording", out var item) || item.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        return new Recording(
+            Text(item, "id"), Text(item, "path"), Text(item, "startedAt"),
+            Real(item, "startedAtUnix"), Number(item, "requestedSeconds"),
+            Number(item, "width"), Number(item, "height"), Number(item, "fps"),
+            item.TryGetProperty("indicator", out var mark) && mark.ValueKind == JsonValueKind.True,
+            (long)Real(item, "bytes"), Real(item, "seconds"), Real(item, "expectedSeconds"),
+            item.TryGetProperty("truncated", out var cut) && cut.ValueKind == JsonValueKind.True,
+            Real(item, "elapsedSeconds"));
+    }
+
+    private async Task<(JsonElement Json, string? Error)> RecorderAsync(
+        string sessionId, CancellationToken cancellationToken, params string[] verb)
+    {
+        var (json, error, _) = await RecorderWithBodyAsync(sessionId, cancellationToken, verb);
+        return (json, error);
+    }
+
+    // Same shape as BrowserAsync, but a refusal keeps the helper's payload: for a
+    // truncated recording the caller needs the file details, not only the message.
+    private async Task<(JsonElement Json, string? Error, JsonElement? Failure)> RecorderWithBodyAsync(
+        string sessionId, CancellationToken cancellationToken, params string[] verb)
+    {
+        var session = (await ListAsync(cancellationToken)).FirstOrDefault(candidate => candidate.Id == sessionId);
+        if (session is null)
+        {
+            return (default, "Session not found.", null);
+        }
+        if (!string.Equals(session.Kind, "desktop", StringComparison.Ordinal))
+        {
+            return (default, "Only desktop sessions have a screen to record.", null);
+        }
+
+        var arguments = new List<string>
+        {
+            "exec", "-u", "abc", "-e", DesktopDisplayEnv, options.NamePrefix + sessionId, RecorderHelper
+        };
+        arguments.AddRange(verb);
+
+        var run = await RunPodmanAsync(arguments.ToArray(), cancellationToken);
+        var output = run.Stdout.Trim();
+        if (output.Length == 0)
+        {
+            var detail = run.Stderr.Trim();
+            return (default, detail.Length > 0 ? detail : $"The recorder helper exited {run.ExitCode} without output.", null);
+        }
+
+        JsonElement json;
+        try
+        {
+            json = JsonDocument.Parse(output).RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            return (default, $"The recorder helper returned unreadable output: {Truncate(output, 200)}", null);
+        }
+
+        if (!json.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True)
+        {
+            var why = Text(json, "detail");
+            return (default, why.Length > 0 ? why : "The recorder refused the command.", json);
+        }
+        return (json, null, null);
+    }
+
+    private static double Real(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.TryGetDouble(out var number) ? number : 0;
 }
