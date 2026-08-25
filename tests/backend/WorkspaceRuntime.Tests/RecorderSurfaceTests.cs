@@ -370,3 +370,53 @@ public class ApprovalHonestyTests
         Assert.Contains("did not take effect", source);
     }
 }
+
+public class DesktopGeometryTests
+{
+    [Fact]
+    public void A_desktop_session_is_pinned_to_a_fixed_size()
+    {
+        // Selkies re-modes the display through RandR when a viewer connects, and
+        // that one behaviour caused three separate failures: recordings truncating
+        // silently (x11grab dies on the reconfiguration and still exits 0), element
+        // boxes going stale, and any coordinate an agent was handed pointing
+        // somewhere else a moment later.
+        var source = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Infrastructure", "SessionOrchestrator.cs"));
+
+        Assert.Contains("SELKIES_MANUAL_WIDTH=", source);
+        Assert.Contains("SELKIES_MANUAL_HEIGHT=", source);
+        Assert.Contains("SELKIES_IS_MANUAL_RESOLUTION_MODE=true", source);
+    }
+
+    [Fact]
+    public void A_console_session_is_not_given_a_screen_size()
+    {
+        // A console has no X display; setting a resolution on it would be cargo.
+        var source = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Infrastructure", "SessionOrchestrator.cs"));
+
+        Assert.Contains("if (!isConsole)", source);
+    }
+
+    [Fact]
+    public void The_size_is_configurable_but_defaults_to_something_footage_is_cut_for()
+    {
+        var options = new SessionBackendOptions();
+        Assert.Equal(1920, options.DesktopWidth);
+        Assert.Equal(1080, options.DesktopHeight);
+    }
+
+    [Fact]
+    public void The_recorder_still_reads_the_geometry_rather_than_assuming_it()
+    {
+        // Belt and braces: pinning the size is the fix, but a recorder that hard-codes
+        // 1920x1080 would produce a broken file the day someone changes the setting,
+        // or on a session that predates it.
+        var helper = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "lunos-recorder"));
+
+        Assert.Contains("xdpyinfo", helper);
+        Assert.DoesNotContain("1920x1080", helper);
+    }
+}

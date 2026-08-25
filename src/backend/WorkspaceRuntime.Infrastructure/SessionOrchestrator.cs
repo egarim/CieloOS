@@ -17,6 +17,12 @@ public sealed class SessionBackendOptions
     // build serves Selkies on 3000.
     public string Image { get; init; } = "localhost/lunos-desktop:latest";
     public int ViewportPort { get; init; } = 3000;
+
+    // The desktop's fixed size. 1920x1080 because it is what tutorial footage is
+    // cut for and what every viewer can scale to; the point is less the number than
+    // that it does not change while an agent is working against it.
+    public int DesktopWidth { get; init; } = 1920;
+    public int DesktopHeight { get; init; } = 1080;
     public string NamePrefix { get; init; } = "lunos-session-";
     public string SessionLabel { get; init; } = "lunos.session=1";
 
@@ -168,6 +174,32 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             await RunPodmanAsync(new[] { "volume", "create", sharedVolume }, cancellationToken);
             runArguments.Add("-v");
             runArguments.Add($"{sharedVolume}:{homePath}/shared");
+        }
+
+        // A desktop the agent works on must not move under it.
+        //
+        // Selkies re-modes the shared X display through RandR whenever a viewer
+        // connects or resizes, and that one behaviour is behind three separate
+        // failures: an in-flight x11grab dies on the reconfiguration (and exits
+        // ZERO, so a recording silently stops half way); element boxes are only
+        // valid against the frame they were observed on; and any coordinate an
+        // agent was given a moment ago now points somewhere else. Three live
+        // sessions here had three different geometries, one having drifted through
+        // six modes.
+        //
+        // Setting the manual size fixes the Xvfb framebuffer AND forces Selkies
+        // into manual resolution mode, so the display stays where it was put. The
+        // cost is that a viewer on a differently-shaped window scales or letterboxes
+        // instead of reshaping the desktop — which is how every other remote desktop
+        // has always behaved, and a fair trade for a screen that holds still.
+        if (!isConsole)
+        {
+            runArguments.Add("-e");
+            runArguments.Add($"SELKIES_MANUAL_WIDTH={options.DesktopWidth}");
+            runArguments.Add("-e");
+            runArguments.Add($"SELKIES_MANUAL_HEIGHT={options.DesktopHeight}");
+            runArguments.Add("-e");
+            runArguments.Add("SELKIES_IS_MANUAL_RESOLUTION_MODE=true");
         }
 
         runArguments.Add("-p");
