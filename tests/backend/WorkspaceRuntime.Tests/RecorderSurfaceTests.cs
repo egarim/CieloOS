@@ -158,6 +158,25 @@ public class RecorderSurfaceTests
     }
 
     [Fact]
+    public void A_pid_alone_is_not_an_identity()
+    {
+        // The state file OUTLIVES its ffmpeg: the process stops itself at -t while
+        // the file waits for `stop`. Linux reuses pids, so a later stop would have
+        // sent SIGINT and then SIGKILL to whatever innocent process inherited the
+        // number. Proven on the live box with a planted state file: before this,
+        // an unrelated `sleep` would have been killed; now it survives.
+        var helper = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "lunos-recorder"));
+
+        Assert.Contains("/proc/{pid}/stat", helper);
+        Assert.Contains("pidStart", helper);
+        Assert.Contains("pidComm", helper);
+        // The bare liveness check is gone — os.kill(pid, 0) answers "does a process
+        // exist", which is not the question.
+        Assert.DoesNotContain("os.kill(pid, 0)", helper);
+    }
+
+    [Fact]
     public void The_recording_marker_reports_what_actually_happened()
     {
         // Also found in review, and squarely my own bug: the check read
