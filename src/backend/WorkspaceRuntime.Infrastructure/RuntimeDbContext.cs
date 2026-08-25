@@ -11,6 +11,10 @@ public sealed class UserRow
     // Rows written before desk profiles existed read as "office" — the desk they
     // have always had.
     public string DeskProfile { get; set; } = "office";
+
+    // BCP-47. Defaulted so every user created before languages existed reads as
+    // English rather than as unset.
+    public string Language { get; set; } = "en";
     // Empty until a password is set. Existing installs upgrade with no password:
     // they can still sign in with their identity token, and are asked to set one.
     public string PasswordHash { get; set; } = "";

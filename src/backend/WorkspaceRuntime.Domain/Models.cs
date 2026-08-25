@@ -27,7 +27,12 @@ public enum AuditOutcome
 // DeskProfile is what the desk is FOR (see DeskProfiles): it decides the session
 // image, the agent's tool grant and what the home starts with. Defaulted so every
 // user created before profiles existed reads as the office desk they already had.
-public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug, string DeskProfile = "office");
+// Language is an attribute of the PERSON, not of the browser they happen to be
+// using: it has to reach the panel, the locale and keyboard of their session, and
+// the agent's prompt so it answers in their language. A browser setting reaches
+// only the first of those. BCP-47, defaulted so every user created before this
+// existed reads as English rather than as unset.
+public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug, string DeskProfile = "office", string Language = "en");
 
 public sealed record Workspace(Guid Id, Guid OwnerUserId, string Name);
 

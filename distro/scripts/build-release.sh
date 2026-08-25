@@ -33,6 +33,14 @@ test -f "$STAGE/panel/index.html" || { echo "ERROR: panel index.html missing" >&
 
 echo "==> Staging surfaces + config"
 cp "$ROOT"/surfaces/*.surface.json "$STAGE/surfaces/"
+# The translations travel WITH the manifests they translate. A glob for
+# *.surface.json alone would ship a bundle whose consent prompts are English
+# everywhere, and it would look like it worked — the panel falls back rather than
+# failing, so nobody would see a bug, just a machine that never speaks Russian.
+if [[ -d "$ROOT/surfaces/i18n" ]]; then
+  mkdir -p "$STAGE/surfaces/i18n"
+  cp -a "$ROOT/surfaces/i18n/." "$STAGE/surfaces/i18n/"
+fi
 cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
 
 echo "==> Staging installer + foreground launcher + service unit + self-test"

@@ -1,0 +1,52 @@
+#!/usr/bin/with-contenv bash
+# Give the session a keyboard it can write the person's language on.
+#
+# CIELO_LAYOUTS is set by the runtime from the user's language, and always carries
+# `us` so an agent's own keysyms and any ASCII path still work. The toggle is both
+# Shift keys together: it is the one chord that does not collide with an
+# application shortcut, and a person who does not know it has lost nothing, because
+# the layout indicator in the panel shows what is active.
+#
+# Applied at session start rather than baked in: `setxkbmap` needs a running X
+# server, and the layouts come from the user record, which the image cannot know.
+set -eu
+
+LAYOUTS="${CIELO_LAYOUTS:-us}"
+VARIANTS="${CIELO_LAYOUT_VARIANTS:-}"
+OPTIONS="${CIELO_LAYOUT_TOGGLE:-grp:shifts_toggle}"
+
+cat > /usr/local/bin/cielo-keyboard <<EOF
+#!/bin/bash
+# Re-applies the session's layouts. Also run from autostart, because a desktop
+# environment starting up will happily reset xkb behind us.
+export DISPLAY="\${DISPLAY:-:1}"
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  if xdpyinfo >/dev/null 2>&1; then
+    setxkbmap -layout "${LAYOUTS}" ${VARIANTS:+-variant "${VARIANTS}"} -option "${OPTIONS}" 2>/dev/null && exit 0
+  fi
+  sleep 2
+done
+exit 0
+EOF
+chmod +x /usr/local/bin/cielo-keyboard
+
+install -d /config/.config/autostart
+cat > /config/.config/autostart/cielo-keyboard.desktop <<EOF
+[Desktop Entry]
+Type=Application
+Name=CieloOS keyboard layout
+Exec=/usr/local/bin/cielo-keyboard
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+EOF
+chown -R "${PUID:-911}:${PGID:-911}" /config/.config/autostart
+
+# The system-wide default too, so anything reading it before the desktop starts
+# (a login greeter, a console) agrees with what the person will get.
+cat > /etc/default/keyboard <<EOF
+XKBMODEL="pc105"
+XKBLAYOUT="${LAYOUTS}"
+XKBVARIANT="${VARIANTS}"
+XKBOPTIONS="${OPTIONS}"
+BACKSPACE="guess"
+EOF

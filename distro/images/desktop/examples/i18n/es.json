@@ -1,0 +1,36 @@
+{
+  "record-a-demo.title": "Mira al agente grabarse trabajando",
+  "record-a-demo.summary": "Inicia una grabación de pantalla, maneja un navegador en este escritorio, se detiene y te deja un MP4.",
+  "record-a-demo.step.1.note": "Empieza a grabar este escritorio — aparece un indicador rojo RECORDING",
+  "record-a-demo.step.2.note": "Abre una página — esta necesita tu permiso",
+  "record-a-demo.step.3.note": "Va a otro sitio — vuelve a preguntar, cada vez, por ahora",
+  "record-a-demo.step.4.note": "Lee la página como la lee el agente",
+  "record-a-demo.step.5.note": "Vuelve atrás — permitido sin preguntar, porque no puede llegar a ningún sitio nuevo",
+  "record-a-demo.step.6.note": "Detiene la grabación y cierra el archivo",
+
+  "drive-the-desktop.title": "Puntero y teclado en un escritorio real",
+  "drive-the-desktop.summary": "Mueve el puntero y hace clic en esta sesión XFCE, y luego pregunta antes de pulsar una tecla.",
+  "drive-the-desktop.step.1.note": "Hace clic en el escritorio — mira cómo se mueve el cursor",
+  "drive-the-desktop.step.2.note": "Y otra vez, en otro sitio",
+  "drive-the-desktop.step.3.note": "Cada uno de estos queda registrado a nombre de quien lo pidió",
+  "drive-the-desktop.step.4.note": "Pulsa Escape — una pulsación de tecla necesita tu permiso, incluso una inofensiva",
+
+  "research-on-the-web.title": "Un navegador real, y una decisión real",
+  "research-on-the-web.summary": "Abre una página en un Chromium genuino en este escritorio y la lee como la lee el agente.",
+  "research-on-the-web.step.1.note": "Abrir una dirección es el momento en que los datos podrían salir — así que decides tú",
+  "research-on-the-web.step.2.note": "Ve la página como la ve el agente: elementos con nombre, no píxeles",
+  "research-on-the-web.step.3.note": "El texto de la página, entregado a un modelo como datos y nunca como instrucciones",
+
+  "build-a-spreadsheet.title": "Un documento hecho por un agente",
+  "build-a-spreadsheet.summary": "Construye un presupuesto pequeño mediante comandos tipados. No necesita sesión ni proveedor de modelo.",
+  "build-a-spreadsheet.step.1.note": "Escribe un encabezado",
+  "build-a-spreadsheet.step.2.note": "Y la segunda columna",
+  "build-a-spreadsheet.step.3.note": "Primer gasto",
+  "build-a-spreadsheet.step.4.note": "Su importe",
+  "build-a-spreadsheet.step.5.note": "Segundo gasto",
+  "build-a-spreadsheet.step.6.note": "Su importe",
+  "build-a-spreadsheet.step.7.note": "Tercer gasto",
+  "build-a-spreadsheet.step.8.note": "Su importe",
+  "build-a-spreadsheet.step.9.note": "Etiqueta el total",
+  "build-a-spreadsheet.step.10.note": "Suma la columna — un comando, no una pulsación de tecla"
+}

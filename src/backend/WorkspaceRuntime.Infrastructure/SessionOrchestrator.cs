@@ -76,6 +76,11 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
     // and a machine with no profiles want.
     private readonly Func<string, DeskProfile>? resolveDeskProfile;
 
+    // The owner's language, so the session gets a locale and a keyboard they can
+    // write in. Same shape as the desk profile: the orchestrator has no identity
+    // store, so the answer is injected.
+    private readonly Func<string, UiLanguage>? resolveLanguage;
+
     // Profile images are built lazily and a build takes minutes, so a build is a
     // background job with a status the panel can read, not something a request
     // waits on.
@@ -84,11 +89,13 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
     public SessionOrchestrator(
         SessionBackendOptions options,
         Func<string, string?>? resolveSharedOwner = null,
-        Func<string, DeskProfile>? resolveDeskProfile = null)
+        Func<string, DeskProfile>? resolveDeskProfile = null,
+        Func<string, UiLanguage>? resolveLanguage = null)
     {
         this.options = options;
         this.resolveSharedOwner = resolveSharedOwner;
         this.resolveDeskProfile = resolveDeskProfile;
+        this.resolveLanguage = resolveLanguage;
     }
 
     public string SurfaceId => "session";
@@ -192,8 +199,29 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         // cost is that a viewer on a differently-shaped window scales or letterboxes
         // instead of reshaping the desktop — which is how every other remote desktop
         // has always behaved, and a fair trade for a screen that holds still.
+        // The owner's language reaches the session as a locale and a set of keyboard
+        // layouts. `us` is always among them — ASCII paths, shell commands and the
+        // agent's own keysyms have to keep working whatever the person writes in —
+        // and the toggle is a setting rather than an installation, because a desk you
+        // cannot type your own language on is broken whatever the panel says.
+        var language = resolveLanguage?.Invoke(owner) ?? Languages.English;
+        // LANGUAGE first, and it is not redundant: gettext consults it AHEAD of
+        // LC_ALL and LANG, and it is the one that actually decides which catalogue
+        // an application loads. Setting only LANG gets the formatting right and
+        // leaves the interface in English, which is the confusing half of the job.
+        runArguments.Add("-e");
+        runArguments.Add($"LANGUAGE={language.Code}");
+        runArguments.Add("-e");
+        runArguments.Add($"LANG={language.Locale}");
+        runArguments.Add("-e");
+        runArguments.Add($"LC_ALL={language.Locale}");
+        runArguments.Add("-e");
+        runArguments.Add($"CIELO_LANGUAGE={language.Code}");
+
         if (!isConsole)
         {
+            runArguments.Add("-e");
+            runArguments.Add($"CIELO_LAYOUTS={language.Layouts}");
             runArguments.Add("-e");
             runArguments.Add($"SELKIES_MANUAL_WIDTH={options.DesktopWidth}");
             runArguments.Add("-e");

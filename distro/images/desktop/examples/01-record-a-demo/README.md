@@ -22,6 +22,7 @@ believing it.
 
 ## Afterwards
 
-The MP4 is in `~/recordings`, downloadable from the panel's Files view. Editing it
+The MP4 is in `~/recordings`, downloadable from the panel under **Desks** →
+**Home**. Editing it
 into a narrated tutorial — chapters, captions, callouts — is the next thing being
 built.

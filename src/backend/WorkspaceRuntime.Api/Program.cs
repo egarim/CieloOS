@@ -83,7 +83,14 @@ builder.Services.AddSingleton<ITokenAuthenticator>(provider =>
 builder.Services.AddSingleton<ISetupService>(provider =>
     new SetupService(provider.GetRequiredService<IRuntimeStore>(), provider.GetRequiredService<ITokenAuthenticator>()));
 builder.Services.AddSingleton<ISurfaceRegistry>(_ => new FileSurfaceRegistry(repositoryRoot));
-builder.Services.AddSingleton<IExampleCatalog>(_ => new FileExampleCatalog(repositoryRoot));
+// The examples live beside the desk-profile build contexts, wherever those are —
+// on an installed machine that is /var/lib/cielo/images, which is NOT under the
+// runtime root. Deriving one from the other means a change to where install.sh
+// puts the image tree cannot silently empty the Examples list.
+builder.Services.AddSingleton<IExampleCatalog>(_ => new FileExampleCatalog(
+    repositoryRoot,
+    Path.GetDirectoryName(
+        builder.Configuration["Sessions:ProfileImagesPath"] ?? "/var/lib/cielo/images/profiles")));
 builder.Services.AddSingleton<ExampleRunner>();
 builder.Services.AddSingleton<IRuntimeEventStream, ChannelRuntimeEventStream>();
 builder.Services.AddSingleton<IPolicyEngine, ManifestPolicyEngine>();
@@ -109,6 +116,15 @@ builder.Services.AddSingleton<SessionOrchestrator>(sp => new SessionOrchestrator
         var rootSlug = Ownership.RootUserSlug(owner, store) ?? owner;
         var user = store.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug);
         return DeskProfiles.Resolve(user?.DeskProfile);
+    },
+    // And its locale and keyboard follow that same person's language. An agent
+    // works at its owner's desk, so it writes in its owner's language.
+    owner =>
+    {
+        var store = sp.GetRequiredService<IRuntimeStore>();
+        var rootSlug = Ownership.RootUserSlug(owner, store) ?? owner;
+        var user = store.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug);
+        return Languages.Resolve(user?.Language);
     }));
 builder.Services.AddSingleton<ISessionBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<IConsoleBackend>(provider => provider.GetRequiredService<SessionOrchestrator>());

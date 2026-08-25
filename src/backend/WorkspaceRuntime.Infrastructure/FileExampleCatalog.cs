@@ -10,18 +10,31 @@ public sealed class FileExampleCatalog : IExampleCatalog
 {
     private readonly List<Example> examples = new();
 
-    public FileExampleCatalog(string repositoryRoot)
+    // THREE layouts, because there are three, and getting this wrong shows up as an
+    // empty Examples list rather than as an error:
+    //
+    //   git checkout   <root>/distro/images/desktop/examples
+    //   run.sh bundle  <root>/images/desktop/examples
+    //   install.sh     /var/lib/cielo/images/desktop/examples
+    //
+    // The installed case is the one that bites: install.sh puts the image tree under
+    // /var/lib/cielo/images while the runtime root is /opt/cielo, so nothing under
+    // the runtime root contains them. It is passed in rather than guessed, derived
+    // from the same setting that locates the desk-profile build contexts, so the two
+    // cannot drift apart.
+    public FileExampleCatalog(string repositoryRoot, string? installedImagesRoot = null)
     {
-        // Two layouts, because there are two: a git checkout keeps these under
-        // distro/, and the shipped bundle flattens that away — the same reason
-        // Sessions:ProfileImagesPath points at <bundle>/images/profiles. Looking in
-        // both is what stops the panel showing an empty list on a real install.
-        var root = new[]
-            {
-                Path.Combine(repositoryRoot, "distro", "images", "desktop", "examples"),
-                Path.Combine(repositoryRoot, "images", "desktop", "examples"),
-            }
-            .FirstOrDefault(Directory.Exists);
+        var candidates = new List<string>
+        {
+            Path.Combine(repositoryRoot, "distro", "images", "desktop", "examples"),
+            Path.Combine(repositoryRoot, "images", "desktop", "examples"),
+        };
+        if (!string.IsNullOrWhiteSpace(installedImagesRoot))
+        {
+            candidates.Add(Path.Combine(installedImagesRoot, "desktop", "examples"));
+        }
+
+        var root = candidates.FirstOrDefault(Directory.Exists);
 
         if (root is null)
         {

@@ -54,6 +54,47 @@ RUN chmod +x /usr/local/bin/lunos-recorder
 # decides once what goes into it. Each example names the surfaces it exercises, so
 # the catalogue is data — and the same files are how a fresh installation proves it
 # can actually drive this machine.
+# A desk you cannot type your own language on is broken, whatever the panel says.
+# Locales must be GENERATED, not merely installed — without locale-gen the C.UTF-8
+# fallback silently mangles anything outside ASCII, which is the failure people
+# describe as "it looks fine until I type my own name". The keyboard layouts ship
+# together so switching is a setting rather than an installation, and the fonts are
+# here because Cyrillic renders as boxes without them and boxes look like a bug.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        locales x11-xkb-utils xkb-data fonts-dejavu-core fonts-liberation2 \
+    && sed -i 's/^# *\(en_US.UTF-8\|ru_RU.UTF-8\|es_ES.UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# The APPLICATIONS, not just our own interface.
+#
+# XFCE's parts ship their own translations and were already here — thunar, xfwm4,
+# xfce4-panel, xfdesktop, mousepad, plank all had ru and es. What was missing is
+# the TOOLKIT: no gtk30.mo, no glib20.mo, which means every file-open dialog, every
+# Cancel button and every GLib error stays English while the menus around them are
+# not. Menus in one language and dialogs in another is the half-translated look
+# that reads as a broken build rather than a missing package.
+#
+# Ubuntu keeps those in language packs, installed to /usr/share/locale-langpack.
+# Verified after installing: 419 Russian catalogues instead of 41, and GTK's Cancel
+# resolves to "_Отмена". Costs about 40 MB for both languages.
+#
+# ONLYOFFICE needs nothing here: it is CEF-based and already ships ru.pak, es.pak
+# and es-419.pak, so it follows the session's locale.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends \
+        language-pack-ru language-pack-gnome-ru \
+        language-pack-es language-pack-gnome-es \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Three layouts, always present, switched with both Shift keys together. A person
+# whose language is not the desk's default should not have to install anything to
+# write in it — and the agent's own typing is unaffected, because xdotool types
+# keysyms rather than going through the layout.
+COPY cielo-keyboard-seed /custom-cont-init.d/97-cielo-keyboard
+RUN chmod +x /custom-cont-init.d/97-cielo-keyboard
+
 COPY examples/ /opt/cielo-examples/
 COPY cielo-examples-seed /custom-cont-init.d/98-cielo-examples
 RUN chmod +x /custom-cont-init.d/98-cielo-examples

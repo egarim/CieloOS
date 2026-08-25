@@ -420,3 +420,217 @@ public class DesktopGeometryTests
         Assert.DoesNotContain("1920x1080", helper);
     }
 }
+
+public class LanguageTests
+{
+    [Theory]
+    [InlineData("en")]
+    [InlineData("ru")]
+    [InlineData("es")]
+    public void The_three_languages_the_product_is_built_for_are_offered(string code)
+    {
+        Assert.True(Languages.IsKnown(code));
+    }
+
+    [Theory]
+    [InlineData("ru-RU", "ru")]
+    [InlineData("es-419", "es")]
+    [InlineData("es_MX", "es")]
+    [InlineData("EN-gb", "en")]
+    public void A_regional_variant_lands_where_it_means_to(string requested, string expected)
+    {
+        // "es-419" is Latin American Spanish and must not fall through to English
+        // just because the exact tag is not on the list.
+        Assert.Equal(expected, Languages.Resolve(requested).Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("  ")]
+    [InlineData("klingon")]
+    public void An_unknown_language_opens_an_English_desk_rather_than_no_desk(string? code)
+    {
+        // A language removed in a later release, or a code from a newer panel, must
+        // still open a session. English is inconvenient; a machine that will not
+        // start is not.
+        Assert.Equal("en", Languages.Resolve(code).Code);
+    }
+
+    [Fact]
+    public void Every_language_keeps_a_us_layout()
+    {
+        // ASCII paths, shell commands and the agent's own xdotool keysyms have to
+        // keep working whatever the person writes in. A desk that can only type
+        // Cyrillic cannot type a file path.
+        foreach (var language in Languages.All)
+        {
+            Assert.Contains("us", language.Layouts.Split(','));
+        }
+    }
+
+    [Fact]
+    public void Every_language_names_a_real_locale()
+    {
+        // C.UTF-8 silently mangles anything outside ASCII — the failure people
+        // describe as "it looked fine until I typed my own name".
+        foreach (var language in Languages.All)
+        {
+            Assert.EndsWith(".UTF-8", language.Locale);
+            Assert.NotEqual("C.UTF-8", language.Locale);
+        }
+    }
+
+    [Fact]
+    public void A_session_is_given_its_owners_locale_and_layouts()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Infrastructure", "SessionOrchestrator.cs"));
+
+        Assert.Contains("LANG={language.Locale}", source);
+        Assert.Contains("CIELO_LAYOUTS={language.Layouts}", source);
+    }
+
+    [Fact]
+    public void The_desktop_image_can_actually_render_and_type_these_languages()
+    {
+        // Installing locales is not enough — they have to be GENERATED, or the
+        // container falls back to C.UTF-8 and mangles non-ASCII. And Cyrillic
+        // renders as boxes without fonts, which looks like a bug rather than a
+        // missing package.
+        var containerfile = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "Containerfile"));
+
+        Assert.Contains("locale-gen", containerfile);
+        Assert.Contains("ru_RU.UTF-8", containerfile);
+        Assert.Contains("es_ES.UTF-8", containerfile);
+        Assert.Contains("fonts-dejavu-core", containerfile);
+    }
+
+    [Fact]
+    public void Users_who_predate_languages_are_recorded_as_English()
+    {
+        var migration = Directory
+            .EnumerateFiles(Path.Combine(TestRepository.Root(), "src", "backend",
+                "WorkspaceRuntime.Infrastructure", "Migrations"), "*UserLanguage.cs")
+            .Single();
+
+        Assert.Contains("defaultValue: \"en\"", File.ReadAllText(migration));
+    }
+}
+
+public class ApplicationLanguageTests
+{
+    [Fact]
+    public void The_toolkit_is_translated_too_not_only_the_applications()
+    {
+        // XFCE's own parts already shipped ru and es. The toolkit did not: without
+        // gtk30.mo and glib20.mo every file dialog, Cancel button and GLib error
+        // stays English while the menus around it are translated. Menus in one
+        // language and dialogs in another reads as a broken build, not a missing
+        // package. Ubuntu keeps those in language packs.
+        var containerfile = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "Containerfile"));
+
+        Assert.Contains("language-pack-gnome-ru", containerfile);
+        Assert.Contains("language-pack-gnome-es", containerfile);
+    }
+
+    [Fact]
+    public void The_variable_gettext_actually_reads_is_set()
+    {
+        // gettext consults LANGUAGE ahead of LC_ALL and LANG. Setting only LANG
+        // gets number and date formatting right and leaves every interface in
+        // English — the confusing half of the job, and the half that looks done.
+        var source = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Infrastructure", "SessionOrchestrator.cs"));
+
+        Assert.Contains("LANGUAGE={language.Code}", source);
+        Assert.Contains("LANG={language.Locale}", source);
+    }
+}
+
+// A fix that only exists on the machine it was made on is not a fix. These check
+// that what was built today actually reaches a NEW installation — the failure mode
+// being an empty list or an English prompt rather than an error anybody notices.
+public class ShippedToNewInstallationsTests
+{
+    private static string Release() => File.ReadAllText(Path.Combine(
+        TestRepository.Root(), "distro", "scripts", "build-release.sh"));
+
+    private static string Installer() => File.ReadAllText(Path.Combine(
+        TestRepository.Root(), "distro", "install.sh"));
+
+    [Fact]
+    public void The_release_bundle_carries_the_translations_not_only_the_manifests()
+    {
+        // `cp surfaces/*.surface.json` alone ships a bundle whose consent prompts
+        // are English everywhere — and it LOOKS fine, because the panel falls back
+        // rather than failing. Nobody sees a bug; they see a machine that never
+        // speaks their language.
+        Assert.Contains("surfaces/i18n", Release());
+    }
+
+    [Fact]
+    public void The_release_bundle_carries_the_image_tree()
+    {
+        // The examples, the Containerfiles, the helpers and the seeds all live
+        // under distro/images and are built on the target.
+        Assert.Contains("distro/images/.", Release());
+    }
+
+    [Fact]
+    public void The_installer_lays_down_surfaces_wholesale()
+    {
+        // Wholesale, so a new subdirectory (i18n today, something else tomorrow)
+        // does not need the installer edited to travel with it.
+        Assert.Contains("$BUNDLE/surfaces", Installer());
+    }
+
+    [Fact]
+    public void The_catalogue_looks_where_the_installer_actually_puts_things()
+    {
+        // install.sh puts the image tree in /var/lib/cielo/images while the runtime
+        // root is /opt/cielo, so NOTHING under the runtime root holds the examples.
+        // Found by auditing rather than by testing: locally it worked, because the
+        // directory had been created by hand.
+        var catalog = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Infrastructure", "FileExampleCatalog.cs"));
+        var program = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Api", "Program.cs"));
+
+        Assert.Contains("installedImagesRoot", catalog);
+        // Derived from the profile-images setting rather than written out again, so
+        // moving one moves the other.
+        Assert.Contains("Sessions:ProfileImagesPath", program);
+        Assert.Contains("new FileExampleCatalog(", program);
+    }
+
+    [Fact]
+    public void An_installed_layout_finds_its_examples()
+    {
+        // The behaviour, not just the source: given the installed shape, the
+        // catalogue must read the examples.
+        var root = Path.Combine(Path.GetTempPath(), "cielo-install-shape-" + Guid.NewGuid().ToString("N"));
+        var runtimeRoot = Path.Combine(root, "opt", "cielo");
+        var examples = Path.Combine(root, "var", "lib", "cielo", "images", "desktop", "examples", "01-demo");
+        try
+        {
+            Directory.CreateDirectory(runtimeRoot);
+            Directory.CreateDirectory(examples);
+            File.WriteAllText(Path.Combine(examples, "example.json"),
+                """{"id":"demo","title":"Demo","summary":"s","needsSession":false,"steps":[{"surface":"spreadsheet","operation":"set-cell","input":{"address":"A1","value":"x"},"note":"n"}]}""");
+
+            var catalog = new FileExampleCatalog(
+                runtimeRoot,
+                Path.Combine(root, "var", "lib", "cielo", "images"));
+
+            Assert.Single(catalog.Examples);
+            Assert.Equal("demo", catalog.Examples[0].Id);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+}
