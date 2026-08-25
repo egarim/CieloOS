@@ -245,3 +245,128 @@ public class RecorderSurfaceTests
         }
     }
 }
+
+public class ExampleRunnerTests
+{
+    [Fact]
+    public void Two_runs_cannot_both_claim_the_same_person()
+    {
+        // Read-then-write is not atomic just because the dictionary is. Two
+        // requests a millisecond apart could both see "nothing running" and both
+        // start driving the same desktop.
+        var runner = new ExampleRunner();
+        var claims = 0;
+
+        Parallel.For(0, 64, index =>
+        {
+            if (runner.TryClaim("joche", Run($"run-{index}", ExampleRunState.Running)))
+            {
+                Interlocked.Increment(ref claims);
+            }
+        });
+
+        Assert.Equal(1, claims);
+    }
+
+    [Fact]
+    public void A_finished_run_releases_the_claim()
+    {
+        // The gate has to open again, or the person gets one demo per restart.
+        var runner = new ExampleRunner();
+        Assert.True(runner.TryClaim("joche", Run("first", ExampleRunState.Running)));
+        Assert.False(runner.TryClaim("joche", Run("second", ExampleRunState.Running)));
+
+        runner.Update("joche", current => current with { State = ExampleRunState.Finished });
+
+        Assert.True(runner.TryClaim("joche", Run("third", ExampleRunState.Running)));
+    }
+
+    [Fact]
+    public void A_run_awaiting_a_person_still_holds_the_claim()
+    {
+        var runner = new ExampleRunner();
+        Assert.True(runner.TryClaim("joche", Run("first", ExampleRunState.AwaitingApproval)));
+        Assert.False(runner.TryClaim("joche", Run("second", ExampleRunState.Running)));
+    }
+
+    [Fact]
+    public void One_persons_run_does_not_block_anothers()
+    {
+        var runner = new ExampleRunner();
+        Assert.True(runner.TryClaim("joche", Run("hers", ExampleRunState.Running)));
+        Assert.True(runner.TryClaim("yulia", Run("his", ExampleRunState.Running)));
+    }
+
+    [Fact]
+    public void The_session_is_bound_into_every_step()
+    {
+        var bound = ExampleSubstitution.Bind(
+            new Dictionary<string, string> { ["id"] = "{session}", ["url"] = "https://example.com" },
+            "joche-abc123");
+
+        Assert.Equal("joche-abc123", bound["id"]);
+        Assert.Equal("https://example.com", bound["url"]);
+    }
+
+    [Fact]
+    public void Every_shipped_example_names_surfaces_that_exist()
+    {
+        // The failure this prevents is the one that makes demos worthless: a
+        // renamed surface leaves an example that still reads convincingly and
+        // refuses at step one. The examples are also the installation's acceptance
+        // test, so a stale one is worse than none.
+        var catalog = new FileExampleCatalog(TestRepository.Root());
+        var surfaces = TestRepository.Surfaces();
+
+        Assert.NotEmpty(catalog.Examples);
+        foreach (var example in catalog.Examples)
+        {
+            Assert.NotEmpty(example.Steps);
+            foreach (var step in example.Steps)
+            {
+                var surface = surfaces.Find(step.Surface);
+                Assert.True(surface is not null, $"{example.Id}: no surface '{step.Surface}'");
+                if (step.Kind == "command")
+                {
+                    Assert.True(surface!.Commands.ContainsKey(step.Operation),
+                        $"{example.Id}: '{step.Surface}' has no command '{step.Operation}'");
+                }
+                Assert.False(string.IsNullOrWhiteSpace(step.Note), $"{example.Id}: a step with nothing to say");
+            }
+        }
+    }
+
+    [Fact]
+    public void Deleting_the_examples_folder_makes_it_stay_deleted()
+    {
+        // Bumping the version would otherwise resurrect a folder somebody removed
+        // on purpose: the new version's marker is absent, so the seed reads like a
+        // first run. Deleting something twice to make it stay gone is the computer
+        // arguing with its owner.
+        var seed = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "cielo-examples-seed"));
+
+        Assert.Contains(".cielo-examples-seeded", seed);
+        Assert.Contains("! -d \"$TARGET\"", seed);
+    }
+
+    private static ExampleRun Run(string id, ExampleRunState state) =>
+        new(id, "example", "Example", null, state, 0, 3, "", Array.Empty<ExampleStepReport>());
+}
+
+public class ApprovalHonestyTests
+{
+    [Fact]
+    public void An_approved_command_that_did_not_work_is_not_recorded_as_success()
+    {
+        // The audit stamped Success on every approval, whatever the executor
+        // returned. So a navigation the person consented to, and which was then
+        // refused downstream, read as if it had worked — in the one place people
+        // go to find out what actually happened.
+        var source = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "src", "backend", "WorkspaceRuntime.Application", "RuntimeServices.cs"));
+
+        Assert.Contains("result.Executed ? AuditOutcome.Success : AuditOutcome.Blocked", source);
+        Assert.Contains("did not take effect", source);
+    }
+}

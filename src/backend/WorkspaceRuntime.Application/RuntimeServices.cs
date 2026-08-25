@@ -327,7 +327,18 @@ public sealed class AgentRuntime
             var result = await executor.ExecuteAsync(request!, cancellationToken);
             var resolved = approval with { Status = ApprovalStatus.Approved, ResolvedAt = DateTimeOffset.UtcNow };
             store.UpsertApproval(resolved);
-            store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request!.AgentId, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, "Human approved request.", request.Id, actor, onBehalfOf));
+            // Approved is not the same as happened. This recorded Success for every
+            // approval, whatever the executor returned — so a navigation the person
+            // consented to and which was then refused downstream read, in the one
+            // place people go to find out what occurred, as if it had worked. The
+            // outcome now follows the execution, and the reason travels with it.
+            store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, approval.UserId, request!.AgentId,
+                $"{request.ToolName}.{request.Operation}",
+                result.Executed ? AuditOutcome.Success : AuditOutcome.Blocked,
+                result.Executed
+                    ? $"Human approved request. {Truncate(result.Message, 160)}"
+                    : $"Human approved it, but it did not take effect: {Truncate(result.Message, 160)}",
+                request.Id, actor, onBehalfOf));
             return new ToolRequestResultDto(PolicyDecision.Allow, "Human approved request.", result, resolved, store.AuditEvents);
         }
         finally

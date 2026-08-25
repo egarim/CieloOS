@@ -68,13 +68,24 @@ public sealed class ExampleRunner
 
     public bool TryClaim(string owner, ExampleRun run)
     {
-        var existing = runs.GetValueOrDefault(owner);
-        if (existing is not null && existing.State is ExampleRunState.Running or ExampleRunState.AwaitingApproval)
-        {
-            return false;
-        }
-        runs[owner] = run;
-        return true;
+        // Read-then-write is not atomic just because the dictionary is: two
+        // requests a millisecond apart could both see "nothing running" and both
+        // start driving the same desktop. AddOrUpdate runs its factory under the
+        // bucket lock, so exactly one of them wins.
+        var claimed = false;
+        runs.AddOrUpdate(
+            owner,
+            _ => { claimed = true; return run; },
+            (_, existing) =>
+            {
+                if (existing.State is ExampleRunState.Running or ExampleRunState.AwaitingApproval)
+                {
+                    return existing;
+                }
+                claimed = true;
+                return run;
+            });
+        return claimed;
     }
 
     public void Update(string owner, Func<ExampleRun, ExampleRun> change)

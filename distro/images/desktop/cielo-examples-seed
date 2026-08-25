@@ -13,10 +13,24 @@ set -eu
 
 VERSION=1
 MARKER="/config/.cielo-examples-v${VERSION}"
+# Version-independent: "this session has been offered examples at least once".
+# Without it, bumping VERSION would resurrect a folder somebody deleted on
+# purpose — the new version's marker is absent, so the seed would look like a
+# first run and put it all back. Deleting a folder twice to make it stay gone is
+# the computer arguing with its owner.
+EVER="/config/.cielo-examples-seeded"
 TARGET="/config/Desktop/Examples"
 SOURCE="/opt/cielo-examples"
 
 if [[ -f "$MARKER" ]]; then
+  exit 0
+fi
+
+if [[ -f "$EVER" && ! -d "$TARGET" ]]; then
+  # Seeded before, and the folder is gone: that was a decision. Record that this
+  # version was considered so the check does not run again, and leave it deleted.
+  echo "examples were removed by the user; not restoring" > "$MARKER"
+  chown "${PUID:-911}:${PGID:-911}" "$MARKER"
   exit 0
 fi
 
@@ -38,4 +52,5 @@ cp -r "$SOURCE"/. "$TARGET"/
 # a folder they cannot open.
 chown -R "${PUID:-911}:${PGID:-911}" /config/Desktop
 echo "seeded examples v${VERSION}" > "$MARKER"
-chown "${PUID:-911}:${PGID:-911}" "$MARKER"
+echo "examples have been seeded here at least once" > "$EVER"
+chown "${PUID:-911}:${PGID:-911}" "$MARKER" "$EVER"

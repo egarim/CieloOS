@@ -2067,7 +2067,34 @@ public static async Task RunAsync(
                     return;
                 }
 
-                reports.Add(new ExampleStepReport(number, step.Note, "approved", "You approved it, and it ran."));
+                // Approved is not the same as succeeded. Consenting to a navigation
+                // does not mean it worked — it can still be refused downstream (a
+                // cross-origin redirect, say), and reporting "it ran" would be a
+                // line that cannot fail, printed next to a step that just did.
+                // The audit trail is the witness: the command's own record.
+                var record = store.AuditEvents.FirstOrDefault(entry =>
+                    entry.CorrelationId == approval.ToolRequestId && entry.Outcome != AuditOutcome.PendingApproval);
+                var ranCleanly = record is null || record.Outcome == AuditOutcome.Success;
+
+                reports.Add(new ExampleStepReport(number, step.Note,
+                    ranCleanly ? "approved" : "failed",
+                    ranCleanly
+                        ? $"You approved it. {Shorten(record?.Detail ?? "It ran.", 140)}"
+                        : $"You approved it, but it did not work: {Shorten(record!.Detail, 160)}"));
+
+                if (!ranCleanly)
+                {
+                    runner.Update(owner, current => current with
+                    {
+                        State = ExampleRunState.Failed,
+                        Message = $"Step {number} was approved but did not work.",
+                        ApprovalId = null, ApprovalReason = null, ApprovalHash = null,
+                        Reports = reports.ToArray(),
+                    });
+                    Publish();
+                    return;
+                }
+
                 runner.Update(owner, current => current with
                 {
                     State = ExampleRunState.Running,
