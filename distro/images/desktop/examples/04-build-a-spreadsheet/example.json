@@ -1,0 +1,18 @@
+{
+  "id": "build-a-spreadsheet",
+  "title": "A document an agent made",
+  "summary": "Builds a small budget through typed commands. Needs no session and no model provider.",
+  "needsSession": false,
+  "steps": [
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "A1", "value": "Category" }, "note": "Write a header" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "B1", "value": "Amount" }, "note": "And the second column" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "A2", "value": "Rent" }, "note": "First expense" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "B2", "value": "1200" }, "note": "Its amount" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "A3", "value": "Food" }, "note": "Second expense" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "B3", "value": "430" }, "note": "Its amount" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "A4", "value": "Transport" }, "note": "Third expense" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "B4", "value": "95" }, "note": "Its amount" },
+    { "surface": "spreadsheet", "operation": "set-cell", "input": { "address": "A5", "value": "Total" }, "note": "Label the total" },
+    { "surface": "spreadsheet", "operation": "sum", "input": { "source": "B2,B3,B4", "target": "B5" }, "note": "Sum the column — a command, not a keystroke" }
+  ]
+}

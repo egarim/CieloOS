@@ -1,0 +1,26 @@
+{
+  "id": "record-a-demo",
+  "title": "Watch the agent film itself working",
+  "summary": "Starts a screen recording, drives a browser on this desktop, stops, and leaves you an MP4.",
+  "needsSession": true,
+  "steps": [
+    { "surface": "recorder", "operation": "start",
+      "input": { "id": "{session}", "seconds": "180", "name": "record-a-demo" },
+      "note": "Start filming this desktop — a red RECORDING marker appears" },
+    { "surface": "browser", "operation": "navigate",
+      "input": { "id": "{session}", "url": "https://example.com" },
+      "note": "Open a page — this one needs your permission" },
+    { "surface": "browser", "operation": "navigate",
+      "input": { "id": "{session}", "url": "https://www.iana.org/help/example-domains" },
+      "note": "Go somewhere else — it asks again, every time, for now" },
+    { "kind": "observe", "surface": "browser", "operation": "read",
+      "input": { "id": "{session}" },
+      "note": "Read the page the way the agent does" },
+    { "surface": "browser", "operation": "back",
+      "input": { "id": "{session}" },
+      "note": "Go back — allowed without asking, because it cannot reach anywhere new" },
+    { "surface": "recorder", "operation": "stop",
+      "input": { "id": "{session}" },
+      "note": "Stop filming and close the file" }
+  ]
+}

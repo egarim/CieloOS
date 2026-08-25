@@ -83,6 +83,8 @@ builder.Services.AddSingleton<ITokenAuthenticator>(provider =>
 builder.Services.AddSingleton<ISetupService>(provider =>
     new SetupService(provider.GetRequiredService<IRuntimeStore>(), provider.GetRequiredService<ITokenAuthenticator>()));
 builder.Services.AddSingleton<ISurfaceRegistry>(_ => new FileSurfaceRegistry(repositoryRoot));
+builder.Services.AddSingleton<IExampleCatalog>(_ => new FileExampleCatalog(repositoryRoot));
+builder.Services.AddSingleton<ExampleRunner>();
 builder.Services.AddSingleton<IRuntimeEventStream, ChannelRuntimeEventStream>();
 builder.Services.AddSingleton<IPolicyEngine, ManifestPolicyEngine>();
 builder.Services.AddSingleton<SpreadsheetSandboxExecutor>();
@@ -1070,6 +1072,83 @@ app.MapGet("/api/sessions/{id}/elements", async (string id, HttpContext context,
         : Results.Json(new { error = elements.Error }, statusCode: StatusCodes.Status409Conflict);
 });
 
+// The examples catalogue: what this machine can do, as something you press.
+app.MapGet("/api/examples", (IExampleCatalog catalog, ExampleRunner runner, HttpContext context) =>
+{
+    var caller = Caller(context);
+    return Results.Ok(new
+    {
+        examples = catalog.Examples.Select(example => new
+        {
+            example.Id,
+            example.Title,
+            example.Summary,
+            example.NeedsSession,
+            steps = example.Steps.Count
+        }),
+        current = runner.Current(caller.Slug)
+    });
+});
+
+// Where a run has got to. Polled by the panel for the progress bar: the steps are
+// scripted, so this is a real position rather than a spinner.
+app.MapGet("/api/examples/run", (ExampleRunner runner, HttpContext context) =>
+    Results.Ok(new { current = runner.Current(Caller(context).Slug) }));
+
+app.MapPost("/api/examples/{id}/run", async (
+    string id, ExampleRunRequest request, HttpContext context,
+    IExampleCatalog catalog, ExampleRunner runner, AgentRuntime runtime,
+    IRuntimeStore store, ISessionBackend sessions, IBrowserBackend browser,
+    IRuntimeEventStream events, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    if (catalog.Find(id) is not { } example)
+    {
+        return Results.NotFound(new { error = $"No example '{id}'." });
+    }
+
+    string? sessionId = null;
+    if (example.NeedsSession)
+    {
+        sessionId = request.SessionId;
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return Results.BadRequest(new { error = "This example runs on a desktop session; choose one." });
+        }
+        var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == sessionId);
+        if (target is null)
+        {
+            return Results.NotFound(new { error = $"Session '{sessionId}' not found." });
+        }
+        // The bus enforces this too, on every step. Checking here as well means the
+        // person gets one clear refusal instead of watching a demo fail at step 1.
+        if (!Ownership.CanAccessHome(caller, target.Owner, store))
+        {
+            return Results.Json(new { error = $"'{caller.Slug}' may not run an example on a session owned by '{target.Owner}'." },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
+
+    var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
+    var run = new ExampleRun(
+        Guid.NewGuid().ToString("N"), example.Id, example.Title, sessionId,
+        ExampleRunState.Running, 0, example.Steps.Count,
+        "Starting…", Array.Empty<ExampleStepReport>());
+
+    if (!runner.TryClaim(caller.Slug, run))
+    {
+        return Results.Conflict(new { error = "An example is already running. Let it finish, or answer the prompt it is waiting on." });
+    }
+
+    // Detached on purpose: a run drives a desktop for a minute or more, and the
+    // panel follows it by polling. Holding the request open would tie the demo to
+    // one browser tab surviving.
+    _ = Task.Run(() => ExampleRunning.RunAsync(example, run, caller, userId, agentId, sessionId,
+        runner, runtime, store, browser, events), CancellationToken.None);
+
+    return Results.Ok(new { current = runner.Current(caller.Slug) });
+});
+
 // Is this session being recorded, and what has it captured so far? The gated read
 // that pairs with the `recorder` surface — and the answer a person deserves before
 // they take a seat at someone else's desktop.
@@ -1900,6 +1979,169 @@ public sealed record AddProviderRequest(
     List<string>? DefaultFor);
 
 public sealed record SetDefaultRequest(string? Capability, string? ProviderId);
+
+public static class ExampleRunning
+{
+// Walk an example's steps through the ordinary bus, pausing where a human has to
+// decide. The pause IS the demo: this machine stops and asks, and watching that
+// happen once explains more than a paragraph about it.
+public static async Task RunAsync(
+    Example example, ExampleRun run, RuntimePrincipal caller, Guid userId, Guid agentId,
+    string? sessionId, ExampleRunner runner, AgentRuntime runtime, IRuntimeStore store,
+    IBrowserBackend browser, IRuntimeEventStream events)
+{
+    var owner = caller.Slug;
+    var reports = new List<ExampleStepReport>();
+
+    void Publish() => events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+
+    for (var index = 0; index < example.Steps.Count; index++)
+    {
+        var step = example.Steps[index];
+        var number = index + 1;
+        var input = ExampleSubstitution.Bind(step.Input, sessionId);
+
+        runner.Update(owner, current => current with
+        {
+            State = ExampleRunState.Running,
+            Step = number,
+            Message = step.Note,
+            Reports = reports.ToArray(),
+        });
+        Publish();
+
+        try
+        {
+            // An "observe" step is a gated READ, never a mutation — it exists so a
+            // demo can show what the agent just perceived.
+            if (string.Equals(step.Kind, "observe", StringComparison.Ordinal))
+            {
+                var detail = step.Operation switch
+                {
+                    "read" => await browser.ReadAsync(sessionId ?? "", CancellationToken.None) is { Ok: true } text
+                        ? $"{text.Url} — \"{Shorten(text.Text, 160)}\""
+                        : "The page could not be read.",
+                    "elements" => await browser.ElementsAsync(sessionId ?? "", CancellationToken.None) is { Ok: true } list
+                        ? $"{list.Elements.Count} actionable element(s): "
+                          + string.Join(", ", list.Elements.Take(4).Select(element => $"{element.Role} '{element.Name}'"))
+                        : "The page could not be observed.",
+                    _ => $"Unknown observation '{step.Operation}'."
+                };
+                reports.Add(new ExampleStepReport(number, step.Note, "observed", detail));
+                continue;
+            }
+
+            var result = await runtime.SubmitAsync(
+                new SubmitToolRequestDto(userId, agentId, step.Surface, step.Operation,
+                    new Dictionary<string, string>(input, StringComparer.Ordinal)),
+                caller, CancellationToken.None);
+
+            if (result.Decision == PolicyDecision.RequireApproval && result.Approval is { } approval)
+            {
+                runner.Update(owner, current => current with
+                {
+                    State = ExampleRunState.AwaitingApproval,
+                    Message = step.Note,
+                    ApprovalId = approval.Id,
+                    ApprovalReason = approval.Reason,
+                    ApprovalHash = approval.RequestHash,
+                    Reports = reports.ToArray(),
+                });
+                Publish();
+
+                // Approving RUNS the command, so there is nothing to resubmit —
+                // wait for the person, then read what their answer was.
+                var resolved = await WaitForApprovalAsync(store, approval.Id);
+                if (resolved != ApprovalStatus.Approved)
+                {
+                    reports.Add(new ExampleStepReport(number, step.Note, "declined",
+                        "You said no, so the example stopped here. That is the feature working."));
+                    runner.Update(owner, current => current with
+                    {
+                        State = ExampleRunState.Finished,
+                        Message = "Stopped, because you declined a step.",
+                        ApprovalId = null, ApprovalReason = null, ApprovalHash = null,
+                        Reports = reports.ToArray(),
+                    });
+                    Publish();
+                    return;
+                }
+
+                reports.Add(new ExampleStepReport(number, step.Note, "approved", "You approved it, and it ran."));
+                runner.Update(owner, current => current with
+                {
+                    State = ExampleRunState.Running,
+                    ApprovalId = null, ApprovalReason = null, ApprovalHash = null,
+                });
+                continue;
+            }
+
+            var executed = result.Execution;
+            var outcome = result.Decision == PolicyDecision.Deny ? "refused"
+                : executed is { Executed: true } ? "done" : "failed";
+            reports.Add(new ExampleStepReport(number, step.Note, outcome,
+                executed?.Message ?? result.Reason));
+
+            // A refusal is sometimes the point (example 03 shows one), but a step
+            // that simply failed should stop the run rather than cascade.
+            if (outcome == "failed")
+            {
+                runner.Update(owner, current => current with
+                {
+                    State = ExampleRunState.Failed,
+                    Message = $"Step {number} did not work: {Shorten(executed?.Message ?? result.Reason, 200)}",
+                    Reports = reports.ToArray(),
+                });
+                Publish();
+                return;
+            }
+        }
+        catch (Exception error)
+        {
+            reports.Add(new ExampleStepReport(number, step.Note, "failed", error.Message));
+            runner.Update(owner, current => current with
+            {
+                State = ExampleRunState.Failed,
+                Message = $"Step {number} threw: {Shorten(error.Message, 200)}",
+                Reports = reports.ToArray(),
+            });
+            Publish();
+            return;
+        }
+    }
+
+    runner.Update(owner, current => current with
+    {
+        State = ExampleRunState.Finished,
+        Step = example.Steps.Count,
+        Message = "Finished.",
+        Reports = reports.ToArray(),
+    });
+    Publish();
+}
+
+static async Task<ApprovalStatus> WaitForApprovalAsync(IRuntimeStore store, Guid approvalId)
+{
+    // Ten minutes is long enough to answer a prompt and short enough that a demo
+    // nobody answered does not hold the runner forever.
+    var deadline = DateTimeOffset.UtcNow.AddMinutes(10);
+    while (DateTimeOffset.UtcNow < deadline)
+    {
+        var approval = store.Approvals.FirstOrDefault(record => record.Id == approvalId);
+        if (approval is not null && approval.Status != ApprovalStatus.Pending)
+        {
+            return approval.Status;
+        }
+        await Task.Delay(500);
+    }
+    return ApprovalStatus.Rejected;
+}
+
+static string Shorten(string value, int limit) =>
+    string.IsNullOrEmpty(value) ? "" : value.Length <= limit ? value : value[..limit] + "…";
+}
+
+public sealed record ExampleRunRequest(string? SessionId, Guid? AgentId);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);
 public sealed record DesktopRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);

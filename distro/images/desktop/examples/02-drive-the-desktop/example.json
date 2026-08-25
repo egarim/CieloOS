@@ -1,0 +1,20 @@
+{
+  "id": "drive-the-desktop",
+  "title": "Pointer and keyboard on a real desktop",
+  "summary": "Moves and clicks on this XFCE session, then asks before pressing a key.",
+  "needsSession": true,
+  "steps": [
+    { "surface": "desktop", "operation": "click",
+      "input": { "id": "{session}", "x": "300", "y": "260" },
+      "note": "Click the desktop — watch the cursor move" },
+    { "surface": "desktop", "operation": "click",
+      "input": { "id": "{session}", "x": "760", "y": "420" },
+      "note": "And again, somewhere else" },
+    { "surface": "desktop", "operation": "click",
+      "input": { "id": "{session}", "x": "500", "y": "620" },
+      "note": "Every one of these is recorded against who asked for it" },
+    { "surface": "desktop", "operation": "key",
+      "input": { "id": "{session}", "keysym": "Escape" },
+      "note": "Press Escape — a keystroke needs your permission, even a harmless one" }
+  ]
+}

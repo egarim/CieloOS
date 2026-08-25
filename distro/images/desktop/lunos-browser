@@ -36,7 +36,14 @@ import urllib.request
 import websockets
 
 PORT = int(os.environ.get("CIELO_BROWSER_PORT", "9333"))
-PROFILE = os.environ.get("CIELO_BROWSER_PROFILE", "/config/.cielo-agent-browser")
+# Per SESSION, not per home. The home volume is shared by every session an owner
+# has open, and Chromium locks a profile directory to one instance — so a second
+# desktop session would find the profile "in use by another Chromium process on
+# another computer" and simply never get a DevTools endpoint. The container's
+# hostname is the session's own identity, and it is already unique.
+PROFILE = os.environ.get(
+    "CIELO_BROWSER_PROFILE",
+    f"/config/.cielo-agent-browser/{os.uname().nodename}")
 BINARY = "/usr/bin/chromium-browser"
 
 # The roles worth showing an agent: things you can act on. The full AX tree is

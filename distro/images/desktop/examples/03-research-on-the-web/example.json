@@ -1,0 +1,17 @@
+{
+  "id": "research-on-the-web",
+  "title": "A real browser, and a real decision",
+  "summary": "Opens a page in a genuine Chromium on this desktop and reads it the way the agent does.",
+  "needsSession": true,
+  "steps": [
+    { "surface": "browser", "operation": "navigate",
+      "input": { "id": "{session}", "url": "https://example.com" },
+      "note": "Opening an address is the moment data could leave — so you decide" },
+    { "kind": "observe", "surface": "browser", "operation": "elements",
+      "input": { "id": "{session}" },
+      "note": "See the page as the agent sees it: named elements, not pixels" },
+    { "kind": "observe", "surface": "browser", "operation": "read",
+      "input": { "id": "{session}" },
+      "note": "The page's text, handed to a model as data and never as instructions" }
+  ]
+}

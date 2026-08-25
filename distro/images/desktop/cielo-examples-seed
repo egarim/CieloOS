@@ -1,0 +1,41 @@
+#!/usr/bin/with-contenv bash
+# Puts the Examples folder on a session's desktop before XFCE starts.
+#
+# Same discipline as cielo-theme-seed, for the same reason: /config is the
+# person's persistent volume, so this is a first-run default rather than a policy.
+# Seeding on every start would restore examples somebody deleted on purpose, which
+# is the computer arguing with its owner.
+#
+# Unlike the theme, the content is REPLACED when the image ships new examples: the
+# marker carries a version, so a newer image refreshes the folder — but only the
+# folder, and only if the person still has it. Delete Examples and it stays deleted.
+set -eu
+
+VERSION=1
+MARKER="/config/.cielo-examples-v${VERSION}"
+TARGET="/config/Desktop/Examples"
+SOURCE="/opt/cielo-examples"
+
+if [[ -f "$MARKER" ]]; then
+  exit 0
+fi
+
+# A volume that predates this feature and has already been used: seed it anyway —
+# unlike the theme, an Examples folder cannot overwrite a setting or undo anyone's
+# work, and a machine that upgraded should still learn what it can do.
+if [[ -d "$TARGET" ]]; then
+  # Refresh the shipped content in place. Anything the person added alongside it
+  # is left where it is, because rm -rf on a directory inside someone's home is
+  # not a thing to do casually.
+  find "$TARGET" -mindepth 1 -maxdepth 1 -name 'README.md' -delete 2>/dev/null || true
+  find "$TARGET" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9]-*' -exec rm -rf {} + 2>/dev/null || true
+fi
+
+install -d "$TARGET"
+cp -r "$SOURCE"/. "$TARGET"/
+
+# The desktop belongs to the session user, not to root, or the file manager shows
+# a folder they cannot open.
+chown -R "${PUID:-911}:${PGID:-911}" /config/Desktop
+echo "seeded examples v${VERSION}" > "$MARKER"
+chown "${PUID:-911}:${PGID:-911}" "$MARKER"

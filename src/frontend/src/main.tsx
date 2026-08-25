@@ -199,7 +199,7 @@ function App() {
   const [newSessionProfile, setNewSessionProfile] = React.useState("agent-console");
   const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [selectedDesk, setSelectedDesk] = React.useState<string | null>(null);
-  const [view, setView] = React.useState<"desk" | "models">("desk");
+  const [view, setView] = React.useState<"desk" | "examples" | "models">("desk");
   const [models, setModels] = React.useState<ModelsData | null>(null);
   const [providerForm, setProviderForm] = React.useState<ProviderForm>(emptyProviderForm);
   const [modelsMsg, setModelsMsg] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -1110,6 +1110,7 @@ function App() {
 
       <nav className="viewNav">
         <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desks</button>
+        <button className={view === "examples" ? "active" : ""} onClick={() => setView("examples")}>Examples</button>
         <button className={view === "models" ? "active" : ""} onClick={() => setView("models")}>Models</button>
       </nav>
 
@@ -1121,7 +1122,9 @@ function App() {
         </p>
       )}
 
-      {view === "models" ? (
+      {view === "examples" ? (
+        <ExamplesView sessions={sessions} />
+      ) : view === "models" ? (
         <ModelsView
           keys={keys}
           keyName={keyName}
@@ -1892,3 +1895,162 @@ function ModelsView({
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
+
+type ExampleSummary = { id: string; title: string; summary: string; needsSession: boolean; steps: number };
+type ExampleReport = { number: number; note: string; outcome: string; detail: string };
+type ExampleRun = {
+  runId: string; exampleId: string; title: string; sessionId: string | null;
+  state: "Running" | "AwaitingApproval" | "Finished" | "Failed";
+  step: number; totalSteps: number; message: string; reports: ExampleReport[];
+  approvalId?: string | null; approvalReason?: string | null; approvalHash?: string | null;
+};
+
+// Things this machine can do, that you press rather than read.
+//
+// The steps are scripted, so the progress bar shows a real position rather than a
+// spinner that means "something is happening". And when a step needs consent the
+// run STOPS here and asks — which is the most honest thing these demos show, so it
+// is given the whole width rather than tucked into a corner.
+function ExamplesView({ sessions }: { sessions: SessionView[] }) {
+  const [examples, setExamples] = React.useState<ExampleSummary[]>([]);
+  const [run, setRun] = React.useState<ExampleRun | null>(null);
+  const [session, setSession] = React.useState("");
+  const [error, setError] = React.useState("");
+
+  const desktops = sessions.filter((candidate) => candidate.kind === "desktop" && candidate.status === "running");
+
+  React.useEffect(() => {
+    api<{ examples: ExampleSummary[]; current: ExampleRun | null }>("/api/examples")
+      .then((payload) => { setExamples(payload.examples); setRun(payload.current); })
+      .catch((problem) => setError(String(problem)));
+  }, []);
+
+  React.useEffect(() => {
+    if (!session && desktops.length > 0) setSession(desktops[0].id);
+  }, [desktops, session]);
+
+  // Poll only while something is happening. A demo the user is not running should
+  // not keep a request in flight forever.
+  const live = run?.state === "Running" || run?.state === "AwaitingApproval";
+  React.useEffect(() => {
+    if (!live) return;
+    const timer = window.setInterval(() => {
+      api<{ current: ExampleRun | null }>("/api/examples/run")
+        .then((payload) => setRun(payload.current))
+        .catch(() => undefined);
+    }, 900);
+    return () => window.clearInterval(timer);
+  }, [live]);
+
+  async function start(example: ExampleSummary) {
+    setError("");
+    if (example.needsSession && !session) {
+      setError("This example runs on a desktop session, and there is no running desktop to use. Open one from Desks first.");
+      return;
+    }
+    try {
+      const payload = await api<{ current: ExampleRun }>(`/api/examples/${example.id}/run`, {
+        method: "POST",
+        body: JSON.stringify({ sessionId: example.needsSession ? session : null }),
+      });
+      setRun(payload.current);
+    } catch (problem) {
+      setError(String(problem));
+    }
+  }
+
+  async function resolve(decision: "approve" | "reject") {
+    if (!run?.approvalId) return;
+    try {
+      await api(`/api/approvals/${run.approvalId}/${decision}`, {
+        method: "POST",
+        body: JSON.stringify({ requestHash: run.approvalHash }),
+      });
+    } catch (problem) {
+      setError(String(problem));
+    }
+  }
+
+  const percent = run && run.totalSteps > 0 ? Math.round((run.step / run.totalSteps) * 100) : 0;
+
+  return (
+    <section className="panel examples">
+      <h2>Examples</h2>
+      <p className="hint">
+        Each of these runs real commands through the same checks as everything else on this
+        machine. Nothing here is a special demo path — if an example works, the machine works.
+      </p>
+
+      {desktops.length > 0 && (
+        <label className="exampleSession">
+          Run desktop examples on{" "}
+          <select value={session} onChange={(event) => setSession(event.target.value)}>
+            {desktops.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>{candidate.id}</option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {error && <p className="decision deny">{error}</p>}
+
+      {run && (
+        <div className={`exampleRun ${run.state.toLowerCase()}`} data-automation-id="example-run">
+          <div className="exampleRunHead">
+            <strong>{run.title}</strong>
+            <span>{run.state === "Finished" ? "Finished" : run.state === "Failed" ? "Stopped" : `Step ${run.step} of ${run.totalSteps}`}</span>
+          </div>
+          <div className="progressTrack" role="progressbar" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+            <div className={`progressFill ${run.state === "Failed" ? "bad" : ""}`} style={{ width: `${percent}%` }} />
+          </div>
+          <p className="exampleMessage">{run.message}</p>
+
+          {run.state === "AwaitingApproval" && (
+            <div className="exampleApproval" data-automation-id="example-approval">
+              <p><strong>This step needs your permission.</strong></p>
+              <p className="approvalReason">{run.approvalReason}</p>
+              <div className="exampleApprovalActions">
+                <button onClick={() => resolve("approve")} data-automation-id="example-approve">Approve and continue</button>
+                <button className="ghost" onClick={() => resolve("reject")}>Decline</button>
+              </div>
+            </div>
+          )}
+
+          {run.reports.length > 0 && (
+            <ol className="exampleSteps">
+              {run.reports.map((report) => (
+                <li key={report.number} className={report.outcome}>
+                  <span className="stepNote">{report.note}</span>
+                  <span className="stepDetail">{report.detail}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+
+      {examples.length === 0 ? (
+        <p className="hint">This installation does not carry the examples folder.</p>
+      ) : (
+        <ul className="exampleList">
+          {examples.map((example) => (
+            <li key={example.id}>
+              <div>
+                <strong>{example.title}</strong>
+                <p>{example.summary}</p>
+                <span className="hint">{example.steps} steps{example.needsSession ? " · needs a desktop session" : " · runs anywhere"}</span>
+              </div>
+              <button
+                disabled={live}
+                onClick={() => start(example)}
+                data-automation-id={`example-run-${example.id}`}
+              >
+                Run
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

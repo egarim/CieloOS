@@ -49,6 +49,15 @@ RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false upd
 COPY lunos-recorder /usr/local/bin/lunos-recorder
 RUN chmod +x /usr/local/bin/lunos-recorder
 
+# Runnable examples on the desktop. They live outside /config for the same reason
+# the theme templates do: /config is the person's volume, and the seed script
+# decides once what goes into it. Each example names the surfaces it exercises, so
+# the catalogue is data — and the same files are how a fresh installation proves it
+# can actually drive this machine.
+COPY examples/ /opt/cielo-examples/
+COPY cielo-examples-seed /custom-cont-init.d/98-cielo-examples
+RUN chmod +x /custom-cont-init.d/98-cielo-examples
+
 # The CieloOS look: light, macOS-adjacent, and all from Ubuntu universe, so it
 # builds identically on both architectures with nothing fetched from GitHub.
 # Exact names matter and are easy to get wrong — the light variants are
