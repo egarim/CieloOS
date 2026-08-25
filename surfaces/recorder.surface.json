@@ -1,0 +1,62 @@
+{
+  "schema": 2,
+  "kind": "surface",
+  "id": "recorder",
+  "displayName": "Session Recorder",
+  "targetsSession": true,
+  "executor": "recorder",
+  "state": {
+    "document": "surface:recorder",
+    "revisioned": false,
+    "shape": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  "commands": {
+    "start": {
+      "displayName": "Start recording this session",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": true,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" },
+          "seconds": { "type": "string", "pattern": "^[0-9]{1,4}$" },
+          "name": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "An agent may record the session it is working in, because that is the point: footage of the work it just did, to be edited into a tutorial afterwards. `targetsSession` means the bus has already established that this session belongs to the caller, so 'record a session' can only ever mean 'record my own'. The recording is a file in the owner's own home — never uploaded, never sent to a model — so producing it does not cross the boundary that ISessionVisionConsent exists to hold; anything that later SENDS one somewhere does, and must ask separately. Two limits are structural rather than advisory: a hard duration ceiling passed to ffmpeg itself, so a runtime that dies without stopping cannot leave a process filling the home volume, and an on-screen recording marker, because a person may take a seat at a session that is already recording and must be able to see that without being told."
+      }
+    },
+    "stop": {
+      "displayName": "Stop recording",
+      "exposedToAgent": true,
+      "requiresHuman": false,
+      "mutatesState": true,
+      "reversible": false,
+      "dryRun": true,
+      "validWhen": "always",
+      "input": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9-]{1,64}$" }
+        },
+        "required": ["id"],
+        "additionalProperties": false
+      },
+      "policy": {
+        "defaultDecision": "Allow",
+        "reason": "Ending a recording of one's own session takes nothing away and removes the on-screen marker. It reports a SHORT file as a failure rather than a success: ffmpeg exits 0 after the X display is resized out from under it — which is what happens when a viewer connects — so the encoded duration is the only honest witness that the footage is whole."
+      }
+    }
+  }
+}

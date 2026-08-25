@@ -36,6 +36,19 @@ RUN chmod +x /usr/local/bin/lunos-atspi
 COPY lunos-browser /usr/local/bin/lunos-browser
 RUN chmod +x /usr/local/bin/lunos-browser
 
+# The `recorder` surface: capture the session's desktop to an MP4 so the agent can
+# turn the work it just did into a tutorial. The base image already ships the
+# FFmpeg 8.x runtime libraries and libx264 (ONLYOFFICE pulls them in), so the CLI
+# itself costs ~5 MB rather than a codec stack. x11grab comes with it, and
+# x11-utils supplies xdpyinfo (the display geometry, which is NOT fixed — Selkies
+# re-modes the display when a viewer connects) and xmessage for the on-screen
+# recording marker.
+RUN apt-get -o Acquire::Check-Date=false -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends ffmpeg x11-utils x11-xserver-utils \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+COPY lunos-recorder /usr/local/bin/lunos-recorder
+RUN chmod +x /usr/local/bin/lunos-recorder
+
 # The CieloOS look: light, macOS-adjacent, and all from Ubuntu universe, so it
 # builds identically on both architectures with nothing fetched from GitHub.
 # Exact names matter and are easy to get wrong — the light variants are
