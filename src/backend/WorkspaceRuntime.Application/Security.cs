@@ -43,7 +43,11 @@ public static class AccessPolicy
         // when you have no session yet. Its own guard is the password.
         if (path == "/" || path == "/api/branding" || path == "/api/inference/status"
             || path == "/api/setup/status" || path == "/api/setup/claim"
-            || path == "/api/desk-profiles" || path == "/api/auth/login")
+            || path == "/api/desk-profiles" || path == "/api/auth/login"
+            // Which languages this machine has been translated into. Public for the
+            // same reason the desk list is: the sign-in screen has to offer it
+            // before anyone has signed in, and it says nothing about who lives here.
+            || path == "/api/languages")
         {
             return AccessLevel.Public;
         }

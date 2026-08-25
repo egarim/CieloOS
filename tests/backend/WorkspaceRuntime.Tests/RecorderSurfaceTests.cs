@@ -634,3 +634,41 @@ public class ShippedToNewInstallationsTests
         }
     }
 }
+
+public class LanguageEndpointTests
+{
+    [Fact]
+    public void Choosing_your_language_is_yours_alone_and_human_only()
+    {
+        // It rides /api/auth/ deliberately: a language decides the locale and
+        // keyboard of your sessions and what the agent answers you in, so it is
+        // yours to set and nobody else's to set for you — including an API key
+        // acting in your name.
+        Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/api/auth/language", "POST"));
+    }
+
+    [Fact]
+    public void The_list_of_languages_is_readable_before_you_sign_in()
+    {
+        // The sign-in screen has to offer it while nobody is signed in. It says
+        // what this machine was translated into, not who lives here.
+        Assert.Equal(AccessLevel.Public, AccessPolicy.Required("/api/languages", "GET"));
+    }
+
+    [Fact]
+    public void Setting_a_language_changes_only_the_language()
+    {
+        // A single-field write, not a whole-user upsert: a request that meant to
+        // change one thing must not be able to overwrite a display name or a slug.
+        var store = new InMemoryRuntimeStore();
+        var user = store.Users[0];
+
+        store.SetLanguage(user.Id, "ru");
+
+        var after = store.Users.First(candidate => candidate.Id == user.Id);
+        Assert.Equal("ru", after.Language);
+        Assert.Equal(user.DisplayName, after.DisplayName);
+        Assert.Equal(user.Slug, after.Slug);
+        Assert.Equal(user.DeskProfile, after.DeskProfile);
+    }
+}

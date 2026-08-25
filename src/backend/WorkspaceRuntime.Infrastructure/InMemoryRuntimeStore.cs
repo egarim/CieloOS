@@ -57,6 +57,15 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public void SetPasswordHash(Guid userId, string hash) => passwords[userId] = hash;
 
+    public void SetLanguage(Guid userId, string language)
+    {
+        var index = users.FindIndex(user => user.Id == userId);
+        if (index >= 0)
+        {
+            users[index] = users[index] with { Language = language };
+        }
+    }
+
     public PlatformUser GetUser(Guid id) => users.Single(user => user.Id == id);
 
     public AgentProfile GetAgent(Guid id) => agents.Single(agent => agent.Id == id);

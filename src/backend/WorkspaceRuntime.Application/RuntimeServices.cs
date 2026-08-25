@@ -36,6 +36,11 @@ public interface IRuntimeStore
     // travelling with an identity that gets serialised to the panel and the API.
     string? PasswordHashFor(Guid userId);
     void SetPasswordHash(Guid userId, string hash);
+
+    // The language a person works in. A single-field write like the password
+    // hash, rather than a whole-user upsert, so nothing else about the person can
+    // be overwritten by a request that only meant to change one thing.
+    void SetLanguage(Guid userId, string language);
     AgentProfile GetAgent(Guid id);
     void UpsertApproval(ApprovalRecord approval);
     ApprovalRecord GetApproval(Guid id);

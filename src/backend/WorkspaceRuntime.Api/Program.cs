@@ -1321,6 +1321,12 @@ app.MapGet("/api/whoami", (HttpContext context) =>
     var deskProfile = DeskProfiles.Resolve(
         runtimeStore.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug)?.DeskProfile);
 
+    // The language travels with whoami for the same reason the desk profile does:
+    // the panel needs it on its first render, and an agent reports its owner's,
+    // because it works at that owner's desk.
+    var language = Languages.Resolve(
+        runtimeStore.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug)?.Language);
+
     return Results.Ok(new
     {
         caller.Slug,
@@ -1328,7 +1334,57 @@ app.MapGet("/api/whoami", (HttpContext context) =>
         kind = caller.Kind.ToString(),
         homes = ownedHomes,
         deskProfile = deskProfile.Id,
-        deskProfileLabel = deskProfile.Label
+        deskProfileLabel = deskProfile.Label,
+        language = language.Code
+    });
+});
+
+// The languages this machine can be used in, so the panel offers what actually
+// exists rather than a list it hopes is translated.
+app.MapGet("/api/languages", () => Results.Ok(new
+{
+    languages = Languages.All.Select(language => new
+    {
+        language.Code,
+        language.EnglishName,
+        language.NativeName
+    })
+}));
+
+// Change the language you work in. Human-only and self-only: a language decides
+// the locale and keyboard of your sessions and what the agent answers you in, so
+// it is yours to set and nobody else's to set for you — including your own agent,
+// which inherits it rather than choosing it.
+app.MapPost("/api/auth/language", (
+    SetLanguageRequest request, HttpContext context, IRuntimeStore store,
+    IRuntimeEventStream events) =>
+{
+    var caller = Caller(context);
+    if (!Languages.IsKnown(request.Language))
+    {
+        return Results.BadRequest(new
+        {
+            error = $"'{request.Language}' is not a language this machine has been translated into.",
+            available = Languages.All.Select(language => language.Code)
+        });
+    }
+
+    var user = store.Users.FirstOrDefault(candidate => candidate.Slug == caller.Slug);
+    if (user is null)
+    {
+        return Results.NotFound(new { error = "No such person." });
+    }
+
+    store.SetLanguage(user.Id, Languages.Resolve(request.Language).Code);
+    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+
+    // Sessions already open keep the locale they started with: their environment
+    // was fixed when the container was created. Say so rather than letting someone
+    // wonder why their desktop is still in the old language.
+    return Results.Ok(new
+    {
+        language = Languages.Resolve(request.Language).Code,
+        appliesToNewSessions = true
     });
 });
 
@@ -1967,6 +2023,8 @@ public sealed record SurfaceCommandRequest(
     Guid? AgentId);
 
 public sealed record ResolveApprovalRequest(string? RequestHash, long? ObservedRevision);
+
+public sealed record SetLanguageRequest(string? Language);
 
 public sealed record SetTokenLimitRequest(string? Scope, string? Subject, long? MonthlyTokens);
 

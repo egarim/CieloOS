@@ -134,6 +134,18 @@ public sealed class EfRuntimeStore : IRuntimeStore
         EfPasswords.Write(context, userId, hash);
     }
 
+    public void SetLanguage(Guid userId, string language)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Users.FirstOrDefault(user => user.Id == userId);
+        if (row is null)
+        {
+            return;
+        }
+        row.Language = language;
+        context.SaveChanges();
+    }
+
 
     public PlatformUser GetUser(Guid id)
     {
