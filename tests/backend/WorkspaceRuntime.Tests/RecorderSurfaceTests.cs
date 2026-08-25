@@ -158,6 +158,21 @@ public class RecorderSurfaceTests
     }
 
     [Fact]
+    public void The_startup_probe_never_outwaits_the_recording()
+    {
+        // The surface accepts one second, and a one-second capture FINISHES inside
+        // a one-second health probe — so "it already exited" was read as "it failed
+        // to start", making the shortest supported length the least reliable one.
+        // The probe is now bounded by the recording, and an exit during it is
+        // judged by the file rather than assumed to be a failure.
+        var helper = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "images", "desktop", "lunos-recorder"));
+
+        Assert.Contains("time.sleep(min(1.0, max(0.2, seconds / 2)))", helper);
+        Assert.DoesNotContain("time.sleep(1.0)", helper);
+    }
+
+    [Fact]
     public void A_pid_alone_is_not_an_identity()
     {
         // The state file OUTLIVES its ffmpeg: the process stops itself at -t while

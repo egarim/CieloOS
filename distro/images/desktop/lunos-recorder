@@ -262,17 +262,25 @@ def start(argv):
     )
 
     # Give it a beat to fail loudly (a bad display, a full disk) rather than
-    # reporting a recording that died a tenth of a second later.
-    time.sleep(1.0)
+    # reporting a recording that died a tenth of a second later. Never outwait the
+    # recording itself: a 1-second capture FINISHES inside a 1-second probe, and
+    # treating that as an immediate failure made the shortest supported length the
+    # least reliable one.
+    time.sleep(min(1.0, max(0.2, seconds / 2)))
     if process.poll() is not None:
-        indicator(False)
-        detail = ""
-        try:
-            with open(path + ".log", encoding="utf-8", errors="replace") as handle:
-                detail = handle.read().strip()[:400]
-        except OSError:
-            pass
-        return fail(f"ffmpeg exited immediately: {detail or 'no output'}")
+        # Exited already — which means either it failed, or it is simply done.
+        # "Done" is a real outcome for a short recording, and the file is the
+        # witness: a playable one is a finished capture, not a broken start.
+        encoded = duration_of(path)
+        if process.returncode != 0 or not encoded:
+            indicator(False)
+            detail = ""
+            try:
+                with open(path + ".log", encoding="utf-8", errors="replace") as handle:
+                    detail = handle.read().strip()[:400]
+            except OSError:
+                pass
+            return fail(f"ffmpeg exited immediately: {detail or 'no output'}")
 
     state = {
         "id": os.path.splitext(os.path.basename(path))[0],
