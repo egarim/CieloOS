@@ -125,34 +125,6 @@ Rootless podman works in WSL2 with **no systemd and no `XDG_RUNTIME_DIR` fiddlin
 WSL provides `/run/user/<uid>`, and `useradd` already gave your user subuid/subgid
 ranges. Verified: `podman info` reports `rootless=true` on `arm64`.
 
-### On ARM, sessions need two overrides
-
-The shipped defaults are amd64-shaped, so on an ARM machine a desktop session cannot
-start until you point the runtime at a multi-arch image **and** its real port:
-
-```bash
-Sessions__Image=lscr.io/linuxserver/webtop:ubuntu-xfce \
-Sessions__ViewportPort=3000 \
-  ./cielo/run.sh
-```
-
-- `Sessions:Image` defaults to `docker.io/accetto/ubuntu-vnc-xfce-g3:latest`, which is
-  published for **amd64 only** — nothing to run on aarch64.
-- `Sessions:ViewportPort` defaults to `6901` (that image's noVNC port). webtop serves
-  Selkies on **3000**, so without this the session's viewport button points at a dead
-  port.
-
-The image is ~3.4 GB, so the first `create` is a long download. Pull it ahead of time
-and each click after that starts in seconds:
-
-```bash
-podman pull lscr.io/linuxserver/webtop:ubuntu-xfce
-```
- Note that stock webtop
-is **not** `lunos-desktop`: it lacks the `xdotool` / `scrot` / AT-SPI tooling (and
-ONLYOFFICE) that `distro/images/desktop/Containerfile` layers on, so a human can use
-the desktop but an agent cannot drive it.
-
 ## Optional: run it as a service instead of a foreground app
 
 `install.sh` installs a systemd unit, and WSL has systemd **off** by default. Turn it
