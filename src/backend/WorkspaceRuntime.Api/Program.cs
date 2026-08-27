@@ -64,7 +64,7 @@ switch (databaseProvider)
             sqlitePath = Path.Combine(dataRoot, "workspace-runtime.db");
         }
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseSqlite($"Data Source={sqlitePath}"));
-        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled));
+        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled, sqlitePath));
         break;
 
     default:

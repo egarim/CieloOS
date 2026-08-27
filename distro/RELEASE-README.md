@@ -37,6 +37,43 @@ the panel, and run the bundled `./cielo/cielo-selftest.sh` directly.
 Step-by-step for Windows: `docs/wsl-quickstart.md` in the repository
 (https://github.com/egarim/CieloOS/blob/main/docs/wsl-quickstart.md).
 
+## Upgrading an existing installation
+
+The runtime keeps its state in SQLite. Before applying any schema change, the new
+binary writes a timestamped backup beside the database (`workspace-runtime.db.<timestamp>.bak`)
+and logs the path. If you ever need to go back to an older build, stop the runtime,
+restore that backup over the live database, then start the older build.
+
+**Installed layout (`install.sh`)**
+
+Keep `/opt/cielo/.data` in place and run the same installer from the new bundle.
+`install.sh` stops `cielo-runtime.service` before replacing `bin`, `panel`,
+`surfaces`, and `config`, then restarts it afterward.
+
+```
+tar xzf cielo-linux-<arch>.tar.gz
+sudo ./cielo/install.sh --mode <app|headless|kiosk>
+```
+
+Pass the same options you used originally (for example `--mode`, `--port`,
+`--no-chat`).
+
+**App layout (`run.sh`)**
+
+The `.data` directory lives inside the bundle and is not part of a fresh tarball.
+Copy it into the new bundle before starting the new build.
+
+```
+# stop the old run.sh first (Ctrl-C, or kill the process)
+mkdir -p new-cielo
+tar xzf cielo-linux-<arch>.tar.gz -C new-cielo --strip-components=1
+cp -a cielo/.data new-cielo/.data
+./new-cielo/run.sh
+```
+
+Keep the old bundle directory until the new build has started cleanly and the
+health check responds.
+
 ## First owner (loopback-only, by design)
 
 The first claim only works **from the machine itself** — nobody on the network can

@@ -14,15 +14,45 @@ public sealed class EfRuntimeStore : IRuntimeStore
     // image is wired with seedDemo:false (see Program.cs): the spreadsheet
     // singleton is still created, but the machine has no users until the first
     // owner claims it.
-    public EfRuntimeStore(IDbContextFactory<RuntimeDbContext> contextFactory, bool seedDemo = true)
+    public EfRuntimeStore(IDbContextFactory<RuntimeDbContext> contextFactory, bool seedDemo = true, string? sqliteDatabasePath = null)
     {
         this.contextFactory = contextFactory;
-        EnsureCreatedAndSeeded(seedDemo);
+        EnsureCreatedAndSeeded(seedDemo, sqliteDatabasePath);
     }
 
-    private void EnsureCreatedAndSeeded(bool seedDemo)
+    private void EnsureCreatedAndSeeded(bool seedDemo, string? sqliteDatabasePath)
     {
         using var context = contextFactory.CreateDbContext();
+
+        // A DB that was migrated by a newer build contains history rows this build
+        // does not know about. Applying this build's migrations to it would either
+        // no-op or fail later in a query; refusing here makes the rollback path
+        // explicit and points at the backup that the newer build should have left.
+        var knownMigrations = context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
+        var unknownAppliedMigrations = context.Database.GetAppliedMigrations()
+            .Where(migration => !knownMigrations.Contains(migration))
+            .ToList();
+        if (unknownAppliedMigrations.Count > 0)
+        {
+            var newestUnknown = unknownAppliedMigrations[^1];
+            var backup = FindMostRecentBackup(sqliteDatabasePath);
+            var backupMessage = backup is null
+                ? $"No timestamped backup was found beside '{sqliteDatabasePath}'."
+                : $"Restore from the timestamped backup at '{backup}'.";
+            throw new InvalidOperationException(
+                $"The database schema is newer than this build understands (applied migration '{newestUnknown}' is not present in this binary). {backupMessage}");
+        }
+
+        // Only take a copy when Migrate() has work to do; an up-to-date DB must
+        // not gain a new backup file on every boot.
+        if (sqliteDatabasePath is not null
+            && File.Exists(sqliteDatabasePath)
+            && context.Database.GetPendingMigrations().Any())
+        {
+            var backupPath = BackupSqliteDatabase(sqliteDatabasePath);
+            Console.Error.WriteLine($"Database backup written to {backupPath}");
+        }
+
         context.Database.Migrate();
 
         // Per-entity guards, NOT a global `Users.Any()` early-return: a non-demo
@@ -57,6 +87,35 @@ public sealed class EfRuntimeStore : IRuntimeStore
         }
 
         context.SaveChanges();
+    }
+
+    private static string BackupSqliteDatabase(string sqliteDatabasePath)
+    {
+        var fullPath = Path.GetFullPath(sqliteDatabasePath);
+        var backupPath = $"{fullPath}.{DateTime.Now:yyyyMMddHHmmssfff}.bak";
+        File.Copy(fullPath, backupPath, overwrite: true);
+        return backupPath;
+    }
+
+    private static string? FindMostRecentBackup(string? sqliteDatabasePath)
+    {
+        if (string.IsNullOrWhiteSpace(sqliteDatabasePath))
+        {
+            return null;
+        }
+
+        var fullPath = Path.GetFullPath(sqliteDatabasePath);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (directory is null || !Directory.Exists(directory))
+        {
+            return null;
+        }
+
+        var databaseName = Path.GetFileName(fullPath);
+        return Directory.EnumerateFiles(directory, $"{databaseName}.*")
+            .Where(path => path.EndsWith(".bak", StringComparison.Ordinal))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .FirstOrDefault();
     }
 
     public IReadOnlyList<PlatformUser> Users

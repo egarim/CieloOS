@@ -174,6 +174,12 @@ else
 fi
 
 echo "==> [5/9] Install to /opt/cielo"
+# Replace files only while the runtime is stopped: overwriting a running
+# executable is undefined at best. Stage 7 starts it again after the service
+# unit and environment file have been refreshed.
+if [[ "$LIVE" -eq 1 && "$CI" -eq 0 ]]; then
+  systemctl stop cielo-runtime.service || true
+fi
 install -d /opt/cielo
 cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cielo/
 install -d -o cielo -g cielo /opt/cielo/.data
