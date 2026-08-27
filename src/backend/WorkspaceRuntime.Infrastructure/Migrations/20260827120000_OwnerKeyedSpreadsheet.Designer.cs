@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WorkspaceRuntime.Infrastructure;
 
@@ -13,7 +14,7 @@ namespace WorkspaceRuntime.Infrastructure.Migrations
     [Migration("20260827120000_OwnerKeyedSpreadsheet")]
     partial class OwnerKeyedSpreadsheet
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.11");

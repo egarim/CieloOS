@@ -2157,7 +2157,10 @@ public static async Task RunAsync(
     IBrowserBackend browser, IRuntimeEventStream events)
 {
     var owner = caller.Slug;
-    var ownerSlug = SpreadsheetOwner(caller, store);
+    // Not the top-level SpreadsheetOwner helper: a local function declared among
+    // top-level statements is unreachable from inside a type (CS8801), so call
+    // what it wraps.
+    var ownerSlug = Ownership.RootUserSlug(caller.Slug, store);
     var reports = new List<ExampleStepReport>();
 
     void Publish() => events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(ownerSlug), DateTimeOffset.UtcNow));
