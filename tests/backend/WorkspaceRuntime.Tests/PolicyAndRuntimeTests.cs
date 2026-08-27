@@ -76,7 +76,7 @@ public class PolicyAndRuntimeTests
             new Dictionary<string, string> { ["address"] = "C1", ["value"] = "42" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, result.Decision);
-        Assert.Equal("42", store.Spreadsheet.Cells["C1"]);
+        Assert.Equal("42", store.GetSpreadsheet(store.Users[0].Slug).Cells["C1"]);
         Assert.Contains(store.AuditEvents, auditEvent =>
             auditEvent.Action == "spreadsheet.set-cell"
             && auditEvent.Outcome == AuditOutcome.Success
@@ -102,13 +102,13 @@ public class PolicyAndRuntimeTests
         Assert.Equal(PolicyDecision.RequireApproval, pending.Decision);
         Assert.NotNull(pending.Approval);
         Assert.NotEmpty(pending.Approval!.RequestHash);
-        Assert.NotEmpty(store.Spreadsheet.Cells);
+        Assert.NotEmpty(store.GetSpreadsheet(store.Users[0].Slug).Cells);
 
         var approved = await runtime.ResolveApprovalAsync(
             pending.Approval.Id, approved: true, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), null, CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, approved.Decision);
-        Assert.Empty(store.Spreadsheet.Cells);
+        Assert.Empty(store.GetSpreadsheet(store.Users[0].Slug).Cells);
         Assert.Contains(store.Approvals, approval => approval.Id == pending.Approval.Id && approval.Status == ApprovalStatus.Approved);
     }
 
@@ -130,7 +130,7 @@ public class PolicyAndRuntimeTests
         await Assert.ThrowsAsync<StaleApprovalException>(() =>
             runtime.ResolveApprovalAsync(pending.Approval!.Id, approved: true, "not-the-real-hash", TestRepository.HumanPrincipal(store), null, CancellationToken.None));
 
-        Assert.NotEmpty(store.Spreadsheet.Cells);
+        Assert.NotEmpty(store.GetSpreadsheet(store.Users[0].Slug).Cells);
         Assert.Contains(store.Approvals, approval => approval.Id == pending.Approval!.Id && approval.Status == ApprovalStatus.Pending);
     }
 
@@ -168,7 +168,7 @@ public class PolicyAndRuntimeTests
             user.Id, agent.Id, "spreadsheet", "set-cell",
             new Dictionary<string, string> { ["address"] = "TOTALS ROW!!", ["value"] = "1" }), TestRepository.AgentPrincipal(store), CancellationToken.None);
         Assert.Equal(PolicyDecision.Deny, badAddress.Decision);
-        Assert.DoesNotContain("TOTALS ROW!!", store.Spreadsheet.Cells.Keys);
+        Assert.DoesNotContain("TOTALS ROW!!", store.GetSpreadsheet(store.Users[0].Slug).Cells.Keys);
 
         var tooLong = await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
@@ -187,7 +187,7 @@ public class PolicyAndRuntimeTests
     public async Task Commands_invalid_in_the_current_state_are_denied_at_dispatch()
     {
         var store = new InMemoryRuntimeStore();
-        store.SetSpreadsheet(new SpreadsheetState(new Dictionary<string, string>()));
+        store.SetSpreadsheet(store.Users[0].Slug, new SpreadsheetState(new Dictionary<string, string>()));
         var runtime = CreateRuntime(store);
         var user = store.Users[0];
         var agent = store.Agents[0];
@@ -209,7 +209,7 @@ public class PolicyAndRuntimeTests
 
         var pending = await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "clear", new Dictionary<string, string>()), TestRepository.AgentPrincipal(store), CancellationToken.None);
-        var observedRevision = store.SpreadsheetRevision;
+        var observedRevision = store.GetSpreadsheetRevision(store.Users[0].Slug);
 
         await runtime.SubmitAsync(new SubmitToolRequestDto(
             user.Id, agent.Id, "spreadsheet", "set-cell",
@@ -234,7 +234,7 @@ public class PolicyAndRuntimeTests
                 user.Id, agent.Id, "spreadsheet", "set-cell",
                 new Dictionary<string, string> { ["address"] = "C1", ["value"] = "1" }), TestRepository.AgentPrincipal(store), expectedRevision: 99, CancellationToken.None));
 
-        Assert.Equal(store.SpreadsheetRevision, stale.CurrentRevision);
+        Assert.Equal(store.GetSpreadsheetRevision(store.Users[0].Slug), stale.CurrentRevision);
     }
 
     private static AgentRuntime CreateRuntime(IRuntimeStore store) =>

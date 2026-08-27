@@ -197,9 +197,9 @@ public static class SurfaceInputValidator
 
 public static class SurfaceConditions
 {
-    public static bool IsValidNow(string validWhen, IRuntimeStore store) => validWhen switch
+    public static bool IsValidNow(string validWhen, IRuntimeStore store, string ownerSlug) => validWhen switch
     {
-        "has-cells" => store.Spreadsheet.Cells.Count > 0,
+        "has-cells" => store.GetSpreadsheet(ownerSlug).Cells.Count > 0,
         _ => true
     };
 }

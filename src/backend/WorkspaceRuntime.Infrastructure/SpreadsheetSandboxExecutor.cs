@@ -20,13 +20,14 @@ public sealed class SpreadsheetSandboxExecutor : ISurfaceExecutor
 
     public Task<ToolExecutionResult> ExecuteAsync(ToolRequest request, CancellationToken cancellationToken)
     {
-        if (!TryCompute(request, out var cells, out var error))
+        var ownerSlug = store.GetUser(request.UserId).Slug;
+        if (!TryCompute(request, ownerSlug, out var cells, out var error))
         {
-            return Task.FromResult(new ToolExecutionResult(false, error!, store.Spreadsheet));
+            return Task.FromResult(new ToolExecutionResult(false, error!, store.GetSpreadsheet(ownerSlug)));
         }
 
         var spreadsheet = new SpreadsheetState(cells!);
-        store.SetSpreadsheet(spreadsheet);
+        store.SetSpreadsheet(ownerSlug, spreadsheet);
         return Task.FromResult(new ToolExecutionResult(true, $"Executed spreadsheet.{request.Operation} in sandbox.", spreadsheet));
     }
 
@@ -34,12 +35,13 @@ public sealed class SpreadsheetSandboxExecutor : ISurfaceExecutor
     // so the preview a human approves is the change that will actually happen.
     public Task<EffectPreview> PreviewAsync(ToolRequest request, CancellationToken cancellationToken)
     {
-        if (!TryCompute(request, out var cells, out var error))
+        var ownerSlug = store.GetUser(request.UserId).Slug;
+        if (!TryCompute(request, ownerSlug, out var cells, out var error))
         {
             return Task.FromResult(new EffectPreview(false, error!, Array.Empty<CellChange>()));
         }
 
-        var before = store.Spreadsheet.Cells;
+        var before = store.GetSpreadsheet(ownerSlug).Cells;
         var changes = new List<CellChange>();
         foreach (var address in before.Keys.Union(cells!.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(key => key, StringComparer.Ordinal))
         {
@@ -57,7 +59,7 @@ public sealed class SpreadsheetSandboxExecutor : ISurfaceExecutor
         return Task.FromResult(new EffectPreview(true, summary, changes));
     }
 
-    private bool TryCompute(ToolRequest request, out Dictionary<string, string>? result, out string? error)
+    private bool TryCompute(ToolRequest request, string ownerSlug, out Dictionary<string, string>? result, out string? error)
     {
         result = null;
         error = null;
@@ -68,7 +70,7 @@ public sealed class SpreadsheetSandboxExecutor : ISurfaceExecutor
             return false;
         }
 
-        var cells = new Dictionary<string, string>(store.Spreadsheet.Cells, StringComparer.OrdinalIgnoreCase);
+        var cells = new Dictionary<string, string>(store.GetSpreadsheet(ownerSlug).Cells, StringComparer.OrdinalIgnoreCase);
         switch (request.Operation)
         {
             case "set-cell":

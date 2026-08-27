@@ -65,8 +65,8 @@ public class SurfaceContractTests
         Assert.Equal("A1", change.Address);
         Assert.Equal("12", change.Before);
         Assert.Equal("99", change.After);
-        Assert.Equal("12", store.Spreadsheet.Cells["A1"]);
-        Assert.Equal(0, store.SpreadsheetRevision);
+        Assert.Equal("12", store.GetSpreadsheet(store.Users[0].Slug).Cells["A1"]);
+        Assert.Equal(0, store.GetSpreadsheetRevision(store.Users[0].Slug));
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class SurfaceContractTests
         var preview = await executor.PreviewAsync(request, CancellationToken.None);
 
         Assert.True(preview.Supported);
-        Assert.Equal(store.Spreadsheet.Cells.Count, preview.Changes.Count);
+        Assert.Equal(store.GetSpreadsheet(store.Users[0].Slug).Cells.Count, preview.Changes.Count);
         Assert.All(preview.Changes, change => Assert.Null(change.After));
     }
 
@@ -88,11 +88,11 @@ public class SurfaceContractTests
     public void Revision_increments_on_every_committed_change()
     {
         var store = new InMemoryRuntimeStore();
-        Assert.Equal(0, store.SpreadsheetRevision);
+        Assert.Equal(0, store.GetSpreadsheetRevision(store.Users[0].Slug));
 
-        store.SetSpreadsheet(new SpreadsheetState(new Dictionary<string, string> { ["A1"] = "1" }));
-        store.SetSpreadsheet(new SpreadsheetState(new Dictionary<string, string> { ["A1"] = "2" }));
+        store.SetSpreadsheet(store.Users[0].Slug, new SpreadsheetState(new Dictionary<string, string> { ["A1"] = "1" }));
+        store.SetSpreadsheet(store.Users[0].Slug, new SpreadsheetState(new Dictionary<string, string> { ["A1"] = "2" }));
 
-        Assert.Equal(2, store.SpreadsheetRevision);
+        Assert.Equal(2, store.GetSpreadsheetRevision(store.Users[0].Slug));
     }
 }

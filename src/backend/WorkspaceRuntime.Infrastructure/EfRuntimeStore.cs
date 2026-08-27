@@ -11,9 +11,8 @@ public sealed class EfRuntimeStore : IRuntimeStore
 
     // Default seedDemo:true so PersistenceTests' `new EfRuntimeStore(factory)` and
     // any dev use keep the joche/yulia demo population. A shipped, provider-free
-    // image is wired with seedDemo:false (see Program.cs): the spreadsheet
-    // singleton is still created, but the machine has no users until the first
-    // owner claims it.
+    // image is wired with seedDemo:false (see Program.cs): the machine has no
+    // users, and therefore no spreadsheet row, until the first owner claims it.
     public EfRuntimeStore(IDbContextFactory<RuntimeDbContext> contextFactory, bool seedDemo = true, string? sqliteDatabasePath = null)
     {
         this.contextFactory = contextFactory;
@@ -59,31 +58,36 @@ public sealed class EfRuntimeStore : IRuntimeStore
         // machine has no users for many boots (until it is claimed), and it must
         // still get its spreadsheet singleton exactly once — the control plane
         // reads `.Single(Id == 1)` on nearly every operation.
-        if (!context.Spreadsheets.Any())
-        {
-            context.Spreadsheets.Add(new SpreadsheetRow
-            {
-                Id = 1,
-                CellsJson = JsonSerializer.Serialize(seedDemo
-                    ? new Dictionary<string, string> { ["A1"] = "12", ["A2"] = "30", ["B1"] = "Ready" }
-                    : new Dictionary<string, string>())
-            });
-        }
-
+        PlatformUser? seededFirstUser = null;
         if (seedDemo && !context.Users.Any())
         {
-            PlatformUser? firstUser = null;
             AgentProfile? firstAgent = null;
             foreach (var (user, workspace, agent) in RuntimeSeed.People())
             {
-                firstUser ??= user;
+                seededFirstUser ??= user;
                 firstAgent ??= agent;
                 context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile, Language = user.Language });
                 context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
                 context.Agents.Add(ToAgentRow(agent));
             }
 
-            context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, firstUser!.Id, firstAgent!.Id, "runtime.seed", AuditOutcome.Success, "Seeded demo users.")));
+            context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, seededFirstUser!.Id, firstAgent!.Id, "runtime.seed", AuditOutcome.Success, "Seeded demo users.")));
+        }
+
+        if (seedDemo)
+        {
+            var ownerSlug = seededFirstUser?.Slug
+                ?? context.Users.AsNoTracking().OrderBy(user => user.Slug).First().Slug;
+            var row = EnsureSpreadsheetForOwner(context, ownerSlug, out var created);
+            if (created)
+            {
+                row.CellsJson = JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    ["A1"] = "12",
+                    ["A2"] = "30",
+                    ["B1"] = "Ready"
+                });
+            }
         }
 
         context.SaveChanges();
@@ -163,23 +167,19 @@ public sealed class EfRuntimeStore : IRuntimeStore
         }
     }
 
-    public SpreadsheetState Spreadsheet
+    public SpreadsheetState GetSpreadsheet(string ownerSlug)
     {
-        get
-        {
-            using var context = contextFactory.CreateDbContext();
-            var row = context.Spreadsheets.AsNoTracking().Single(sheet => sheet.Id == 1);
-            return new SpreadsheetState(JsonSerializer.Deserialize<Dictionary<string, string>>(row.CellsJson) ?? new Dictionary<string, string>());
-        }
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Spreadsheets.AsNoTracking().SingleOrDefault(sheet => sheet.OwnerSlug == ownerSlug);
+        return row is null
+            ? new SpreadsheetState(new Dictionary<string, string>())
+            : new SpreadsheetState(JsonSerializer.Deserialize<Dictionary<string, string>>(row.CellsJson) ?? new Dictionary<string, string>());
     }
 
-    public long SpreadsheetRevision
+    public long GetSpreadsheetRevision(string ownerSlug)
     {
-        get
-        {
-            using var context = contextFactory.CreateDbContext();
-            return context.Spreadsheets.AsNoTracking().Single(sheet => sheet.Id == 1).Revision;
-        }
+        using var context = contextFactory.CreateDbContext();
+        return context.Spreadsheets.AsNoTracking().SingleOrDefault(sheet => sheet.OwnerSlug == ownerSlug)?.Revision ?? 0;
     }
     public string? PasswordHashFor(Guid userId)
     {
@@ -252,10 +252,10 @@ public sealed class EfRuntimeStore : IRuntimeStore
         context.SaveChanges();
     }
 
-    public void SetSpreadsheet(SpreadsheetState spreadsheet)
+    public void SetSpreadsheet(string ownerSlug, SpreadsheetState spreadsheet)
     {
         using var context = contextFactory.CreateDbContext();
-        var row = context.Spreadsheets.Single(sheet => sheet.Id == 1);
+        var row = EnsureSpreadsheetForOwner(context, ownerSlug, out _);
         row.CellsJson = JsonSerializer.Serialize(spreadsheet.Cells);
         row.Revision++;
         context.SaveChanges();
@@ -315,6 +315,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "owner.claim", AuditOutcome.Success, $"Claimed owner '{user.Slug}'.")));
+        EnsureSpreadsheetForOwner(context, user.Slug, out _);
         context.SaveChanges();
         return true;
     }
@@ -331,8 +332,34 @@ public sealed class EfRuntimeStore : IRuntimeStore
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "user.add", AuditOutcome.Success, $"Added user '{user.Slug}'.")));
+        EnsureSpreadsheetForOwner(context, user.Slug, out _);
         context.SaveChanges();
         return true;
+    }
+
+    private static SpreadsheetRow EnsureSpreadsheetForOwner(RuntimeDbContext context, string ownerSlug, out bool created)
+    {
+        var existing = context.Spreadsheets.SingleOrDefault(sheet => sheet.OwnerSlug == ownerSlug);
+        if (existing is not null)
+        {
+            created = false;
+            return existing;
+        }
+
+        // Pre-owner installs had a singleton row. Hand it to the first owner so
+        // that existing work is not discarded, then create fresh rows after that.
+        var legacy = context.Spreadsheets.SingleOrDefault(sheet => sheet.OwnerSlug == "");
+        if (legacy is not null)
+        {
+            legacy.OwnerSlug = ownerSlug;
+            created = false;
+            return legacy;
+        }
+
+        var row = new SpreadsheetRow { OwnerSlug = ownerSlug };
+        context.Spreadsheets.Add(row);
+        created = true;
+        return row;
     }
 
     private static AgentRow ToAgentRow(AgentProfile agent) => new()

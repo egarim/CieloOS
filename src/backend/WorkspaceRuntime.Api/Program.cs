@@ -1008,7 +1008,7 @@ app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store) =>
     var caller = Caller(context);
     var rootSlug = Ownership.RootUserSlug(caller.Slug, store);
     return Ownership.CanAccessHome(caller, rootSlug, store)
-        ? Results.Ok(store.Spreadsheet)
+        ? Results.Ok(store.GetSpreadsheet(rootSlug))
         : Results.Json(new { error = $"'{caller.Slug}' may not read the shared spreadsheet." },
             statusCode: StatusCodes.Status403Forbidden);
 });
@@ -1295,7 +1295,7 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     var selection = brains.Resolve(store.GetAgent(agentId));
     var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, selection.Brain, cancellationToken,
         model: BilledModel(selection.Provider, models));
-    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(SpreadsheetOwner(caller, store)), DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
 
@@ -1335,7 +1335,7 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
         model: chatProvider is null
             ? null
             : new ModelIdentity(chatProvider.Profile.Id, chatProvider.Profile.Model, billedLocality));
-    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(SpreadsheetOwner(caller, store)), DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
 
@@ -1411,7 +1411,7 @@ app.MapPost("/api/auth/language", (
     }
 
     store.SetLanguage(user.Id, Languages.Resolve(request.Language).Code);
-    events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(SpreadsheetOwner(caller, store)), DateTimeOffset.UtcNow));
 
     // Sessions already open keep the locale they started with: their environment
     // was fixed when the container was created. Say so rather than letting someone
@@ -1506,7 +1506,9 @@ app.MapGet("/api/surfaces/{surfaceId}/state", (string surfaceId, HttpContext con
         return Results.NotFound();
     }
 
-    var revision = store.SpreadsheetRevision;
+    var principal = Caller(context);
+    var ownerSlug = SpreadsheetOwner(principal, store);
+    var revision = store.GetSpreadsheetRevision(ownerSlug);
     var etag = $"\"{revision}\"";
     if (context.Request.Headers.IfNoneMatch.ToString() == etag)
     {
@@ -1514,7 +1516,7 @@ app.MapGet("/api/surfaces/{surfaceId}/state", (string surfaceId, HttpContext con
     }
 
     context.Response.Headers.ETag = etag;
-    return Results.Ok(new { surface = surfaceId, revision, state = new { cells = store.Spreadsheet.Cells } });
+    return Results.Ok(new { surface = surfaceId, revision, state = new { cells = store.GetSpreadsheet(ownerSlug).Cells } });
 });
 
 app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
@@ -1525,8 +1527,9 @@ app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext 
     }
 
     var principal = Caller(context);
+    var ownerSlug = SpreadsheetOwner(principal, store);
     var commands = manifest.Commands
-        .Where(pair => SurfaceConditions.IsValidNow(pair.Value.ValidWhen, store))
+        .Where(pair => SurfaceConditions.IsValidNow(pair.Value.ValidWhen, store, ownerSlug))
         .Where(pair => principal.Kind != PrincipalKind.Agent || pair.Value.ExposedToAgent)
         .Take(8)
         .Select(pair => new
@@ -1540,7 +1543,7 @@ app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext 
             pair.Value.Input
         });
 
-    return Results.Ok(new { surface = surfaceId, revision = store.SpreadsheetRevision, commands });
+    return Results.Ok(new { surface = surfaceId, revision = store.GetSpreadsheetRevision(ownerSlug), commands });
 });
 
 // Bounded idempotency cache: repeated submissions of the same key return the
@@ -1568,6 +1571,7 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
     // the single choke point every entry path shares. This endpoint only
     // shapes the transport: dry runs, idempotency, and revision preconditions.
     var principal = Caller(context);
+    var ownerSlug = SpreadsheetOwner(principal, store);
     var arguments = ToArguments(request.Input);
     var (userId, agentId) = ActingAgent(principal, request.AgentId, store);
 
@@ -1588,7 +1592,7 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
 
         var toolRequest = new ToolRequest(Guid.NewGuid(), userId, agentId, surfaceId, commandName, arguments, DateTimeOffset.UtcNow);
         var preview = await dryRunExecutor.PreviewAsync(toolRequest, cancellationToken);
-        return Results.Ok(new { dryRun = true, revision = store.SpreadsheetRevision, preview });
+        return Results.Ok(new { dryRun = true, revision = store.GetSpreadsheetRevision(ownerSlug), preview });
     }
 
     // Idempotency is scoped to principal + exact request content, and is
@@ -1620,7 +1624,7 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
         result.Reason,
         result.Execution,
         result.Approval,
-        revision = store.SpreadsheetRevision
+        revision = store.GetSpreadsheetRevision(ownerSlug)
     };
 
     if (cacheKey is not null)
@@ -1634,7 +1638,7 @@ app.MapPost("/api/surfaces/{surfaceId}/commands/{commandName}", async (
 
     events.Publish(new RuntimeEvent(
         result.Decision == PolicyDecision.RequireApproval ? "approval-pending" : "state-changed",
-        store.SpreadsheetRevision,
+        store.GetSpreadsheetRevision(ownerSlug),
         DateTimeOffset.UtcNow));
     return Results.Ok(response);
 });
@@ -1658,12 +1662,13 @@ app.MapPost("/api/tool-requests", async (SubmitToolRequestDto request, HttpConte
     // The acting user/agent come from the authenticated identity, not the
     // request body — a caller cannot submit as someone else.
     var principal = Caller(context);
+    var ownerSlug = SpreadsheetOwner(principal, store);
     var (userId, agentId) = ActingAgent(principal, request.AgentId, store);
     var bound = request with { UserId = userId, AgentId = agentId };
     var result = await runtime.SubmitAsync(bound, principal, cancellationToken);
     events.Publish(new RuntimeEvent(
         result.Decision == PolicyDecision.RequireApproval ? "approval-pending" : "state-changed",
-        store.SpreadsheetRevision,
+        store.GetSpreadsheetRevision(ownerSlug),
         DateTimeOffset.UtcNow));
     return result;
 });
@@ -1886,7 +1891,7 @@ static async Task<IResult> ResolveAsync(
     try
     {
         var result = await runtime.ResolveApprovalAsync(approvalId, approved, request.RequestHash ?? "", principal, request.ObservedRevision, cancellationToken);
-        events.Publish(new RuntimeEvent("approval-resolved", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+        events.Publish(new RuntimeEvent("approval-resolved", store.GetSpreadsheetRevision(SpreadsheetOwner(principal, store)), DateTimeOffset.UtcNow));
         return Results.Ok(result);
     }
     catch (ApprovalOwnershipException exception)
@@ -1928,6 +1933,9 @@ static IEnumerable<string> AuditHomeSlugs(AuditEvent auditEvent, IRuntimeStore s
 
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
+
+static string SpreadsheetOwner(RuntimePrincipal principal, IRuntimeStore store) =>
+    Ownership.RootUserSlug(principal.Slug, store);
 
 // HttpOnly so a script in the panel's origin cannot read it — the flaw the token
 // in localStorage had. Strict so it does not ride along on a cross-site request.
@@ -2132,9 +2140,10 @@ public static async Task RunAsync(
     IBrowserBackend browser, IRuntimeEventStream events)
 {
     var owner = caller.Slug;
+    var ownerSlug = SpreadsheetOwner(caller, store);
     var reports = new List<ExampleStepReport>();
 
-    void Publish() => events.Publish(new RuntimeEvent("state-changed", store.SpreadsheetRevision, DateTimeOffset.UtcNow));
+    void Publish() => events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(ownerSlug), DateTimeOffset.UtcNow));
 
     for (var index = 0; index < example.Steps.Count; index++)
     {

@@ -11,8 +11,8 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly List<ApprovalRecord> approvals = new();
     private readonly List<AuditEvent> auditEvents = new();
     private readonly Dictionary<Guid, ToolRequest> pendingRequests = new();
-    private long spreadsheetRevision;
-    private SpreadsheetState spreadsheet;
+    private readonly Dictionary<string, SpreadsheetState> spreadsheets = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> spreadsheetRevisions = new(StringComparer.Ordinal);
 
     // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
     // unit-test fixtures) populated with the joche/yulia demo identities. A real,
@@ -20,12 +20,6 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     // whose first owner is created by the first-run claim.
     public InMemoryRuntimeStore(bool seedDemo = true)
     {
-        // The spreadsheet singleton always exists (the control plane reads it on
-        // nearly every mutation/SSE); only its demo contents are gated.
-        spreadsheet = new SpreadsheetState(seedDemo
-            ? new Dictionary<string, string> { ["A1"] = "12", ["A2"] = "30", ["B1"] = "Ready" }
-            : new Dictionary<string, string>());
-
         if (!seedDemo)
         {
             return;
@@ -38,6 +32,13 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
             agents.Add(agent);
         }
 
+        spreadsheets[users[0].Slug] = new SpreadsheetState(new Dictionary<string, string>
+        {
+            ["A1"] = "12",
+            ["A2"] = "30",
+            ["B1"] = "Ready"
+        });
+
         auditEvents.Add(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, users[0].Id, agents[0].Id, "runtime.seed", AuditOutcome.Success, "Seeded demo users."));
     }
 
@@ -46,8 +47,13 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     public IReadOnlyList<AgentProfile> Agents => agents;
     public IReadOnlyList<ApprovalRecord> Approvals => approvals.OrderByDescending(approval => approval.CreatedAt).ToList();
     public IReadOnlyList<AuditEvent> AuditEvents => auditEvents.OrderByDescending(auditEvent => auditEvent.OccurredAt).ToList();
-    public SpreadsheetState Spreadsheet => spreadsheet;
-    public long SpreadsheetRevision => spreadsheetRevision;
+    public SpreadsheetState GetSpreadsheet(string ownerSlug) =>
+        spreadsheets.TryGetValue(ownerSlug, out var spreadsheet)
+            ? spreadsheet
+            : new SpreadsheetState(new Dictionary<string, string>());
+
+    public long GetSpreadsheetRevision(string ownerSlug) =>
+        spreadsheetRevisions.TryGetValue(ownerSlug, out var revision) ? revision : 0;
 
     // In-memory mode keeps passwords in memory too: it exists for tests and
     // ephemeral runs, where nothing survives a restart by design.
@@ -80,10 +86,12 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public void AppendAudit(AuditEvent auditEvent) => auditEvents.Add(auditEvent);
 
-    public void SetSpreadsheet(SpreadsheetState spreadsheet)
+    public void SetSpreadsheet(string ownerSlug, SpreadsheetState spreadsheet)
     {
-        this.spreadsheet = spreadsheet;
-        spreadsheetRevision++;
+        spreadsheets[ownerSlug] = spreadsheet;
+        spreadsheetRevisions[ownerSlug] = spreadsheetRevisions.TryGetValue(ownerSlug, out var revision)
+            ? revision + 1
+            : 1;
     }
 
     public void SavePendingRequest(Guid approvalId, ToolRequest request) => pendingRequests[approvalId] = request;

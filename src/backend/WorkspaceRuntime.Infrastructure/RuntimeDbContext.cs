@@ -74,6 +74,7 @@ public sealed class PendingRequestRow
 public sealed class SpreadsheetRow
 {
     public int Id { get; set; }
+    public string OwnerSlug { get; set; } = "";
     public string CellsJson { get; set; } = "{}";
     public long Revision { get; set; }
 }
@@ -104,7 +105,8 @@ public sealed class RuntimeDbContext : DbContext
         modelBuilder.Entity<ApprovalRow>().ToTable("runtime_approvals");
         modelBuilder.Entity<AuditEventRow>().ToTable("runtime_audit_events");
         modelBuilder.Entity<PendingRequestRow>().ToTable("runtime_pending_requests").HasKey(row => row.ApprovalId);
-        modelBuilder.Entity<SpreadsheetRow>().ToTable("runtime_spreadsheets");
+        modelBuilder.Entity<SpreadsheetRow>().ToTable("runtime_spreadsheets")
+            .HasIndex(row => row.OwnerSlug).IsUnique();
         modelBuilder.Entity<TokenUsageRow>().ToTable("runtime_token_usage");
         // One limit per (scope, subject): "the cap for this agent" is a single
         // fact, and a second row for the same subject would just be ambiguous.

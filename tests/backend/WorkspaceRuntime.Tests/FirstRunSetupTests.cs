@@ -22,8 +22,8 @@ public sealed class FirstRunSetupTests
         Assert.Empty(store.Agents);
         // The control plane reads the spreadsheet on nearly every operation; it
         // must exist (and be empty) even with the demo population gated off.
-        Assert.Empty(store.Spreadsheet.Cells);
-        Assert.Equal(0, store.SpreadsheetRevision);
+        Assert.Empty(store.GetSpreadsheet("").Cells);
+        Assert.Equal(0, store.GetSpreadsheetRevision(""));
     }
 
     [Fact]
@@ -33,7 +33,7 @@ public sealed class FirstRunSetupTests
 
         Assert.Equal(2, store.Users.Count);
         Assert.Contains(store.Users, user => user.Slug == "joche");
-        Assert.Equal("12", store.Spreadsheet.Cells["A1"]);
+        Assert.Equal("12", store.GetSpreadsheet(store.Users[0].Slug).Cells["A1"]);
     }
 
     [Fact]
@@ -47,13 +47,13 @@ public sealed class FirstRunSetupTests
 
             var first = Store();
             Assert.Empty(first.Users);
-            Assert.Empty(first.Spreadsheet.Cells); // reading the singleton must not throw
+            Assert.Empty(first.GetSpreadsheet("").Cells); // reading an unclaimed sheet must not throw
 
             // A second boot with no users must NOT try to re-insert the singleton
             // (the bug the per-entity guard prevents): reading it still works.
             var second = Store();
             Assert.Empty(second.Users);
-            Assert.Empty(second.Spreadsheet.Cells);
+            Assert.Empty(second.GetSpreadsheet("").Cells);
         }
         finally
         {

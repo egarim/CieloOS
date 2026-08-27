@@ -29,7 +29,7 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(2, second.Agents.Count);
         Assert.Contains(second.Users, user => user.Slug == "joche");
         Assert.Contains(second.Users, user => user.Slug == "yulia");
-        Assert.Equal("12", second.Spreadsheet.Cells["A1"]);
+        Assert.Equal("12", second.GetSpreadsheet(second.Users[0].Slug).Cells["A1"]);
         // Seeded exactly once despite reopening — no duplicate seed rows.
         Assert.Single(second.AuditEvents, auditEvent => auditEvent.Action == "runtime.seed");
         _ = first;
@@ -52,8 +52,8 @@ public sealed class PersistenceTests : IDisposable
         Assert.Equal(PolicyDecision.Allow, result.Decision);
 
         var reopened = CreateStore();
-        Assert.Equal("42", reopened.Spreadsheet.Cells["C1"]);
-        Assert.Equal(1, reopened.SpreadsheetRevision);
+        Assert.Equal("42", reopened.GetSpreadsheet(reopened.Users[0].Slug).Cells["C1"]);
+        Assert.Equal(1, reopened.GetSpreadsheetRevision(reopened.Users[0].Slug));
         Assert.Contains(reopened.AuditEvents, auditEvent => auditEvent.Action == "spreadsheet.set-cell" && auditEvent.Outcome == AuditOutcome.Success);
     }
 
@@ -86,7 +86,7 @@ public sealed class PersistenceTests : IDisposable
             pending.Approval!.Id, approved: true, pending.Approval.RequestHash, TestRepository.HumanPrincipal(store), null, CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, approved.Decision);
-        Assert.Empty(reopened.Spreadsheet.Cells);
+        Assert.Empty(reopened.GetSpreadsheet(reopened.Users[0].Slug).Cells);
         Assert.Contains(reopened.Approvals, approval => approval.Id == pending.Approval.Id && approval.Status == ApprovalStatus.Approved);
     }
 

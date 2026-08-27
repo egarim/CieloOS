@@ -10,7 +10,8 @@ using WorkspaceRuntime.Infrastructure;
 namespace WorkspaceRuntime.Infrastructure.Migrations
 {
     [DbContext(typeof(RuntimeDbContext))]
-    partial class RuntimeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260827120000_OwnerKeyedSpreadsheet")]
+    partial class OwnerKeyedSpreadsheet
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {

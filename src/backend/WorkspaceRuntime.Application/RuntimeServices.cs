@@ -28,8 +28,8 @@ public interface IRuntimeStore
     IReadOnlyList<AgentProfile> Agents { get; }
     IReadOnlyList<ApprovalRecord> Approvals { get; }
     IReadOnlyList<AuditEvent> AuditEvents { get; }
-    SpreadsheetState Spreadsheet { get; }
-    long SpreadsheetRevision { get; }
+    SpreadsheetState GetSpreadsheet(string ownerSlug);
+    long GetSpreadsheetRevision(string ownerSlug);
     PlatformUser GetUser(Guid id);
 
     // The password hash is deliberately NOT on PlatformUser: it has no business
@@ -45,7 +45,7 @@ public interface IRuntimeStore
     void UpsertApproval(ApprovalRecord approval);
     ApprovalRecord GetApproval(Guid id);
     void AppendAudit(AuditEvent auditEvent);
-    void SetSpreadsheet(SpreadsheetState spreadsheet);
+    void SetSpreadsheet(string ownerSlug, SpreadsheetState spreadsheet);
     void SavePendingRequest(Guid approvalId, ToolRequest request);
     ToolRequest GetPendingRequest(Guid approvalId);
     ToolRequest? FindPendingRequest(Guid approvalId);
@@ -141,7 +141,7 @@ public sealed class AgentRuntime
                 return Denied(request, user.Id, agent.Id, actor, validationError);
             }
 
-            if (!SurfaceConditions.IsValidNow(command.ValidWhen, store))
+            if (!SurfaceConditions.IsValidNow(command.ValidWhen, store, user.Slug))
             {
                 return Denied(request, user.Id, agent.Id, actor, $"Command '{dto.Operation}' is not valid in the current surface state.");
             }
@@ -226,9 +226,9 @@ public sealed class AgentRuntime
         await mutationGate.WaitAsync(cancellationToken);
         try
         {
-            if (expectedRevision is { } expected && expected != store.SpreadsheetRevision)
+            if (expectedRevision is { } expected && expected != store.GetSpreadsheetRevision(user.Slug))
             {
-                throw new RevisionMismatchException(store.SpreadsheetRevision);
+                throw new RevisionMismatchException(store.GetSpreadsheetRevision(user.Slug));
             }
 
             switch (evaluation.Decision)
@@ -306,7 +306,7 @@ public sealed class AgentRuntime
             // The consent the human gave was to a previewed effect. If the
             // surface moved since they previewed it, the effect they approved
             // is no longer the effect that would run.
-            if (approved && observedRevision is { } seen && seen != store.SpreadsheetRevision)
+            if (approved && observedRevision is { } seen && seen != store.GetSpreadsheetRevision(store.GetUser(approval.UserId).Slug))
             {
                 throw new StaleApprovalException("The workspace changed since this approval was previewed. Re-read the approval before resolving it.");
             }
