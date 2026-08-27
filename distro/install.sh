@@ -427,16 +427,31 @@ fi
 
 echo "==> [9/9] Presentation mode: $MODE"
 if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
-  # Minimal Wayland kiosk: `cage` runs a single fullscreen app (chromium) as cielo.
-  # (Least-packages GUI; shake this out on the actual hardware/GPU.)
-  apt-get install -y --no-install-recommends cage seatd chromium-browser || \
-    apt-get install -y --no-install-recommends cage seatd chromium || true
+  # Minimal Wayland kiosk: `cage` runs a single fullscreen app (Firefox ESR) as
+  # cielo. Ubuntu 24.04's chromium packages are snap-only stubs, so install
+  # firefox-esr from Mozilla's apt repository instead.
+  if ! {
+    install -d -m 0755 /etc/apt/keyrings
+    apt-get install -y --no-install-recommends gnupg
+    curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg | gpg --dearmor > /etc/apt/keyrings/packages.mozilla.org.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
+    apt-get update -y
+    apt-get install -y --no-install-recommends cage seatd firefox-esr
+  }; then
+    echo "==> Kiosk browser install failed; this machine will boot without a UI." >&2
+    exit 1
+  fi
+  if ! KIOSK_BROWSER="$(command -v firefox-esr)"; then
+    echo "==> Kiosk browser binary was not found; this machine will boot without a UI." >&2
+    exit 1
+  fi
   enable_unit seatd.service || true
   cat > /etc/systemd/system/cielo-kiosk.service <<EOF
 [Unit]
 Description=CieloOS kiosk browser
 After=cielo-runtime.service systemd-user-sessions.service
 Wants=cielo-runtime.service
+Conflicts=getty@tty1.service
 
 [Service]
 User=cielo
@@ -445,7 +460,7 @@ TTYPath=/dev/tty1
 Environment=XDG_RUNTIME_DIR=/run/user/${CIELO_UID}
 # Wait for the runtime, then open the panel fullscreen.
 ExecStartPre=/bin/sh -c 'until curl -fsS http://127.0.0.1:${PORT}/api/setup/status >/dev/null; do sleep 1; done'
-ExecStart=/usr/bin/cage -- chromium --kiosk --no-first-run --disable-translate "http://127.0.0.1:${PORT}/"
+ExecStart=/usr/bin/cage -- "$KIOSK_BROWSER" --kiosk --no-remote "http://127.0.0.1:${PORT}/"
 Restart=on-failure
 
 [Install]
