@@ -481,9 +481,13 @@ app.MapGet("/api/desk-profiles", async (ISessionBackend sessions, CancellationTo
         // The panel says "this desk needs an image that is not built yet" rather
         // than letting a person pick a profile and meet a failure at session time.
         // Ready means BOTH halves of the desk: the desktop the person opens and
-        // the console their agent works in.
-        var ready = (!profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken))
-            && (!profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken));
+        // the console their agent works in. Resolve the same image strings the
+        // runtime will actually run; "no image of its own" must not mean "already
+        // ready" when the shared image has never been built.
+        var desktopImage = DeskImageFor(profile, console: false, builder.Configuration["Sessions:Image"]);
+        var consoleImage = DeskImageFor(profile, console: true, builder.Configuration["Sessions:Image"]);
+        var ready = await sessions.ImageExistsAsync(desktopImage, cancellationToken)
+            && await sessions.ImageExistsAsync(consoleImage, cancellationToken);
         profiles.Add(new
         {
             profile.Id,
@@ -512,8 +516,10 @@ app.MapPost("/api/desk-profiles/{id}/build", async (string id, HttpContext conte
 
     // Already built is a success, not a reason to spend another twenty minutes:
     // a stale panel must not be able to trigger a rebuild by clicking twice.
-    var desktopReady = !profile.NeedsOwnImage || await sessions.ImageExistsAsync(profile.Image, cancellationToken);
-    var consoleReady = !profile.NeedsOwnConsoleImage || await sessions.ImageExistsAsync(profile.ConsoleImage, cancellationToken);
+    var desktopImage = DeskImageFor(profile, console: false, builder.Configuration["Sessions:Image"]);
+    var consoleImage = DeskImageFor(profile, console: true, builder.Configuration["Sessions:Image"]);
+    var desktopReady = await sessions.ImageExistsAsync(desktopImage, cancellationToken);
+    var consoleReady = await sessions.ImageExistsAsync(consoleImage, cancellationToken);
     if (desktopReady && consoleReady)
     {
         return Results.Ok(new { profile.Id, status = "built" });
@@ -1893,6 +1899,15 @@ static ModelIdentity? BilledModel(string providerId, IModelRegistry models)
         string.Equals(candidate.Id, providerId, StringComparison.OrdinalIgnoreCase));
     return provider is null ? null : new ModelIdentity(provider.Id, provider.Model, provider.Locality);
 }
+
+// The image a profile really uses: profiles with their own toolchain keep their
+// own tags, while the default/office desk follows Sessions:Image (and the shared
+// console tag). SessionOrchestrator resolves this at create time, so readiness
+// must test the same string instead of treating "no image of its own" as ready.
+static string DeskImageFor(DeskProfile profile, bool console, string? configuredDesktopImage) =>
+    console
+        ? profile.NeedsOwnConsoleImage ? profile.ConsoleImage : DeskProfiles.SharedConsoleImage
+        : profile.NeedsOwnImage ? profile.Image : configuredDesktopImage ?? DeskProfiles.SharedDesktopImage;
 
 // Creating a desk starts its image build if the machine does not have it yet.
 //

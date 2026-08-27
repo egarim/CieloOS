@@ -6,6 +6,7 @@
 #
 #   tar xzf cielo-linux-arm64.tar.gz
 #   ./cielo/run.sh                 # or: PORT=6000 ./cielo/run.sh
+#   ./cielo/run.sh --prepare-sessions  # prebuild console/desktop images
 #
 # Same runtime as `install.sh --mode app`; the only difference is that this one
 # stays in your terminal and keeps its state in <bundle>/.data instead of
@@ -20,11 +21,13 @@
 set -euo pipefail
 
 PORT="${PORT:-5148}"
+PREPARE_SESSIONS=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --port) PORT="${2:?--port needs a value}"; shift 2 ;;
+    --prepare-sessions) PREPARE_SESSIONS=1; shift ;;
     -h|--help) awk 'NR>1 { if (!/^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"; exit 0 ;;
-    *) echo "Unknown option: $1 (use --port <n>)" >&2; exit 2 ;;
+    *) echo "Unknown option: $1 (use --port <n> or --prepare-sessions)" >&2; exit 2 ;;
   esac
 done
 
@@ -37,6 +40,45 @@ if [[ "$PORT" -lt 1 || "$PORT" -gt 65535 ]]; then
 fi
 
 BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "$PREPARE_SESSIONS" -eq 1 ]]; then
+  # Rootless podman keeps a store PER USER: building as root would put the images
+  # where the rootless runtime cannot see them. The foreground/WSL path is meant
+  # to be run as the normal user, so refuse root rather than build the wrong store.
+  if [[ "$(id -u)" -eq 0 ]]; then
+    echo "run.sh --prepare-sessions builds rootless podman images; run it as your normal user." >&2
+    exit 1
+  fi
+  if ! command -v podman >/dev/null 2>&1; then
+    echo "podman is required to prepare sessions; install it first (see docs/wsl-quickstart.md)." >&2
+    exit 1
+  fi
+  if [[ ! -d "$BUNDLE/images" ]]; then
+    echo "No images/ in this bundle ($BUNDLE/images missing)." >&2
+    exit 1
+  fi
+
+  # The desktop Containerfile defaults to the arm64 ONLYOFFICE package; on x64 it
+  # must be told which one, exactly as install.sh does for the installed path.
+  case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+    arm64|aarch64) OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_arm64.deb" ;;
+    *)             OO_DEB="https://download.onlyoffice.com/install/desktop/editors/linux/onlyoffice-desktopeditors_amd64.deb" ;;
+  esac
+
+  for img in console desktop; do
+    image="localhost/lunos-$img:latest"
+    if podman image exists "$image"; then
+      echo "==> $image already present"
+      continue
+    fi
+    echo "==> Building $image from $BUNDLE/images/$img"
+    args=(build -t "$image")
+    if [[ "$img" == "desktop" ]]; then
+      args+=(--build-arg "ONLYOFFICE_DEB=$OO_DEB")
+    fi
+    podman "${args[@]}" "$BUNDLE/images/$img"
+  done
+  exit 0
+fi
 test -x "$BUNDLE/bin/WorkspaceRuntime.Api" || {
   echo "Run this from the unpacked bundle ($BUNDLE/bin/WorkspaceRuntime.Api missing)." >&2; exit 1; }
 

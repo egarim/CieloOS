@@ -110,6 +110,17 @@ they simply don't start until podman is installed:
 sudo apt install -y podman uidmap slirp4netns fuse-overlayfs
 ```
 
+Then build the two session images (`localhost/lunos-console:latest` and
+`localhost/lunos-desktop:latest`) as your normal user:
+
+```bash
+./cielo/run.sh --prepare-sessions
+```
+
+`run.sh --prepare-sessions` exits when it is done. It builds into your user's
+rootless podman store, the same store the runtime reads, so do not use `sudo`.
+If you skip it, the desk list correctly reports the office desk as not ready.
+
 Rootless podman works in WSL2 with **no systemd and no `XDG_RUNTIME_DIR` fiddling** —
 WSL provides `/run/user/<uid>`, and `useradd` already gave your user subuid/subgid
 ranges. Verified: `podman info` reports `rootless=true` on `arm64`.
