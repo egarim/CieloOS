@@ -65,8 +65,8 @@ echo "==> Patching GRUB for unattended autoinstall"
 xorriso -osirrox on -indev "$ISO" -extract /boot/grub/grub.cfg "$WORK/grub.cfg" >/dev/null 2>&1
 # Append the autoinstall kernel args after every /casper/vmlinuz (skip already-patched
 # lines), and shorten the menu timeout so the USB installs hands-off. perl for BSD/GNU parity.
-perl -pi -e 's{(/casper/vmlinuz)}{$1 autoinstall ds=nocloud;s=/cdrom/autoinstall/}g unless /autoinstall/; s/^set timeout=.*/set timeout=3/;' "$WORK/grub.cfg"
-grep -q 'autoinstall ds=nocloud' "$WORK/grub.cfg" || { echo "ERROR: could not patch grub.cfg (no /casper/vmlinuz line?)" >&2; exit 1; }
+perl -pi -e 's{(/casper/vmlinuz)}{$1 autoinstall ds=nocloud\\;s=/cdrom/autoinstall/}g unless /autoinstall/; s/^set timeout=.*/set timeout=3/;' "$WORK/grub.cfg"
+grep -Fq 'autoinstall ds=nocloud\;s=/cdrom/autoinstall/' "$WORK/grub.cfg" || { echo "ERROR: could not patch grub.cfg (no /casper/vmlinuz line?)" >&2; exit 1; }
 
 echo "==> Remastering ISO -> $OUT"
 mkdir -p "$(dirname "$OUT")"
