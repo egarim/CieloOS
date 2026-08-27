@@ -147,6 +147,40 @@ For a throwaway "just show me the thing" run, prefer `run.sh` — it needs neith
 root nor systemd, which is why it exists as a separate script rather than a flag on
 `install.sh`.
 
+## Maintenance: keep the WSL disk from growing
+
+Every image rebuild leaves the previous image dangling; podman only untags it.
+Check how much can be reclaimed:
+
+```bash
+podman system df
+```
+
+Prune all unused images (this removes the dangling rebuilds, not named volumes):
+
+```bash
+podman image prune -a
+```
+
+That frees space inside WSL. The WSL virtual disk still looks the same size from
+Windows until you tell it to shrink. On current WSL builds:
+
+```powershell
+wsl --manage Ubuntu --set-sparse
+```
+
+Replace `Ubuntu` with whatever `wsl -l -v` names your distro. If `--manage` is
+not available, shut WSL down and compact the VHDX instead:
+
+```powershell
+wsl --shutdown
+Get-ChildItem "$env:LOCALAPPDATA\Packages" -Recurse -Filter ext4.vhdx |
+  Select-Object FullName
+Optimize-VHD -Path <the-ext4.vhdx-path-from-above> -Mode Full
+```
+
+Run `podman system df` again to confirm `RECLAIMABLE` has dropped.
+
 ## Why WSL2 and not a bootable USB
 
 - A Surface is ARM64: a bootable Linux USB would need an **arm64** installer (the

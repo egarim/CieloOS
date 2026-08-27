@@ -112,6 +112,41 @@ with `./install.sh --no-chat`; the panel then shows no chat link.
 Reply quality tracks the chat model: a small local model will do things like type
 `Hello!` into its own shell instead of answering. A capable cloud model behaves.
 
+
+## Podman disk maintenance
+
+Rebuilding a tagged image leaves the previous image dangling. Check and reclaim
+that space with:
+
+```bash
+podman system df
+podman image prune -a
+```
+
+On an `install.sh` machine, the runtime's images live in the `cielo` user's
+rootless store, so run those as `cielo`:
+
+```bash
+sudo -u cielo env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" podman system df
+sudo -u cielo env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" podman image prune -a
+```
+
+On WSL, pruning only frees space inside Linux. Shrink the Windows-side virtual
+disk too:
+
+```powershell
+wsl --manage Ubuntu --set-sparse
+```
+
+If `--manage` is unavailable, shut down WSL and compact the distro's `ext4.vhdx`:
+
+```powershell
+wsl --shutdown
+Optimize-VHD -Path <path-to-ext4.vhdx> -Mode Full
+```
+
+See `docs/wsl-quickstart.md` for locating the VHDX.
+
 ## Notes
 
 - Provider-free and single SQLite DB under `/opt/cielo/.data` (or `<bundle>/.data` with

@@ -279,11 +279,34 @@ esac
 # A desk is two images: the desktop the person uses, and the console their AGENT
 # works in. Building only the desktop would give a .NET desk whose agent cannot
 # run dotnet — the toolchain present for the human and missing for the machine.
+build_tagged() {
+  local tag="$1"
+  local context="$2"
+  local build_arg="${3:-}"
+  local before="$(podman image inspect -f '{{.Id}}' "$tag" 2>/dev/null || true)"
+
+  if [[ -n "$build_arg" ]]; then
+    podman build --build-arg "$build_arg" -t "$tag" "$context"
+  else
+    podman build -t "$tag" "$context"
+  fi
+
+  # podman untags the image this build replaced rather than deleting it. Drop the
+  # previous image now that the new one built, otherwise every rebuild leaves
+  # another multi-gigabyte dangling image.
+  if [[ -n "$before" ]]; then
+    local after="$(podman image inspect -f '{{.Id}}' "$tag" 2>/dev/null || true)"
+    if [[ -n "$after" && "$after" != "$before" ]]; then
+      podman image rm "$before" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 if [ -d "$root/desktop" ]; then
-  podman build --build-arg "VSCODE_DEB=${VSCODE_DEB}" -t "localhost/cielo-desk-${id}:latest" "$root/desktop"
+  build_tagged "localhost/cielo-desk-${id}:latest" "$root/desktop" "VSCODE_DEB=${VSCODE_DEB}"
 fi
 if [ -d "$root/console" ]; then
-  podman build -t "localhost/cielo-console-${id}:latest" "$root/console"
+  build_tagged "localhost/cielo-console-${id}:latest" "$root/console"
 fi
 EOF
 chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image

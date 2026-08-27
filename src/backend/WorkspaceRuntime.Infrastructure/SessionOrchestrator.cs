@@ -404,6 +404,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
                 var ok = true;
                 foreach (var (layer, image) in layers)
                 {
+                    var previousId = await ImageIdAsync(image, CancellationToken.None);
                     var arguments = new List<string> { "build", "-t", image };
                     // Only the desktop layer takes a VS Code build arg; passing an
                     // unknown one to the console layer is a warning, not an error,
@@ -424,6 +425,19 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
                     {
                         ok = false;
                         break;
+                    }
+
+                    // Re-tagging the same name leaves the previous image dangling.
+                    // Remove the old ID now that the new image has built so each
+                    // desk rebuild does not leak another multi-gigabyte image.
+                    var currentId = await ImageIdAsync(image, CancellationToken.None);
+                    if (previousId is not null && currentId is not null && previousId != currentId)
+                    {
+                        var removed = await RunPodmanAsync(new[] { "image", "rm", previousId }, CancellationToken.None);
+                        if (removed.ExitCode != 0)
+                        {
+                            transcript.AppendLine($"=== {layer} previous image {previousId} removal: {removed.Stderr.Trim()}");
+                        }
                     }
                 }
 
@@ -771,6 +785,12 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
         return (process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    private async Task<string?> ImageIdAsync(string image, CancellationToken cancellationToken)
+    {
+        var result = await RunPodmanAsync(new[] { "image", "inspect", "-f", "{{.Id}}", image }, cancellationToken);
+        return result.ExitCode == 0 ? result.Stdout.Trim() : null;
     }
 
     // The chat launcher: a chromium app-mode window on the OS's chat UI. --no-sandbox
