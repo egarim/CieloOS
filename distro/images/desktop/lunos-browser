@@ -15,8 +15,10 @@ The profile is deliberately NOT the human's. Chromium 136+ refuses remote
 debugging on the default user-data-dir, and a running browser hands new launches
 off to the existing singleton instead - so the separation the threat model wants
 is also the only thing that works. A poisoned page therefore cannot reach the
-human's logged-in sessions; to give the agent a site, the human signs in inside
-the agent's profile while watching.
+human's logged-in sessions. Agent sessions are credential-free by default: do
+not sign a human into the agent's profile. Credentialed agent profiles are
+unsupported until the egress proxy, explicit per-desk opt-in, and a visible
+credential indicator all exist.
 
 Every verb prints one line of JSON on stdout and exits 0; failures print
 {"ok": false, "detail": ...} and exit non-zero.
