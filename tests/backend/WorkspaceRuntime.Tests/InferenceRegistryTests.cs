@@ -29,6 +29,20 @@ public class InferenceRegistryTests
     }
 
     [Fact]
+    public void File_registry_reports_not_configured_when_bundle_has_no_distro_layout()
+    {
+        var missingRoot = Path.Combine(Path.GetTempPath(), "workspace-runtime-missing-config-" + Guid.NewGuid().ToString("N"));
+
+        var status = new FileLocalInferenceRegistry(missingRoot).GetStatus();
+
+        Assert.False(status.Configured);
+        Assert.Null(status.ActiveProviderId);
+        Assert.Null(status.StableEndpoint);
+        Assert.Null(status.ActiveProvider);
+        Assert.Empty(status.AvailableProviders);
+    }
+
+    [Fact]
     public void File_registry_loads_active_provider_without_coupling_to_vendor()
     {
         var registry = new FileLocalInferenceRegistry(FindRepositoryRoot());
@@ -37,16 +51,17 @@ public class InferenceRegistryTests
 
         Assert.Equal("prism-bonsai-4b", status.ActiveProviderId);
         Assert.Equal("http://127.0.0.1:5148/v1", status.StableEndpoint);
-        Assert.Equal("prism-ml/Ternary-Bonsai-4B-gguf", status.ActiveProvider.Model.UpstreamId);
-        Assert.Equal("prism-bonsai-4b", status.ActiveProvider.ProviderId);
-        Assert.Equal("local-only", status.ActiveProvider.Runtime.NetworkScope);
-        Assert.Equal("llama-server", status.ActiveProvider.Runtime.Executable);
-        Assert.Contains("-m", status.ActiveProvider.Runtime.Args);
-        Assert.Contains(status.ActiveProvider.Runtime.Args, argument =>
+        var provider = status.ActiveProvider!;
+        Assert.Equal("prism-ml/Ternary-Bonsai-4B-gguf", provider.Model.UpstreamId);
+        Assert.Equal("prism-bonsai-4b", provider.ProviderId);
+        Assert.Equal("local-only", provider.Runtime.NetworkScope);
+        Assert.Equal("llama-server", provider.Runtime.Executable);
+        Assert.Contains("-m", provider.Runtime.Args);
+        Assert.Contains(provider.Runtime.Args, argument =>
             argument.StartsWith("/opt/workspace-runtime/models/", StringComparison.Ordinal));
-        Assert.Equal("4e0bf8b737b0431552f8c2c97695ab7c0cb214c94bcdeb4f5f267e67ddf28b8b", status.ActiveProvider.Model.Artifact?.Sha256);
-        Assert.Equal("9ca265a57f85f2117942490f421f64a226dd9847", status.ActiveProvider.Runtime.Source?.Revision);
-        Assert.Contains(status.AvailableProviders, provider => provider.Id == "qwen3-4b");
+        Assert.Equal("4e0bf8b737b0431552f8c2c97695ab7c0cb214c94bcdeb4f5f267e67ddf28b8b", provider.Model.Artifact?.Sha256);
+        Assert.Equal("9ca265a57f85f2117942490f421f64a226dd9847", provider.Runtime.Source?.Revision);
+        Assert.Contains(status.AvailableProviders, entry => entry.Id == "qwen3-4b");
     }
 
     [Fact]

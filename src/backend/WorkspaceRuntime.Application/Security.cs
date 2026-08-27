@@ -29,9 +29,9 @@ public static class AccessPolicy
             return AccessLevel.Public;
         }
 
-        // /api/inference/status doubles as the readiness probe that the VM's
-        // agent-runtime.service and `workspace-agent status` call before any
-        // token can exist on a fresh installation.
+        // /api/inference/status is public because `workspace-agent status` can
+        // run before any token exists on a fresh installation. It reports
+        // provider readiness only, never identity-bearing data.
         //
         // /api/setup/* is the first-run claim: on a fresh, unclaimed machine no
         // token exists yet, so these must pass the auth gate. The claim's real

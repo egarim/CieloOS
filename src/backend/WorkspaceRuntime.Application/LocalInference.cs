@@ -81,9 +81,10 @@ public sealed record LocalInferenceHardware(
     int RecommendedMemoryGb);
 
 public sealed record LocalInferenceStatus(
-    string ActiveProviderId,
-    string StableEndpoint,
-    LocalInferenceProviderProfile ActiveProvider,
+    bool Configured,
+    string? ActiveProviderId,
+    string? StableEndpoint,
+    LocalInferenceProviderProfile? ActiveProvider,
     IReadOnlyList<LocalInferenceRegistryEntry> AvailableProviders);
 
 public sealed record ChatMessageDto(string Role, string Content);

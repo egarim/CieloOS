@@ -23,6 +23,11 @@ public sealed class FileLocalInferenceRegistry : ILocalInferenceRegistry
 
     public LocalInferenceStatus GetStatus()
     {
+        if (!File.Exists(configPath))
+        {
+            return new LocalInferenceStatus(false, null, null, null, Array.Empty<LocalInferenceRegistryEntry>());
+        }
+
         var config = ReadConfig();
         var registry = ReadRegistry(config);
         ValidateRegistry(registry);
@@ -33,13 +38,16 @@ public sealed class FileLocalInferenceRegistry : ILocalInferenceRegistry
         ValidateProvider(activeProviderId, activeProvider);
 
         return new LocalInferenceStatus(
+            true,
             activeProviderId,
             config.Api.InternalBaseUrl,
             activeProvider,
             registry.Providers);
     }
 
-    public LocalInferenceProviderProfile GetActiveProvider() => GetStatus().ActiveProvider;
+    public LocalInferenceProviderProfile GetActiveProvider() =>
+        GetStatus().ActiveProvider
+        ?? throw new InvalidOperationException("Local inference is not configured.");
 
     private LocalInferenceConfig ReadConfig() =>
         ReadJson<LocalInferenceConfig>(configPath);

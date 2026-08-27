@@ -141,6 +141,21 @@ async Task<int> AskOnceAsync(string prompt)
 async Task<int> ShowStatusAsync(bool asJson)
 {
     var status = await ReadAsync<InferenceStatus>("/api/inference/status");
+    if (!status.Configured || status.ActiveProvider is null)
+    {
+        if (asJson)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(new { configured = false, ready = false, detail = "Local inference is not configured." }, jsonOptions));
+        }
+        else
+        {
+            Console.WriteLine("Local inference is not configured.");
+            Console.WriteLine("Setup:    sudo workspace-model install");
+            Console.WriteLine();
+        }
+        return 0;
+    }
+
     var healthUrl = new Uri(new Uri(status.ActiveProvider.Runtime.OpenAiCompatibleEndpoint), "../health");
     var ready = false;
     string? detail = null;
@@ -294,7 +309,7 @@ sealed record Branding(string ProductName, string AgentName);
 sealed record ChatMessage(string Role, string Content);
 sealed record LocalChatRequest(IReadOnlyList<ChatMessage> Messages, double Temperature, int MaxTokens);
 sealed record LocalChatResponse(string ProviderId, string Model, string Content, bool Forwarded, string? Error);
-sealed record InferenceStatus(string ActiveProviderId, InferenceProvider ActiveProvider);
+sealed record InferenceStatus(bool Configured, string? ActiveProviderId, InferenceProvider? ActiveProvider);
 sealed record InferenceProvider(string DisplayName, InferenceModel Model, InferenceRuntime Runtime);
 sealed record InferenceModel(string UpstreamId);
 sealed record InferenceRuntime(string Engine, string OpenAiCompatibleEndpoint);
