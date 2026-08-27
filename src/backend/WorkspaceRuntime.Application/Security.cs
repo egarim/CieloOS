@@ -58,6 +58,16 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // A scripted demo can drive a desktop and move the mouse, so only the
+        // person at the panel may start one. The handler still applies the same
+        // session ownership check as the read routes.
+        if (path.StartsWith("/api/examples/", StringComparison.OrdinalIgnoreCase)
+            && path.EndsWith("/run", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase))
+        {
+            return AccessLevel.HumanOnly;
+        }
+
         // Owner (human) actions: inviting a teammate, and changing model providers
         // or defaults. Reads (GET) of these stay AnyPrincipal.
         var isPost = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);

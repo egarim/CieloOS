@@ -982,16 +982,45 @@ app.MapPost("/api/models/defaults", (SetDefaultRequest request, IProviderConfigS
     return Results.Ok(new { capability, providerId });
 });
 
-app.MapGet("/api/workspaces", (IRuntimeStore store) => store.Workspaces);
-app.MapGet("/api/agents", (IRuntimeStore store) => store.Agents);
-app.MapGet("/api/audit-events", (IRuntimeStore store) => store.AuditEvents);
-app.MapGet("/api/spreadsheet", (IRuntimeStore store) => store.Spreadsheet);
+app.MapGet("/api/workspaces", (HttpContext context, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    return store.Workspaces.Where(workspace =>
+        OwnerSlug(workspace.OwnerUserId, store) is { } owner
+        && Ownership.CanAccessHome(caller, owner, store));
+});
+
+app.MapGet("/api/agents", (HttpContext context, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    return store.Agents.Where(agent => Ownership.CanAccessHome(caller, agent.Slug, store));
+});
+
+app.MapGet("/api/audit-events", (HttpContext context, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    return store.AuditEvents.Where(auditEvent =>
+        AuditHomeSlugs(auditEvent, store).Any(home => Ownership.CanAccessHome(caller, home, store)));
+});
+
+app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var rootSlug = Ownership.RootUserSlug(caller.Slug, store);
+    return Ownership.CanAccessHome(caller, rootSlug, store)
+        ? Results.Ok(store.Spreadsheet)
+        : Results.Json(new { error = $"'{caller.Slug}' may not read the shared spreadsheet." },
+            statusCode: StatusCodes.Status403Forbidden);
+});
 app.MapGet("/api/inference/status", (ILocalInferenceRegistry registry) => registry.GetStatus());
 
-app.MapGet("/api/approvals", async (IRuntimeStore store, IDryRunToolExecutor dryRun, CancellationToken cancellationToken) =>
+app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, IDryRunToolExecutor dryRun, CancellationToken cancellationToken) =>
 {
+    var caller = Caller(context);
     var views = new List<object>();
-    foreach (var approval in store.Approvals)
+    foreach (var approval in store.Approvals.Where(approval =>
+        OwnerSlug(approval.UserId, store) is { } owner
+        && Ownership.CanAccessHome(caller, owner, store)))
     {
         var request = store.FindPendingRequest(approval.Id);
         EffectPreview? preview = null;
@@ -1871,6 +1900,29 @@ static async Task<IResult> ResolveAsync(
     catch (InvalidOperationException exception)
     {
         return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status409Conflict);
+    }
+}
+
+static string? OwnerSlug(Guid userId, IRuntimeStore store) =>
+    store.Users.FirstOrDefault(user => user.Id == userId)?.Slug;
+
+static IEnumerable<string> AuditHomeSlugs(AuditEvent auditEvent, IRuntimeStore store)
+{
+    if (!string.IsNullOrWhiteSpace(auditEvent.Principal))
+    {
+        yield return auditEvent.Principal;
+    }
+    if (!string.IsNullOrWhiteSpace(auditEvent.OnBehalfOf))
+    {
+        yield return auditEvent.OnBehalfOf;
+    }
+    if (auditEvent.AgentId is { } agentId && store.Agents.FirstOrDefault(agent => agent.Id == agentId) is { } agent)
+    {
+        yield return agent.Slug;
+    }
+    if (auditEvent.UserId is { } userId && store.Users.FirstOrDefault(user => user.Id == userId) is { } user)
+    {
+        yield return user.Slug;
     }
 }
 

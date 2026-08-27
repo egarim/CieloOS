@@ -35,6 +35,7 @@ public class AccessPolicyTests
     [InlineData("/api/surfaces/spreadsheet/commands/set-cell", "POST", AccessLevel.AnyPrincipal)]
     [InlineData("/api/tool-requests", "POST", AccessLevel.AnyPrincipal)]
     [InlineData("/api/approvals", "GET", AccessLevel.AnyPrincipal)]
+    [InlineData("/api/examples/02-drive-the-desktop/run", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/approvals/00000000-0000-0000-0000-000000000001/approve", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/approvals/00000000-0000-0000-0000-000000000001/reject", "POST", AccessLevel.HumanOnly)]
     [InlineData("/v1/chat/completions", "POST", AccessLevel.AnyPrincipal)]
