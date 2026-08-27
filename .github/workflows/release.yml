@@ -1,0 +1,82 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: linux-x64
+            runner: ubuntu-latest
+          - arch: linux-arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Build release bundle
+        run: |
+          chmod +x distro/scripts/build-release.sh
+          distro/scripts/build-release.sh "${{ matrix.arch }}"
+
+      - name: Smoke test release bundle
+        run: |
+          tarball="release/cielo-${{ matrix.arch }}.tar.gz"
+          test -f "$tarball" || { echo "missing tarball: $tarball" >&2; exit 1; }
+
+          entries="$(tar tzf "$tarball")"
+          assert_entry() {
+            grep -Eq "$1" <<<"$entries" || {
+              echo "smoke check failed: missing $2" >&2
+              exit 1
+            }
+          }
+
+          assert_entry '^cielo/panel/index\.html$' 'panel/index.html'
+          assert_entry '^cielo/surfaces/[^/]+\.surface\.json$' 'surfaces/*.surface.json'
+          assert_entry '^cielo/surfaces/i18n/$' 'surfaces/i18n/'
+          assert_entry '^cielo/images/desktop/examples/$' 'images/desktop/examples/'
+          assert_entry '^cielo/bin/WorkspaceRuntime\.Api$' 'bin/WorkspaceRuntime.Api'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cielo-${{ matrix.arch }}
+          path: release/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Attach release bundles
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.tar.gz
+          generate_release_notes: true

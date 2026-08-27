@@ -27,25 +27,29 @@ user. Confirm you're on WSL **2** (WSL 1 has no real kernel and won't do):
 wsl -l -v
 ```
 
-## 2. Get the bundle into WSL
+## 2. Download the release bundle into WSL
 
-The bundle is self-contained — **no .NET needed inside WSL**. Any one of:
+The bundle is self-contained — **no .NET needed inside WSL**. Download the release
+asset for your architecture:
 
-- **Build it** on a machine with the dev prerequisites (.NET 10 SDK + Node **20.19+**;
-  Ubuntu 24.04's stock Node 18 is too old for the panel's Vite 7) and copy it in:
-  ```bash
-  bash distro/scripts/build-release.sh linux-arm64   # → release/cielo-linux-arm64.tar.gz
-  ```
-- **Download** the `cielo-linux-arm64.tar.gz` release asset.
-- **Copy from the Windows filesystem** — WSL mounts your drives under `/mnt`:
-  ```bash
-  cp /mnt/c/Users/<you>/Downloads/cielo-linux-arm64.tar.gz ~/
-  ```
+```bash
+case "$(uname -m)" in
+  aarch64) ARCH=linux-arm64 ;;
+  x86_64)  ARCH=linux-x64 ;;
+  *)       echo "Unknown architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+curl -L -o "cielo-$ARCH.tar.gz" \
+  "https://github.com/egarim/CieloOS/releases/latest/download/cielo-$ARCH.tar.gz"
+```
+
+Building the bundle yourself is a development activity and is documented in
+[local-dev.md](local-dev.md); WSL users should start from the release asset.
 
 ## 3. Run it (no root, no systemd)
 
 ```bash
-tar xzf cielo-linux-arm64.tar.gz
+tar xzf "cielo-$ARCH.tar.gz"
 ./cielo/run.sh                 # or: PORT=6000 ./cielo/run.sh
 ```
 

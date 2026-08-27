@@ -9,6 +9,20 @@
 
 `./scripts/dev.sh` runs everything: it starts the backend on `http://127.0.0.1:5148` and the Vite panel on `http://127.0.0.1:5173`, then prints the owner's session token once one exists. On a fresh checkout there are no users yet, so the panel opens on the claim wizard (see [Authentication](#authentication)).
 
+## Release bundle
+
+A release tarball is the supported WSL install path. Build it from this checkout:
+
+```bash
+bash distro/scripts/build-release.sh linux-x64     # Intel/AMD
+bash distro/scripts/build-release.sh linux-arm64   # Windows-on-ARM / ARM Linux
+```
+
+Each writes `release/cielo-<arch>.tar.gz`: a self-contained bundle (no .NET needed on
+the target) with the runtime, built panel, surfaces, config, install/run scripts, and
+image Containerfiles. Node **20.19+** is required for the panel build (Ubuntu 24.04's
+stock Node 18 is too old for Vite 7).
+
 ## Backend
 
 To run just the backend:
