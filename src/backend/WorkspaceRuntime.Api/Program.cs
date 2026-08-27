@@ -1047,8 +1047,16 @@ app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, ID
     return Results.Ok(views);
 });
 
-app.MapGet("/api/surfaces", (ISurfaceRegistry surfaces) =>
-    surfaces.Surfaces.Select(surface => new { surface.Id, surface.DisplayName, surface.Kind }));
+app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
+{
+    var language = CallerLanguage(Caller(context), store);
+    return surfaces.Surfaces.Select(surface => new
+    {
+        surface.Id,
+        DisplayName = surfaces.DisplayName(surface.Id, language),
+        surface.Kind
+    });
+});
 
 // A caller sees only the sessions it can reach — its own and its agents'.
 // Without this filter the list leaks every user's session ids, owners, and
@@ -1528,6 +1536,7 @@ app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext 
 
     var principal = Caller(context);
     var ownerSlug = SpreadsheetOwner(principal, store);
+    var language = CallerLanguage(principal, store);
     var commands = manifest.Commands
         .Where(pair => SurfaceConditions.IsValidNow(pair.Value.ValidWhen, store, ownerSlug))
         .Where(pair => principal.Kind != PrincipalKind.Agent || pair.Value.ExposedToAgent)
@@ -1535,9 +1544,9 @@ app.MapGet("/api/surfaces/{surfaceId}/commands", (string surfaceId, HttpContext 
         .Select(pair => new
         {
             Name = pair.Key,
-            pair.Value.DisplayName,
+            DisplayName = surfaces.CommandDisplayName(surfaceId, pair.Key, language),
             Decision = pair.Value.Policy.DefaultDecision,
-            pair.Value.Policy.Reason,
+            Reason = surfaces.Reason(surfaceId, pair.Key, language),
             pair.Value.DryRun,
             pair.Value.Reversible,
             pair.Value.Input
@@ -1933,6 +1942,14 @@ static IEnumerable<string> AuditHomeSlugs(AuditEvent auditEvent, IRuntimeStore s
 
 static RuntimePrincipal Caller(HttpContext context) =>
     (RuntimePrincipal)context.Items["principal"]!;
+
+static string CallerLanguage(RuntimePrincipal principal, IRuntimeStore store)
+{
+    var ownerSlug = SpreadsheetOwner(principal, store);
+    var user = store.Users.FirstOrDefault(candidate =>
+        string.Equals(candidate.Slug, ownerSlug, StringComparison.Ordinal));
+    return user?.Language ?? Languages.Default;
+}
 
 static string SpreadsheetOwner(RuntimePrincipal principal, IRuntimeStore store) =>
     Ownership.RootUserSlug(principal.Slug, store);

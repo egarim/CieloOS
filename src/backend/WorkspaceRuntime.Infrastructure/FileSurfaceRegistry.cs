@@ -9,6 +9,7 @@ public sealed class FileSurfaceRegistry : ISurfaceRegistry
     private static readonly HashSet<string> ValidWhenVocabulary = new(StringComparer.Ordinal) { "always", "has-cells" };
 
     private readonly List<SurfaceManifest> surfaces = new();
+    private readonly IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> translations;
 
     public FileSurfaceRegistry(string repositoryRoot)
     {
@@ -34,12 +35,83 @@ public sealed class FileSurfaceRegistry : ISurfaceRegistry
         {
             throw new InvalidOperationException($"No surface manifests were found in {surfacesDirectory}.");
         }
+
+        translations = LoadTranslations(surfacesDirectory);
     }
 
     public IReadOnlyList<SurfaceManifest> Surfaces => surfaces;
 
     public SurfaceManifest? Find(string id) =>
         surfaces.FirstOrDefault(surface => string.Equals(surface.Id, id, StringComparison.Ordinal));
+
+    public string DisplayName(string surfaceId, string language)
+    {
+        var manifest = Find(surfaceId);
+        return Translate($"{surfaceId}.displayName", language, manifest?.DisplayName ?? surfaceId);
+    }
+
+    public string CommandDisplayName(string surfaceId, string command, string language)
+    {
+        var manifest = Find(surfaceId);
+        var fallback = command;
+        if (manifest is not null && manifest.Commands.TryGetValue(command, out var spec))
+        {
+            fallback = spec.DisplayName;
+        }
+
+        return Translate($"{surfaceId}.{command}.displayName", language, fallback);
+    }
+
+    public string Reason(string surfaceId, string command, string language)
+    {
+        var manifest = Find(surfaceId);
+        var fallback = command;
+        if (manifest is not null && manifest.Commands.TryGetValue(command, out var spec))
+        {
+            fallback = spec.Policy.Reason;
+        }
+
+        return Translate($"{surfaceId}.{command}.reason", language, fallback);
+    }
+
+    private string Translate(string key, string language, string fallback)
+    {
+        var code = Languages.Resolve(language).Code;
+        if (translations.TryGetValue(code, out var entries)
+            && entries.TryGetValue(key, out var translated)
+            && !string.IsNullOrWhiteSpace(translated))
+        {
+            return translated;
+        }
+
+        return fallback;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, string>> LoadTranslations(string surfacesDirectory)
+    {
+        var translationsDirectory = Path.Combine(surfacesDirectory, "i18n");
+        if (!Directory.Exists(translationsDirectory))
+        {
+            return new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+        }
+
+        var loaded = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+        foreach (var path in Directory.EnumerateFiles(translationsDirectory, "*.json")
+                     .OrderBy(name => name, StringComparer.Ordinal))
+        {
+            var language = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            var entries = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                entries[property.Name] = property.Value.GetString() ?? "";
+            }
+
+            loaded[language] = entries;
+        }
+
+        return loaded;
+    }
 
     // A malformed manifest fails startup rather than degrading silently: the
     // manifest is the contract the UI, policy engine, and agents all trust.

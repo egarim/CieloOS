@@ -562,13 +562,31 @@ public class ShippedToNewInstallationsTests
         TestRepository.Root(), "distro", "install.sh"));
 
     [Fact]
-    public void The_release_bundle_carries_the_translations_not_only_the_manifests()
+    public void A_Russian_caller_receives_the_Russian_consent_reason()
     {
-        // `cp surfaces/*.surface.json` alone ships a bundle whose consent prompts
-        // are English everywhere — and it LOOKS fine, because the panel falls back
-        // rather than failing. Nobody sees a bug; they see a machine that never
-        // speaks their language.
-        Assert.Contains("surfaces/i18n", Release());
+        // The old test only proved the bundle contained a directory name. The
+        // feature that matters is that the registry reads those files and the
+        // policy engine hands a Russian caller the Russian reason.
+        var store = new InMemoryRuntimeStore();
+        var user = store.Users[0] with { Language = "ru" };
+        var agent = store.Agents[0];
+        var request = new ToolRequest(
+            Guid.NewGuid(),
+            user.Id,
+            agent.Id,
+            "browser",
+            "navigate",
+            new Dictionary<string, string>(),
+            DateTimeOffset.UtcNow);
+        var surfaces = TestRepository.Surfaces();
+        var evaluation = new ManifestPolicyEngine(surfaces).Evaluate(user, agent, request);
+
+        Assert.Equal(PolicyDecision.RequireApproval, evaluation.Decision);
+        Assert.Equal(surfaces.Reason("browser", "navigate", "ru"), evaluation.Reason);
+        Assert.Contains("Переход по адресу", evaluation.Reason);
+        Assert.NotEqual(
+            surfaces.Find("browser")!.Commands["navigate"].Policy.Reason,
+            evaluation.Reason);
     }
 
     [Fact]

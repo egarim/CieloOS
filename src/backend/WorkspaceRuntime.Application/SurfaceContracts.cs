@@ -47,6 +47,9 @@ public interface ISurfaceRegistry
 {
     IReadOnlyList<SurfaceManifest> Surfaces { get; }
     SurfaceManifest? Find(string id);
+    string DisplayName(string surfaceId, string language);
+    string CommandDisplayName(string surfaceId, string command, string language);
+    string Reason(string surfaceId, string command, string language);
 }
 
 // The single policy source of truth: decisions come from surface manifests,
@@ -85,12 +88,13 @@ public sealed class ManifestPolicyEngine : IPolicyEngine
             ["command"] = request.Operation,
             ["reversible"] = command.Reversible ? "true" : "false"
         };
+        var reason = surfaces.Reason(manifest.Id, request.Operation, user.Language);
 
         return command.Policy.DefaultDecision switch
         {
-            "Allow" => new PolicyEvaluation(PolicyDecision.Allow, command.Policy.Reason, evidence),
-            "RequireApproval" => new PolicyEvaluation(PolicyDecision.RequireApproval, command.Policy.Reason, evidence),
-            _ => new PolicyEvaluation(PolicyDecision.Deny, command.Policy.Reason, evidence)
+            "Allow" => new PolicyEvaluation(PolicyDecision.Allow, reason, evidence),
+            "RequireApproval" => new PolicyEvaluation(PolicyDecision.RequireApproval, reason, evidence),
+            _ => new PolicyEvaluation(PolicyDecision.Deny, reason, evidence)
         };
     }
 
