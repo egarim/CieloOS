@@ -186,4 +186,20 @@ public static class Ownership
 
         return slug;
     }
+
+    // A caller may read the spreadsheet of the owner group it belongs to. The
+    // sheet is keyed by RootUserSlug — a user and its agents share one — so the
+    // caller's own group needs no check. An explicit `owner` is honoured only
+    // when it names that same group; otherwise null, so a caller can never read
+    // another owner group's sheet.
+    public static string? ReadableSpreadsheetOwner(RuntimePrincipal caller, string? requestedOwner, IRuntimeStore store)
+    {
+        var myRoot = RootUserSlug(caller.Slug, store);
+        if (string.IsNullOrWhiteSpace(requestedOwner))
+        {
+            return myRoot;
+        }
+
+        return string.Equals(requestedOwner, myRoot, StringComparison.Ordinal) ? myRoot : null;
+    }
 }

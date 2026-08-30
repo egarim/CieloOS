@@ -1003,14 +1003,14 @@ app.MapGet("/api/audit-events", (HttpContext context, IRuntimeStore store) =>
         AuditHomeSlugs(auditEvent, store).Any(home => Ownership.CanAccessHome(caller, home, store)));
 });
 
-app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store) =>
+app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store, string? owner = null) =>
 {
     var caller = Caller(context);
-    var rootSlug = Ownership.RootUserSlug(caller.Slug, store);
-    return Ownership.CanAccessHome(caller, rootSlug, store)
-        ? Results.Ok(store.GetSpreadsheet(rootSlug))
-        : Results.Json(new { error = $"'{caller.Slug}' may not read the shared spreadsheet." },
-            statusCode: StatusCodes.Status403Forbidden);
+    var ownerSlug = Ownership.ReadableSpreadsheetOwner(caller, owner, store);
+    return ownerSlug is null
+        ? Results.Json(new { error = $"'{caller.Slug}' may not read the shared spreadsheet." },
+            statusCode: StatusCodes.Status403Forbidden)
+        : Results.Ok(store.GetSpreadsheet(ownerSlug));
 });
 app.MapGet("/api/inference/status", (ILocalInferenceRegistry registry) => registry.GetStatus());
 
