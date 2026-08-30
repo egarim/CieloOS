@@ -20,6 +20,30 @@
 # removes the control-plane state, not those. See `podman volume ls`.
 set -euo pipefail
 
+# A small spinner so a long install step (a podman build, say) looks alive rather
+# than frozen. `spinner <message> <cmd...>` runs the command in the background,
+# renders a rotating glyph until it exits, then clears the line and passes the
+# command's exit status back. On failure it prints the captured log so the user
+# is not left staring at a blank line.
+spinner() {
+  local message="$1"; shift
+  local glyph=('-' '\' '|' '/') i=0 pid rc=0 log
+  log="$(mktemp)"
+  "$@" >"$log" 2>&1 & pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r\033[36m%s\033[0m %s' "${glyph[$((i % 4))]}" "$message"
+    i=$((i + 1)); sleep 0.15
+  done
+  wait "$pid" || rc=$?
+  printf '\r\033[2K'
+  if [[ "$rc" -ne 0 ]]; then
+    cat "$log"
+  else
+    rm -f "$log"
+  fi
+  return "$rc"
+}
+
 PORT="${PORT:-5148}"
 PREPARE_SESSIONS=0
 while [[ $# -gt 0 ]]; do
@@ -75,7 +99,7 @@ if [[ "$PREPARE_SESSIONS" -eq 1 ]]; then
     if [[ "$img" == "desktop" ]]; then
       args+=(--build-arg "ONLYOFFICE_DEB=$OO_DEB")
     fi
-    podman "${args[@]}" "$BUNDLE/images/$img"
+    spinner "Building $image (this can take a few minutes)..." podman "${args[@]}" "$BUNDLE/images/$img"
   done
   exit 0
 fi

@@ -182,6 +182,11 @@ if [[ "$LIVE" -eq 1 && "$CI" -eq 0 ]]; then
 fi
 install -d /opt/cielo
 cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cielo/
+# The third-party attribution lands with the files it describes, not in the data
+# dir: it is documentation of what /opt/cielo runs, so /opt/cielo is the right home.
+if [[ -f "$BUNDLE/THIRD-PARTY.md" ]]; then
+  cp "$BUNDLE/THIRD-PARTY.md" /opt/cielo/THIRD-PARTY.md
+fi
 install -d -o cielo -g cielo /opt/cielo/.data
 chown -R cielo:cielo /opt/cielo
 

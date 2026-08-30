@@ -54,7 +54,14 @@ cp "$ROOT/distro/config/cielo.env.example" "$STAGE/cielo.env.example"
 mkdir -p "$STAGE/images"
 cp -a "$ROOT/distro/images/." "$STAGE/images/"
 cp "$ROOT/distro/RELEASE-README.md" "$STAGE/README.md" 2>/dev/null || true
-chmod +x "$STAGE/install.sh" "$STAGE/run.sh" "$STAGE/cielo-selftest.sh"
+# The third-party attribution rides in the bundle so it can be placed at
+# /opt/cielo/THIRD-PARTY.md by install.sh alongside the installed runtime.
+cp "$ROOT/THIRD-PARTY.md" "$STAGE/THIRD-PARTY.md"
+# The animated "Installing CieloOS..." page and the first-run auto-claim used by
+# the one-liner install.
+cp "$ROOT/distro/scripts/cielo-install-ui.sh" "$STAGE/cielo-install-ui.sh"
+cp "$ROOT/distro/scripts/cielo-first-run.sh" "$STAGE/cielo-first-run.sh"
+chmod +x "$STAGE/install.sh" "$STAGE/run.sh" "$STAGE/cielo-selftest.sh" "$STAGE/cielo-install-ui.sh" "$STAGE/cielo-first-run.sh"
 
 TARBALL="$OUT/cielo-$ARCH.tar.gz"
 echo "==> Packing $TARBALL"
