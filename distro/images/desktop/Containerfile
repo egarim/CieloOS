@@ -35,6 +35,10 @@ RUN chmod +x /usr/local/bin/lunos-atspi
 # host and one owner's browser stays out of another's reach.
 COPY lunos-browser /usr/local/bin/lunos-browser
 RUN chmod +x /usr/local/bin/lunos-browser
+# The egress proxy the browser is launched behind (#17): every request is
+# allowlist-checked, not just the ones during a command.
+COPY lunos-egress-proxy /usr/local/bin/lunos-egress-proxy
+RUN chmod +x /usr/local/bin/lunos-egress-proxy
 
 # The `recorder` surface: capture the session's desktop to an MP4 so the agent can
 # turn the work it just did into a tutorial. The base image already ships the

@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""Per-desk egress proxy for the agent browser (#17).
+
+``lunos-browser`` launches Chromium with ``--proxy-server=127.0.0.1:<port>``, so
+EVERY request the agent browser makes — while a command is running or not — goes
+through this proxy, not just during a single CDP interception. It sees
+``CONNECT host:port`` for TLS, which is exactly the granularity an egress
+allowlist needs: the host, not the URL. A host is allowed only if it (or a parent
+domain) is on the desk's allowlist (``CIELO_EGRESS_ALLOWLIST``, comma-separated;
+empty means deny-by-default).
+
+Run by lunos-browser at session start, in the container. This is the
+always-on enforcement that command-scoped CDP interception cannot provide.
+"""
+import os
+import socket
+import threading
+import urllib.parse
+
+LISTEN_HOST = "127.0.0.1"
+LISTEN_PORT = int(os.environ.get("CIELO_EGRESS_PROXY_PORT", "9444"))
+ALLOW = {h.strip().lower() for h in os.environ.get("CIELO_EGRESS_ALLOWLIST", "").split(",") if h.strip()}
+
+
+def allowed(host):
+    host = host.lower()
+    for domain in ALLOW:
+        domain = domain[2:] if domain.startswith("*.") else domain
+        if host == domain or host.endswith("." + domain):
+            return True
+    return False
+
+
+def read_head(sock):
+    data = b""
+    while b"\r\n" not in data:
+        chunk = sock.recv(4096)
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
+def pump(src, dst):
+    try:
+        while True:
+            chunk = src.recv(8192)
+            if not chunk:
+                break
+            dst.sendall(chunk)
+    except OSError:
+        pass
+    finally:
+        try:
+            dst.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+
+
+def handle(client):
+    try:
+        head = read_head(client)
+        if head is None:
+            return
+        parts = head.split(b"\r\n", 1)[0].split()
+        if len(parts) < 2:
+            client.sendall(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            return
+        verb, target = parts[0].upper(), parts[1].decode("ascii", "replace")
+
+        if verb == "CONNECT":
+            host, _, port_str = target.rpartition(":")
+            port = int(port_str) if port_str else 443
+        else:
+            parsed = urllib.parse.urlsplit(target if "//" in target else "http://" + target)
+            host, port = parsed.hostname or "", (parsed.port or 80)
+
+        if not allowed(host):
+            client.sendall(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            return
+
+        upstream = socket.create_connection((host, port), timeout=20)
+        if verb == "CONNECT":
+            client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+        else:
+            client.sendall(head)
+
+        threads = [
+            threading.Thread(target=pump, args=(client, upstream), daemon=True),
+            threading.Thread(target=pump, args=(upstream, client), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    except OSError:
+        pass
+    finally:
+        client.close()
+
+
+def main():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((LISTEN_HOST, LISTEN_PORT))
+    server.listen(64)
+    print("egress proxy on %s:%d allowlist=%s" % (LISTEN_HOST, LISTEN_PORT, sorted(ALLOW)), flush=True)
+    while True:
+        client, _ = server.accept()
+        threading.Thread(target=handle, args=(client,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    main()

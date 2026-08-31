@@ -28,6 +28,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -47,6 +48,9 @@ PROFILE = os.environ.get(
     "CIELO_BROWSER_PROFILE",
     f"/config/.cielo-agent-browser/{os.uname().nodename}")
 BINARY = "/usr/bin/chromium-browser"
+# The egress proxy port. Chromium is launched behind it so EVERY request — not
+# just the ones during a command — is checked against the desk allowlist.
+PROXY_PORT = int(os.environ.get("CIELO_EGRESS_PROXY_PORT", "9444"))
 
 # The roles worth showing an agent: things you can act on. The full AX tree is
 # mostly structural noise (generic containers, text runs), and handing a model
@@ -81,12 +85,33 @@ def running():
         return False
 
 
+def ensure_proxy():
+    """Start the egress proxy in the container, or confirm it is up."""
+    try:
+        with socket.create_connection(("127.0.0.1", PROXY_PORT), timeout=1):
+            return
+    except OSError:
+        pass
+    subprocess.Popen(
+        ["/usr/local/bin/lunos-egress-proxy"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", PROXY_PORT), timeout=1):
+                return
+        except OSError:
+            time.sleep(0.25)
+
+
 def launch(timeout=25.0):
     """Start the agent browser on the session's own display, or confirm it is up."""
     if running():
         return
     if not os.path.exists(BINARY):
         fail(f"No browser at {BINARY}.")
+    # Behind the egress proxy so every request is allowlist-checked, always.
+    ensure_proxy()
     os.makedirs(PROFILE, exist_ok=True)
     subprocess.Popen(
         [
@@ -94,6 +119,10 @@ def launch(timeout=25.0):
             # The webtop containers are unprivileged, so the Chromium sandbox
             # cannot start; this mirrors the image's own wrapped-chromium launcher.
             "--no-sandbox", "--test-type", "--password-store=basic",
+            # Every request goes through the egress proxy (allowlist-checked); the
+            # DevTools endpoint stays on loopback and is excluded from the proxy.
+            f"--proxy-server=127.0.0.1:{PROXY_PORT}",
+            "--proxy-bypass-list=<-loopback>",
             f"--user-data-dir={PROFILE}",
             "--remote-debugging-address=127.0.0.1",
             f"--remote-debugging-port={PORT}",
