@@ -16,12 +16,18 @@ PORT="${1:-5148}"
 BASE="http://127.0.0.1:${PORT}"
 USER_NAME="${USER:-}"
 
+# Every request here is on the box against a freshly-started runtime. A request
+# that hangs (the runtime is still warming up, or a background image build is
+# saturating it) would otherwise stall the whole install forever, so bound each
+# one: a timed-out request fails loudly instead of waiting silently.
+TIMEOUT="--max-time 20"
+
 if [[ -z "$USER_NAME" ]]; then
   echo "No OS username (\$USER) to claim as." >&2
   exit 1
 fi
 
-status="$(curl -fsS "$BASE/api/setup/status")" || {
+status="$(curl -fsS $TIMEOUT "$BASE/api/setup/status")" || {
   echo "The runtime is not up on $BASE yet (start it first)." >&2
   exit 1
 }
@@ -34,7 +40,7 @@ if printf '%s' "$status" | grep -q '"claimed":true'; then
 fi
 
 echo "==> Claiming CieloOS for '$USER_NAME'"
-resp="$(curl -fsS -XPOST "$BASE/api/setup/claim" -H 'Content-Type: application/json' \
+resp="$(curl -fsS $TIMEOUT -XPOST "$BASE/api/setup/claim" -H 'Content-Type: application/json' \
   -d "{\"name\":\"${USER_NAME}\"}")" || {
   echo "Claim failed; see the runtime log." >&2
   exit 1
@@ -47,13 +53,35 @@ if [[ -z "$slug" || -z "$token" ]]; then
   exit 1
 fi
 
-# A password you'll actually use, long enough for the length rule (>= 10).
-pw="$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)"
+# The desk password is YOURS, not a random one you never see. On a terminal,
+# prompt for it (hidden) and confirm; otherwise (a non-interactive run) fall back
+# to a generated one so the install still completes.
+pw=""
+if [[ -t 0 ]]; then
+  echo "Set a password for your CieloOS desk (at least 10 characters)."
+  while :; do
+    if IFS= read -r -s -p "  Password: " pw; then printf '\n' >&2; fi
+    if [[ ${#pw} -lt 10 ]]; then
+      echo "  Too short — use 10 or more characters." >&2
+      continue
+    fi
+    pw2=""
+    if IFS= read -r -s -p "  Confirm: " pw2; then printf '\n' >&2; fi
+    if [[ "$pw2" != "$pw" ]]; then
+      echo "  Passwords do not match." >&2
+      continue
+    fi
+    break
+  done
+else
+  pw="$(tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 16)"
+  echo "  (no terminal attached; a password was generated for you)"
+fi
 
 # Setting the FIRST password is loopback-only and needs the owner token as the
 # bearer — both true here. If it fails (say the runtime predates passwords), fall
 # back to the token.
-curl -fsS -XPOST "$BASE/api/auth/password" \
+curl -fsS $TIMEOUT -XPOST "$BASE/api/auth/password" \
   -H "Authorization: Bearer ${token}" -H 'Content-Type: application/json' \
   -d "{\"newPassword\":\"${pw}\"}" >/dev/null 2>&1 || {
   echo "  (could not set a password here; log in with the token and set one in the panel's Models tab)" >&2
