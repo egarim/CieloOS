@@ -43,7 +43,7 @@ public sealed class FirstRunSetupTests
         try
         {
             var options = new DbContextOptionsBuilder<RuntimeDbContext>().UseSqlite($"Data Source={databasePath}").Options;
-            EfRuntimeStore Store() => new(new PooledDbContextFactory<RuntimeDbContext>(options), seedDemo: false);
+            EfRuntimeStore Store() => new(new PooledDbContextFactory<RuntimeDbContext>(options), seedDemo: false, ensureCreated: true);
 
             var first = Store();
             Assert.Empty(first.Users);

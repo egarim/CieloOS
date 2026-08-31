@@ -52,7 +52,8 @@ switch (databaseProvider)
         var postgresConnection = builder.Configuration["Database:PostgresConnection"]
             ?? throw new InvalidOperationException("Database:PostgresConnection is required when Database:Provider is postgres.");
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseNpgsql(postgresConnection));
-        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled));
+        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled,
+            ensureCreated: string.Equals(builder.Configuration["Database:EnsureCreated"], "true", StringComparison.OrdinalIgnoreCase)));
         break;
 
     case "sqlite":
@@ -64,7 +65,8 @@ switch (databaseProvider)
             sqlitePath = Path.Combine(dataRoot, "workspace-runtime.db");
         }
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseSqlite($"Data Source={sqlitePath}"));
-        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled, sqlitePath));
+        builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled, sqlitePath,
+            ensureCreated: string.Equals(builder.Configuration["Database:EnsureCreated"], "true", StringComparison.OrdinalIgnoreCase)));
         break;
 
     default:

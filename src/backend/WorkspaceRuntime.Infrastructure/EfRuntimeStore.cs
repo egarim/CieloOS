@@ -13,15 +13,25 @@ public sealed class EfRuntimeStore : IRuntimeStore
     // any dev use keep the joche/yulia demo population. A shipped, provider-free
     // image is wired with seedDemo:false (see Program.cs): the machine has no
     // users, and therefore no spreadsheet row, until the first owner claims it.
-    public EfRuntimeStore(IDbContextFactory<RuntimeDbContext> contextFactory, bool seedDemo = true, string? sqliteDatabasePath = null)
+    public EfRuntimeStore(IDbContextFactory<RuntimeDbContext> contextFactory, bool seedDemo = true, string? sqliteDatabasePath = null, bool ensureCreated = false)
     {
         this.contextFactory = contextFactory;
-        EnsureCreatedAndSeeded(seedDemo, sqliteDatabasePath);
+        EnsureCreatedAndSeeded(seedDemo, sqliteDatabasePath, ensureCreated);
     }
 
-    private void EnsureCreatedAndSeeded(bool seedDemo, string? sqliteDatabasePath)
+    private void EnsureCreatedAndSeeded(bool seedDemo, string? sqliteDatabasePath, bool ensureCreated)
     {
         using var context = contextFactory.CreateDbContext();
+
+        // Testing / first-run: build the schema straight from the model, so a new
+        // column needs no migration. No history and no upgrade path — exactly right
+        // while the schema is still being shaken out. Production keeps Migrate().
+        if (ensureCreated)
+        {
+            context.Database.EnsureCreated();
+        }
+        else
+        {
 
         // A DB that was migrated by a newer build contains history rows this build
         // does not know about. Applying this build's migrations to it would either
@@ -53,6 +63,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         }
 
         context.Database.Migrate();
+        }
 
         // Per-entity guards, NOT a global `Users.Any()` early-return: a non-demo
         // machine has no users for many boots (until it is claimed), and it must
@@ -402,7 +413,8 @@ public sealed class EfRuntimeStore : IRuntimeStore
         row.Detail,
         row.CorrelationId,
         row.Principal,
-        row.OnBehalfOf);
+        row.OnBehalfOf,
+        row.SessionId);
 
     private static AuditEventRow ToRow(AuditEvent auditEvent) => new()
     {
@@ -415,7 +427,8 @@ public sealed class EfRuntimeStore : IRuntimeStore
         Detail = auditEvent.Detail,
         CorrelationId = auditEvent.CorrelationId,
         Principal = auditEvent.Principal,
-        OnBehalfOf = auditEvent.OnBehalfOf
+        OnBehalfOf = auditEvent.OnBehalfOf,
+        SessionId = auditEvent.SessionId
     };
 
     private sealed record StoredToolRequest(

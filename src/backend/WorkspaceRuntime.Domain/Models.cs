@@ -92,7 +92,8 @@ public sealed record AuditEvent(
     string Detail,
     Guid? CorrelationId = null,
     string? Principal = null,
-    string? OnBehalfOf = null);
+    string? OnBehalfOf = null,
+    string? SessionId = null);
 
 public sealed record SpreadsheetCell(string Address, string Value);
 

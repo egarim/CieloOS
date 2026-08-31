@@ -15,7 +15,7 @@ public sealed class PersistenceTests : IDisposable
         var options = new DbContextOptionsBuilder<RuntimeDbContext>()
             .UseSqlite($"Data Source={databasePath}")
             .Options;
-        return new EfRuntimeStore(new PooledDbContextFactory<RuntimeDbContext>(options));
+        return new EfRuntimeStore(new PooledDbContextFactory<RuntimeDbContext>(options), ensureCreated: true);
     }
 
     [Fact]

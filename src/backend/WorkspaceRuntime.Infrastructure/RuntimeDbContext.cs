@@ -63,6 +63,7 @@ public sealed class AuditEventRow
     public Guid? CorrelationId { get; set; }
     public string? Principal { get; set; }
     public string? OnBehalfOf { get; set; }
+    public string? SessionId { get; set; }
 }
 
 public sealed class PendingRequestRow

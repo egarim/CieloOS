@@ -189,7 +189,8 @@ public class OwnershipTests
         Assert.Contains(store.AuditEvents, auditEvent =>
             auditEvent.Action == "session.inhabit"
             && auditEvent.Principal == "joche"
-            && auditEvent.OnBehalfOf == "joche-agent");
+            && auditEvent.OnBehalfOf == "joche-agent"
+            && auditEvent.SessionId == "joche-agent-abc");
     }
 
     [Fact]

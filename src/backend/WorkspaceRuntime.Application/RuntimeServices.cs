@@ -289,7 +289,7 @@ public sealed class AgentRuntime
                     {
                         successDetail = DesktopLedger(dto);
                     }
-                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, successDetail, request.Id, actor, onBehalfOf));
+                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.Success, successDetail, request.Id, actor, onBehalfOf, SessionId: SessionIdOf(dto.Arguments)));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, result, null, store.AuditEvents);
 
                 case PolicyDecision.RequireApproval:
@@ -297,7 +297,7 @@ public sealed class AgentRuntime
                     var approval = new ApprovalRecord(Guid.NewGuid(), request.Id, user.Id, ApprovalStatus.Pending, evaluation.Reason, DateTimeOffset.UtcNow, null, requestHash);
                     store.UpsertApproval(approval);
                     store.SavePendingRequest(approval.Id, request);
-                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.PendingApproval, evaluation.Reason, request.Id, actor, onBehalfOf));
+                    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, $"{request.ToolName}.{request.Operation}", AuditOutcome.PendingApproval, evaluation.Reason, request.Id, actor, onBehalfOf, SessionId: SessionIdOf(dto.Arguments)));
                     return new ToolRequestResultDto(evaluation.Decision, evaluation.Reason, null, approval, store.AuditEvents);
 
                 default:
@@ -397,6 +397,13 @@ public sealed class AgentRuntime
         "key" => $"key: {dto.Arguments.GetValueOrDefault("keysym", "")}",
         _ => dto.Operation,
     };
+
+    // A command on a session carries the session id as the 'id' argument
+    // (desktop.*, session.inhabit/destroy). Capture it on the audit row so events
+    // from concurrent sessions can be separated; commands with no session leave it
+    // null. A session id is an opaque string, not a Guid.
+    private static string? SessionIdOf(IReadOnlyDictionary<string, string> arguments) =>
+        arguments.TryGetValue("id", out var id) && !string.IsNullOrWhiteSpace(id) ? id : null;
 
     private ToolRequestResultDto Denied(ToolRequest request, Guid userId, Guid agentId, string principal, string reason)
     {
