@@ -996,11 +996,12 @@ app.MapGet("/api/agents", (HttpContext context, IRuntimeStore store) =>
     return store.Agents.Where(agent => Ownership.CanAccessHome(caller, agent.Slug, store));
 });
 
-app.MapGet("/api/audit-events", (HttpContext context, IRuntimeStore store) =>
+app.MapGet("/api/audit-events", (HttpContext context, IRuntimeStore store, DateTimeOffset? since = null, DateTimeOffset? until = null, string? action = null) =>
 {
     var caller = Caller(context);
-    return store.AuditEvents.Where(auditEvent =>
+    var callerEvents = store.AuditEvents.Where(auditEvent =>
         AuditHomeSlugs(auditEvent, store).Any(home => Ownership.CanAccessHome(caller, home, store)));
+    return AuditQuery.Filter(callerEvents, since, until, action);
 });
 
 app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store, string? owner = null) =>
