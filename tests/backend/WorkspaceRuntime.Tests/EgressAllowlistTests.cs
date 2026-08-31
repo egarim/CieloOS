@@ -25,4 +25,19 @@ public class EgressAllowlistTests
         Assert.False(EgressAllowlist.IsAllowed("example.com", new HashSet<string>()));
         Assert.False(EgressAllowlist.IsAllowed(null, new HashSet<string> { "example.com" }));
     }
+
+    [Fact]
+    public void Browser_url_navigation_applies_the_egress_allowlist()
+    {
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "example.com" };
+
+        Assert.True(BrowserUrl.IsAllowed("https://example.com/page", allowed, out _));
+        Assert.True(BrowserUrl.IsAllowed("https://www.example.com/page", allowed, out _));
+        Assert.False(BrowserUrl.IsAllowed("https://evil.com/page", allowed, out var refusal));
+        Assert.Contains("egress allowlist", refusal);
+
+        // An empty allowlist is "no restriction": the scheme floor still holds,
+        // but nothing egress-level is enforced until a desk actually has a list.
+        Assert.True(BrowserUrl.IsAllowed("https://evil.com/page", new HashSet<string>(), out _));
+    }
 }

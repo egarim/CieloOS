@@ -81,7 +81,15 @@ public static class BrowserUrl
 {
     public const int MaxLength = 2048;
 
-    public static bool IsAllowed(string? url, out string reason)
+    // Without an allowlist (or with an empty one) nothing is egress-restricted;
+    // the scheme floor below holds regardless. This is the form existing callers
+    // use until a per-desk allowlist is wired through.
+    public static bool IsAllowed(string? url, out string reason) => IsAllowed(url, null, out reason);
+
+    // With a per-desk allowlist the URL's host must also pass it — that is the
+    // egress decision (#17). An empty allowlist is "no restriction", so this can
+    // be wired in without changing behaviour until a desk actually has a list.
+    public static bool IsAllowed(string? url, IReadOnlySet<string>? allowedHosts, out string reason)
     {
         if (string.IsNullOrWhiteSpace(url))
         {
@@ -115,6 +123,12 @@ public static class BrowserUrl
         if (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps)
         {
             reason = $"Only http and https may be navigated to; '{parsed.Scheme}' is refused.";
+            return false;
+        }
+
+        if (allowedHosts is { Count: > 0 } && !EgressAllowlist.IsAllowed(parsed.Host, allowedHosts))
+        {
+            reason = $"'{parsed.Host}' is not on the desk's egress allowlist.";
             return false;
         }
 
