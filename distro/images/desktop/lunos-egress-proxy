@@ -83,7 +83,11 @@ def handle(client):
         if verb == "CONNECT":
             client.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
         else:
-            client.sendall(head)
+            # A proxy receives absolute-URI ('GET http://h:p/path HTTP/1.1'); the
+            # origin server wants origin-form ('GET /path HTTP/1.1'). Rewrite.
+            path_only = (parsed.path or "/") + (("?" + parsed.query) if parsed.query else "")
+            new_head = parts[0] + b" " + path_only.encode("ascii") + b" " + parts[2] + head.split(b"\r\n", 1)[1]
+            client.sendall(new_head)
 
         threads = [
             threading.Thread(target=pump, args=(client, upstream), daemon=True),
