@@ -153,10 +153,21 @@ builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRe
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<AgentRuntime>();
 // The undo store (#18): records a snapshot of the owner's home before each
-// non-reversible action so it can be restored. NullVersionStore is the default
-// no-op, so a runtime without a real store never changes how anything runs; the
-// Git-backed store replaces it where the home is an inspectable podman volume.
-builder.Services.AddSingleton<IVersionStore, NullVersionStore>();
+// non-reversible action so it can be restored, and lets such actions run without
+// approval because they are now recoverable. Versioning is opt-in — it lowers the
+// approval bar, so it must not turn on where the home is not a podman volume we
+// can snapshot. Enable with Sessions:Versioning=true.
+builder.Services.AddSingleton<IVersionStore>(_ =>
+    string.Equals(builder.Configuration["Sessions:Versioning"], "true", StringComparison.OrdinalIgnoreCase)
+        ? new PodmanVersionStore(
+            new SessionBackendOptions
+            {
+                PodmanPath = builder.Configuration["Sessions:PodmanPath"] ?? "podman",
+                HomeVolumePrefix = "lunos-home-"
+            },
+            builder.Configuration["Sessions:SnapshotRoot"]
+                ?? Path.Combine(Environment.GetEnvironmentVariable("WORKSPACE_RUNTIME_ROOT") ?? "/var/lib/cielo", "versions"))
+        : new NullVersionStore());
 // The ledger behind issue #14: every model call recorded, per-desk and per-agent
 // ceilings enforced. Registered before the loops so they can take it.
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
