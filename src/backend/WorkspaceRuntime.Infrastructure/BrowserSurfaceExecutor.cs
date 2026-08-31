@@ -12,10 +12,14 @@ namespace WorkspaceRuntime.Infrastructure;
 public sealed class BrowserSurfaceExecutor : ISurfaceExecutor
 {
     private readonly IBrowserBackend browser;
+    private readonly IRuntimeStore store;
+    private readonly Func<string, string?> egressConfig;
 
-    public BrowserSurfaceExecutor(IBrowserBackend browser)
+    public BrowserSurfaceExecutor(IBrowserBackend browser, IRuntimeStore store, Func<string, string?> egressConfig)
     {
         this.browser = browser;
+        this.store = store;
+        this.egressConfig = egressConfig;
     }
 
     public string SurfaceId => "browser";
@@ -32,8 +36,13 @@ public sealed class BrowserSurfaceExecutor : ISurfaceExecutor
                 // the backend's own check: a javascript: URL is arbitrary script
                 // execution, which is the one capability this surface refuses to
                 // expose as a command. Letting it in through navigate would void
-                // every other row in the manifest.
-                if (!BrowserUrl.IsAllowed(url, out var refusal))
+                // every other row in the manifest. The desk's egress allowlist
+                // (#17) narrows the same gate to the owner's allowed hosts; absent
+                // one it is "no restriction".
+                var ownerDesk = DeskProfiles.Resolve(
+                    store.Users.FirstOrDefault(user => user.Id == request.UserId)?.DeskProfile ?? DeskProfiles.DefaultId);
+                var allowedHosts = EgressPolicy.AllowedHosts(ownerDesk, egressConfig);
+                if (!BrowserUrl.IsAllowed(url, allowedHosts, out var refusal))
                 {
                     return new ToolExecutionResult(false, refusal, null);
                 }

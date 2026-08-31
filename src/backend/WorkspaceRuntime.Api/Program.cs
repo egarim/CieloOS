@@ -139,7 +139,10 @@ builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequired
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => provider.GetRequiredService<SessionOrchestrator>());
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new ConsoleSurfaceExecutor(provider.GetRequiredService<IConsoleBackend>()));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new DesktopSurfaceExecutor(provider.GetRequiredService<IDesktopBackend>()));
-builder.Services.AddSingleton<ISurfaceExecutor>(provider => new BrowserSurfaceExecutor(provider.GetRequiredService<IBrowserBackend>()));
+builder.Services.AddSingleton<ISurfaceExecutor>(provider => new BrowserSurfaceExecutor(
+    provider.GetRequiredService<IBrowserBackend>(),
+    provider.GetRequiredService<IRuntimeStore>(),
+    key => builder.Configuration[key]));
 builder.Services.AddSingleton<ISurfaceExecutor>(provider => new RecorderSurfaceExecutor(provider.GetRequiredService<IRecorderBackend>()));
 // V0.6 per-session input grant: a time-boxed lease that upgrades desktop
 // typing/keys to Allow (in-memory: a restart drops all input authority).
