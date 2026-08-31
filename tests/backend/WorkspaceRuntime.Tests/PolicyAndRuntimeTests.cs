@@ -81,7 +81,10 @@ public class PolicyAndRuntimeTests
             auditEvent.Action == "spreadsheet.set-cell"
             && auditEvent.Outcome == AuditOutcome.Success
             && auditEvent.Principal == store.Agents[0].Slug
-            && auditEvent.CorrelationId is not null);
+            && auditEvent.CorrelationId is not null
+            // The audit must record WHAT happened (the executor's one-liner), not
+            // the manifest's policy-reason essay.
+            && auditEvent.Detail.Contains("Executed spreadsheet.set-cell"));
     }
 
     [Fact]

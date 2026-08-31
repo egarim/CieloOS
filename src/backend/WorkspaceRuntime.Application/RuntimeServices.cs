@@ -244,10 +244,13 @@ public sealed class AgentRuntime
                         return Denied(request, user.Id, agent.Id, actor, $"Executor rejected the request: {exception.Message}");
                     }
 
-                    // A real input ledger: record the exact input the principal
-                    // sent (console text, or desktop click coords / keystrokes),
-                    // not just "an action happened".
-                    var successDetail = evaluation.Reason;
+                    // The audit should say WHAT happened, not the manifest's
+                    // policy essay. The executor already produces a one-liner
+                    // ("Clicked link 'Learn more'. Now at ..."); use it, and only
+                    // fall back to the policy reason when it produced nothing.
+                    var successDetail = string.IsNullOrWhiteSpace(result.Message)
+                        ? evaluation.Reason
+                        : result.Message;
                     if (dto.ToolName == "console" && dto.Operation == "type")
                     {
                         successDetail = $"input: {Truncate(dto.Arguments.GetValueOrDefault("text", ""))}";
