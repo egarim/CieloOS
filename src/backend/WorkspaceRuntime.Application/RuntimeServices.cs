@@ -81,12 +81,13 @@ public sealed class AgentRuntime
     private readonly ISurfaceRegistry surfaces;
     private readonly ISessionBackend? sessions;
     private readonly ISessionInputGrants? inputGrants;
+    private readonly IVersionStore? versionStore;
 
     // Serializes every mutating operation in this single-process runtime, so
     // revision checks, approval resolution, and execution are atomic together.
     private readonly SemaphoreSlim mutationGate = new(1, 1);
 
-    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces, ISessionBackend? sessions = null, ISessionInputGrants? inputGrants = null)
+    public AgentRuntime(IRuntimeStore store, IPolicyEngine policyEngine, ISandboxedToolExecutor executor, ISurfaceRegistry surfaces, ISessionBackend? sessions = null, ISessionInputGrants? inputGrants = null, IVersionStore? versionStore = null)
     {
         this.store = store;
         this.policyEngine = policyEngine;
@@ -94,6 +95,7 @@ public sealed class AgentRuntime
         this.surfaces = surfaces;
         this.sessions = sessions;
         this.inputGrants = inputGrants;
+        this.versionStore = versionStore;
     }
 
     public Task<ToolRequestResultDto> SubmitAsync(SubmitToolRequestDto dto, RuntimePrincipal principal, CancellationToken cancellationToken) =>
@@ -223,6 +225,22 @@ public sealed class AgentRuntime
                 "Covered by an active per-session input grant.", evaluation.Evidence);
         }
 
+        // The undo floor makes a non-reversible action recoverable: a snapshot of
+        // the owner's home is taken before it runs. That is the trade that buys
+        // the agent autonomy — rather than asking a human to approve something
+        // that can now be undone, let it proceed. Only when versioning is
+        // actually enabled (a real store is wired in); a no-op store never
+        // relaxes a prompt, because then "recoverable" would be fiction.
+        var snapshotCommand = surfaces.Find(request.ToolName)?.Commands.GetValueOrDefault(request.Operation);
+        if (evaluation.Decision == PolicyDecision.RequireApproval
+            && versionStore is not null
+            && versionStore is not NullVersionStore
+            && UndoPolicy.ShouldSnapshot(snapshotCommand))
+        {
+            evaluation = new PolicyEvaluation(PolicyDecision.Allow,
+                "Recoverable: a home snapshot is taken before this action.", evaluation.Evidence);
+        }
+
         await mutationGate.WaitAsync(cancellationToken);
         try
         {
@@ -237,6 +255,18 @@ public sealed class AgentRuntime
                     ToolExecutionResult result;
                     try
                     {
+                        // The version boundary of the OS is the agent action.
+                        // Snapshot the owner's home immediately before a
+                        // NON-reversible action so its consequences can be
+                        // undone; a reversible one needs no checkpoint.
+                        var commandSpec = surfaces.Find(request.ToolName)?.Commands.GetValueOrDefault(request.Operation);
+                        if (versionStore is not null && UndoPolicy.ShouldSnapshot(commandSpec))
+                        {
+                            await versionStore.RecordBeforeAsync(
+                                store.GetUser(request.UserId).Slug, request.Id,
+                                $"{request.ToolName}.{request.Operation}", cancellationToken);
+                        }
+
                         result = await executor.ExecuteAsync(request, cancellationToken);
                     }
                     catch (ArgumentException exception)

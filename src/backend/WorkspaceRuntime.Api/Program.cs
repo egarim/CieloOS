@@ -152,6 +152,11 @@ builder.Services.AddSingleton<SurfaceExecutorRouter>(provider => new SurfaceExec
 builder.Services.AddSingleton<ISandboxedToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<IDryRunToolExecutor>(provider => provider.GetRequiredService<SurfaceExecutorRouter>());
 builder.Services.AddSingleton<AgentRuntime>();
+// The undo store (#18): records a snapshot of the owner's home before each
+// non-reversible action so it can be restored. NullVersionStore is the default
+// no-op, so a runtime without a real store never changes how anything runs; the
+// Git-backed store replaces it where the home is an inspectable podman volume.
+builder.Services.AddSingleton<IVersionStore, NullVersionStore>();
 // The ledger behind issue #14: every model call recorded, per-desk and per-agent
 // ceilings enforced. Registered before the loops so they can take it.
 builder.Services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
@@ -1002,6 +1007,25 @@ app.MapGet("/api/audit-events", (HttpContext context, IRuntimeStore store, DateT
     var callerEvents = store.AuditEvents.Where(auditEvent =>
         AuditHomeSlugs(auditEvent, store).Any(home => Ownership.CanAccessHome(caller, home, store)));
     return AuditQuery.Filter(callerEvents, since, until, action);
+});
+
+// #18: the undo trail. Histories read as actions ("before console.type 14:05"),
+// scoped to the caller's owner group like every other store-wide read.
+app.MapGet("/api/version/history", async (HttpContext context, IVersionStore versions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var ownerSlug = Ownership.RootUserSlug(caller.Slug, store);
+    return Results.Ok(await versions.ListAsync(ownerSlug, cancellationToken));
+});
+
+app.MapPost("/api/version/{id:guid}/restore", async (Guid id, HttpContext context, IVersionStore versions, IRuntimeStore store, CancellationToken cancellationToken) =>
+{
+    var caller = Caller(context);
+    var ownerSlug = Ownership.RootUserSlug(caller.Slug, store);
+    var restored = await versions.RestoreAsync(ownerSlug, id, cancellationToken);
+    return restored
+        ? Results.Ok(new { restored = true })
+        : Results.NotFound(new { error = "Snapshot not found." });
 });
 
 app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store, string? owner = null) =>
