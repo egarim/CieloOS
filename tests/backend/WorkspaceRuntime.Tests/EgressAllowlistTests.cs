@@ -40,4 +40,21 @@ public class EgressAllowlistTests
         // but nothing egress-level is enforced until a desk actually has a list.
         Assert.True(BrowserUrl.IsAllowed("https://evil.com/page", new HashSet<string>(), out _));
     }
+
+    [Fact]
+    public void Egress_policy_resolves_a_desk_allowlist_from_config()
+    {
+        var config = new Dictionary<string, string> { ["Egress:Allowlists:office"] = "example.com, *.example.org" };
+        var hosts = EgressPolicy.AllowedHosts(null, key => config.TryGetValue(key, out var value) ? value : null);
+
+        Assert.Contains("example.com", hosts);
+        Assert.Contains("*.example.org", hosts);
+    }
+
+    [Fact]
+    public void Egress_policy_defaults_to_no_restriction_when_unset()
+    {
+        var hosts = EgressPolicy.AllowedHosts(null, _ => null);
+        Assert.Empty(hosts);
+    }
 }
