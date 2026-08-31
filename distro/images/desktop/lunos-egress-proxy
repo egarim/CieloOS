@@ -32,8 +32,9 @@ def allowed(host):
 
 
 def read_head(sock):
+    # The full request head: request line plus headers, up to the blank line.
     data = b""
-    while b"\r\n" not in data:
+    while b"\r\n\r\n" not in data:
         chunk = sock.recv(4096)
         if not chunk:
             return None
@@ -86,8 +87,8 @@ def handle(client):
             # A proxy receives absolute-URI ('GET http://h:p/path HTTP/1.1'); the
             # origin server wants origin-form ('GET /path HTTP/1.1'). Rewrite.
             path_only = (parsed.path or "/") + (("?" + parsed.query) if parsed.query else "")
-            new_head = parts[0] + b" " + path_only.encode("ascii") + b" " + parts[2] + head.split(b"\r\n", 1)[1]
-            client.sendall(new_head)
+            new_head = parts[0] + b" " + path_only.encode("ascii") + b" " + parts[2] + b"\r\n" + head.split(b"\r\n", 1)[1]
+            upstream.sendall(new_head)
 
         threads = [
             threading.Thread(target=pump, args=(client, upstream), daemon=True),
