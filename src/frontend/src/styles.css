@@ -1264,3 +1264,166 @@ button.fileDownloadLink {
 .exampleSteps li.refused .stepNote::after { content: " — refused"; color: #b00020; }
 .exampleSteps li.declined .stepNote::after { content: " — you declined"; color: #b00020; }
 .exampleSteps li.failed .stepNote::after { content: " — failed"; color: #b00020; }
+
+/* Consumer Home — de-technified default landing */
+.home {
+  display: grid;
+  gap: 20px;
+  max-width: 860px;
+}
+.home .panel { box-shadow: var(--shadow); }
+.home .row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: space-between;
+}
+.home h1 {
+  font-size: 30px;
+  margin: 0 0 4px;
+}
+.home h2 {
+  border: 0;
+  color: var(--ink);
+  font-family: Fraunces, "Iowan Old Style", Georgia, serif;
+  font-size: 18px;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  margin: 0 0 14px;
+  padding: 0;
+  text-transform: none;
+}
+.home .welcome { padding: 26px; }
+.homeStatus { margin-top: 14px; }
+.homeStatus .chip { margin: 0; }
+.askCta {
+  margin-top: 6px;
+}
+.homeThings { margin-top: 6px; }
+.cards {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+button.ex {
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  box-shadow: var(--shadow-soft);
+  color: var(--ink);
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  letter-spacing: 0;
+  min-height: 0;
+  padding: 18px;
+  text-align: left;
+  text-transform: none;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+  width: 100%;
+}
+button.ex:hover {
+  background: var(--paper);
+  border-color: #c7d2fe;
+  transform: translateY(-1px);
+}
+button.ex .icon { font-size: 22px; }
+button.ex .t { font-size: 15px; font-weight: 600; }
+button.ex .d { color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
+
+/* Consumer activity / status rows */
+.tlrow {
+  align-items: center;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  justify-content: space-between;
+  padding: 12px 0;
+}
+.tlrow:last-child { border-bottom: 0; }
+.tlrow .what { font-weight: 600; }
+.tlrow .when { color: var(--ink-soft); font-size: 12px; margin-left: 4px; }
+.tlrow .principal { color: var(--ink-soft); display: block; font-size: 11px; letter-spacing: 0.1em; margin-top: 2px; }
+.outcome {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.outcome.ok { color: var(--allow); }
+.outcome.bad { color: var(--deny); }
+.outcome.hold { color: var(--hold); }
+
+/* Manage this machine */
+.manageGroup {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 14px;
+  margin-left: 10px;
+  padding-left: 16px;
+  border-left: 1px solid var(--hairline);
+}
+.manageTag {
+  color: var(--accent-strong);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* People */
+.personList { display: grid; gap: 4px; margin-top: 6px; }
+.person {
+  align-items: center;
+  border-bottom: 1px solid var(--hairline);
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 11px 0;
+}
+.person:last-child { border-bottom: 0; }
+.person .n { font-weight: 600; }
+.person .r { color: var(--ink-soft); font-size: 12px; }
+
+/* Machine */
+.mCards {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 8px;
+}
+@media (max-width: 760px) { .mCards { grid-template-columns: 1fr; } }
+.a-card {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  padding: 16px;
+}
+.a-card .t { font-weight: 600; margin: 0 0 4px; }
+.a-card .d { color: var(--ink-soft); font-size: 13px; margin: 0 0 12px; }
+
+/* Generic chip used on Home + People */
+.chip {
+  align-items: center;
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 999px;
+  color: var(--allow);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.04em;
+  padding: 4px 11px;
+}
+.chip.avail {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+  color: var(--accent-strong);
+}
+

@@ -41,7 +41,7 @@ type SessionView = { id: string; owner: string; profile: string; status: string;
 type HomeEntry = { name: string; kind: string; size: number; modifiedEpoch: number };
 type HomeListing = { owner: string; path: string; entries: HomeEntry[] };
 type HomeFile = { owner: string; path: string; content: string; truncated: boolean; size: number; binary: boolean };
-type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string };
+type Whoami = { slug: string; display: string; kind: string; homes: string[]; deskProfile?: string; deskProfileLabel?: string; isOwner?: boolean };
 type DeskProfileView = { id: string; label: string; description: string; isDefault: boolean; imageReady: boolean; buildStatus: string };
 type ApiKeyView = {
   id: string;
@@ -199,7 +199,7 @@ function App() {
   const [newSessionProfile, setNewSessionProfile] = React.useState("agent-console");
   const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [selectedDesk, setSelectedDesk] = React.useState<string | null>(null);
-  const [view, setView] = React.useState<"desk" | "examples" | "models">("desk");
+  const [view, setView] = React.useState<"home" | "desk" | "examples" | "models" | "people" | "activity" | "machine">("home");
   const [models, setModels] = React.useState<ModelsData | null>(null);
   const [providerForm, setProviderForm] = React.useState<ProviderForm>(emptyProviderForm);
   const [modelsMsg, setModelsMsg] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -1084,6 +1084,12 @@ function App() {
     .filter((event) => event.principal === selectedDesk || event.onBehalfOf === selectedDesk)
     .slice(0, 8);
   const pendingApprovals = approvals.filter((approval) => approval.status === "Pending");
+  // The consumer Home shows the signed-in person's own recent activity, drawn
+  // from the same audit feed the desk view uses, but for the whole owner group.
+  const ownHomes = new Set(whoami?.homes ?? []);
+  const homeEvents = auditEvents
+    .filter((event) => ownHomes.has(event.principal ?? "") || ownHomes.has(event.onBehalfOf ?? ""))
+    .slice(0, 6);
 
   return (
     <main>
@@ -1109,9 +1115,18 @@ function App() {
       </header>
 
       <nav className="viewNav">
+        <button className={view === "home" ? "active" : ""} onClick={() => setView("home")}>Home</button>
         <button className={view === "desk" ? "active" : ""} onClick={() => setView("desk")}>Desks</button>
         <button className={view === "examples" ? "active" : ""} onClick={() => setView("examples")}>Examples</button>
         <button className={view === "models" ? "active" : ""} onClick={() => setView("models")}>Models</button>
+        {whoami?.isOwner && (
+          <span className="manageGroup" data-automation-id="manage">
+            <span className="manageTag">Manage this machine</span>
+            <button className={view === "people" ? "active" : ""} onClick={() => setView("people")}>People</button>
+            <button className={view === "activity" ? "active" : ""} onClick={() => setView("activity")}>Activity</button>
+            <button className={view === "machine" ? "active" : ""} onClick={() => setView("machine")}>Machine</button>
+          </span>
+        )}
       </nav>
 
       {/* Session commands and approvals both report through here; without it a
@@ -1122,7 +1137,24 @@ function App() {
         </p>
       )}
 
-      {view === "examples" ? (
+      {view === "home" ? (
+        <HomeView
+          name={whoami?.display ?? ""}
+          ownHomes={whoami?.homes ?? []}
+          events={homeEvents}
+          chatUrl={branding.chatUrl}
+          agentName={branding.agentName}
+          modelName={
+            models?.defaults.chat
+              ? models.providers.find((provider) => provider.id === models.defaults.chat)?.displayName ?? models.defaults.chat
+              : null
+          }
+          isOwner={Boolean(whoami?.isOwner)}
+          onDesk={() => setView("desk")}
+          onExamples={() => setView("examples")}
+          onActivity={() => setView("activity")}
+        />
+      ) : view === "examples" ? (
         <ExamplesView sessions={sessions} />
       ) : view === "models" ? (
         <ModelsView
@@ -1154,6 +1186,12 @@ function App() {
           message={modelsMsg}
           busy={modelsBusy}
         />
+      ) : view === "people" ? (
+        <PeopleView deskProfiles={deskProfiles} onChanged={refresh} />
+      ) : view === "activity" ? (
+        <ActivityView events={auditEvents} homes={whoami?.homes ?? []} />
+      ) : view === "machine" ? (
+        <MachineView branding={branding} ownerName={whoami?.display ?? ""} slug={whoami?.slug ?? ""} onModels={() => setView("models")} />
       ) : (
         <section className="workspace">
           <aside className="desks" data-automation-id="desks-rail">
@@ -2051,6 +2089,305 @@ function ExamplesView({ sessions }: { sessions: SessionView[] }) {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Consumer Home — the default landing. De-technified on purpose: "your space",
+// "your assistant", never "identity token / desk profile / home volume". The
+// power features are still one click away, just not leading.
+// ---------------------------------------------------------------------------
+
+type FriendlyEvent = { id: string; action: string; outcome: string; occurredAt: string };
+
+function timeAgo(iso: string): string {
+  const seconds = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return `${Math.round(hours / 24)} days ago`;
+}
+
+function HomeView({
+  name,
+  events,
+  chatUrl,
+  agentName,
+  modelName,
+  isOwner,
+  onDesk,
+  onExamples,
+  onActivity
+}: {
+  name: string;
+  ownHomes: string[];
+  events: FriendlyEvent[];
+  chatUrl: string;
+  agentName: string;
+  modelName: string | null;
+  isOwner: boolean;
+  onDesk: () => void;
+  onExamples: () => void;
+  onActivity: () => void;
+}) {
+  return (
+    <section className="home" data-automation-id="home">
+      <div className="panel welcome">
+        <div className="row">
+          <div>
+            <h1>Hello, {name || "there"}</h1>
+            <p className="muted">Your {agentName.toLowerCase()} is here and everything's good.</p>
+          </div>
+          <button data-automation-id="home-open-desktop" onClick={onDesk}>
+            <ShieldCheck size={16} /> Open my desktop
+          </button>
+        </div>
+        <p className="homeStatus">
+          <span className={`chip${modelName ? "" : " avail"}`}>
+            {modelName ? `${modelName} is ready to help` : "No brain set up yet — Add one in Models?"}
+          </span>
+        </p>
+      </div>
+
+      <div className="panel">
+        <div className="row">
+          <h2>What it did</h2>
+          <button className="btn ghost small" onClick={isOwner ? onActivity : onDesk}>
+            See all
+          </button>
+        </div>
+        {events.length === 0 ? (
+          <p className="muted">Nothing yet. Ask your assistant to do something and it'll show up here.</p>
+        ) : (
+          <div className="tl" data-automation-id="home-activity">
+            {events.map((event) => (
+              <div className="tlrow" key={event.id}>
+                <div>
+                  <span className="what">{event.action}</span>
+                  <span className="when">· {timeAgo(event.occurredAt)}</span>
+                </div>
+                <span className={`outcome ${event.outcome === "Success" ? "ok" : event.outcome === "Blocked" ? "bad" : "hold"}`}>
+                  {event.outcome}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="row"><h2>Ask your assistant</h2>{modelName && <span className="chip">Ready</span>}</div>
+        {chatUrl ? (
+          <button
+            className="askCta"
+            data-automation-id="home-ask"
+            onClick={() => window.open(chatUrl, "_blank", "noopener")}
+          >
+            Ask your assistant <ArrowRight size={16} />
+          </button>
+        ) : (
+          <p className="muted small">
+            No chat window is set up on this machine. Open a desktop and talk to your assistant there.
+          </p>
+        )}
+      </div>
+
+      <div className="homeThings">
+        <h2>Need inspiration?</h2>
+        <div className="cards">
+          <button className="ex" onClick={onDesk}>
+            <span className="icon">🖥️</span>
+            <span className="t">Show me the desktop</span>
+            <span className="d">Your assistant drives the screen and works.</span>
+          </button>
+          <button className="ex" onClick={onExamples}>
+            <span className="icon">📊</span>
+            <span className="t">Make a spreadsheet</span>
+            <span className="d">A little budget, in a minute.</span>
+          </button>
+          <button className="ex" onClick={onExamples}>
+            <span className="icon">🌐</span>
+            <span className="t">Look something up</span>
+            <span className="d">Your assistant searches and shows you.</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manage this machine → People. Owner-only. List who lives here and invite
+// more, each with their own space.
+// ---------------------------------------------------------------------------
+
+type Person = { slug: string; displayName: string; email?: string };
+
+function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView[]; onChanged: () => void }) {
+  const [people, setPeople] = React.useState<Person[]>([]);
+  const [name, setName] = React.useState("");
+  const [profile, setProfile] = React.useState(deskProfiles[0]?.id ?? "office");
+  const [busy, setBusy] = React.useState(false);
+  const [result, setResult] = React.useState<{ slug: string; token: string } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    api<Person[]>("/api/users").then(setPeople).catch(() => undefined);
+  }, []);
+
+  async function addPerson() {
+    const trimmed = name.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api<{ slug: string; token: string }>("/api/users", {
+        method: "POST",
+        body: JSON.stringify({ name: trimmed, deskProfile: profile })
+      });
+      setResult(created);
+      setName("");
+      setPeople(await api<Person[]>("/api/users"));
+      onChanged();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="grid" data-automation-id="people">
+      <div className="panel">
+        <h2>People who use this machine</h2>
+        <p className="muted small">Each person gets their own space, assistant, and desktop. Add someone to share this machine.</p>
+        {people.length === 0 ? (
+          <p className="muted">No one yet.</p>
+        ) : (
+          <div className="personList">
+            {people.map((person) => (
+              <div className="person" key={person.slug}>
+                <div>
+                  <div className="n">{person.displayName || person.slug}</div>
+                  <div className="r">{person.slug}</div>
+                </div>
+                <span className="chip avail">{person.slug === people[0]?.slug ? "Owner" : "Space"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <h2>Add someone</h2>
+        <div className="field">
+          <label>Their name</label>
+          <input data-automation-id="people-name" value={name} placeholder="e.g. Maria" disabled={busy}
+            onChange={(event) => setName(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && addPerson()} />
+        </div>
+        {deskProfiles.length > 0 && (
+          <div className="field">
+            <label>Their space</label>
+            <select data-automation-id="people-profile" value={profile} disabled={busy}
+              onChange={(event) => setProfile(event.target.value)}>
+              {deskProfiles.map((desk) => (
+                <option key={desk.id} value={desk.id}>{desk.label}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <button data-automation-id="people-add" disabled={busy || !name.trim()} onClick={addPerson}>
+          {busy ? <><Loader2 size={16} className="spin" /> Adding…</> : <><UserPlus size={16} /> Add someone</>}
+        </button>
+        {error && <p className="decision deny small">{error}</p>}
+        {result && (
+          <div className="teammateToken" data-automation-id="people-result">
+            <p className="muted small">Created <strong>{result.slug}</strong>. Share this with them — it's how they sign in:</p>
+            <code className="tokenValue">{result.token}</code>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manage this machine → Activity. Owner-only. What happened, newest first.
+// ---------------------------------------------------------------------------
+
+function ActivityView({ events, homes }: { events: AuditEvent[]; homes: string[] }) {
+  const owned = new Set(homes);
+  const recent = events
+    .filter((event) => owned.has(event.principal ?? "") || owned.has(event.onBehalfOf ?? ""))
+    .slice(0, 12);
+
+  return (
+    <section className="grid" data-automation-id="activity">
+      <div className="panel">
+        <h2>What happened</h2>
+        <p className="muted small">Everything your spaces and assistants have done, newest first.</p>
+        {recent.length === 0 ? (
+          <p className="muted">Nothing recorded yet.</p>
+        ) : (
+          <div className="tl">
+            {recent.map((event) => (
+              <div className="tlrow" key={event.id}>
+                <div>
+                  <span className="what">{event.action}</span>
+                  <span className="when">· {timeAgo(event.occurredAt)}</span>
+                  <span className="principal">{event.principal ?? ""}{event.onBehalfOf ? ` → ${event.onBehalfOf}` : ""}</span>
+                </div>
+                <span className={`outcome ${event.outcome === "Success" ? "ok" : event.outcome === "Blocked" ? "bad" : "hold"}`}>
+                  {event.outcome}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Manage this machine → Machine. Owner-only. About the box and what it can do.
+// ---------------------------------------------------------------------------
+
+function MachineView({ branding, ownerName, slug, onModels }: { branding: Branding; ownerName: string; slug: string; onModels: () => void }) {
+  return (
+    <section className="grid" data-automation-id="machine">
+      <div className="panel">
+        <h2>About this machine</h2>
+        <p className="muted small">
+          This is a {branding.productName} machine run by {ownerName}. It's yours — space, assistant, and desktop.
+        </p>
+        <div className="mCards">
+          <div className="a-card">
+            <div className="t">Update</div>
+            <div className="d">New versions of {branding.productName} arrive automatically. You're up to date.</div>
+            <button className="btn ghost small" disabled>Check</button>
+          </div>
+          <div className="a-card">
+            <div className="t">Backup</div>
+            <div className="d">A copy of everything, in case you need it back.</div>
+            <button className="btn ghost small" disabled>Available soon</button>
+          </div>
+          <div className="a-card">
+            <div className="t">Safe mode</div>
+            <div className="d">Stop your assistant doing anything until you say so.</div>
+            <button className="btn ghost small" disabled>Available soon</button>
+          </div>
+          <div className="a-card">
+            <div className="t">Sign-in</div>
+            <div className="d">Your space is <code>{slug}</code>. Change your password or add a model.</div>
+            <button className="btn ghost small" onClick={onModels}>Open Models</button>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }

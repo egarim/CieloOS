@@ -1388,7 +1388,7 @@ app.MapPost("/api/sessions/{id}/desktop-run", async (string id, DesktopRunReques
     return Results.Ok(result);
 });
 
-app.MapGet("/api/whoami", (HttpContext context) =>
+app.MapGet("/api/whoami", (HttpContext context, ISetupService setup) =>
 {
     var caller = Caller(context);
     var ownedHomes = caller.Kind == PrincipalKind.Human
@@ -1411,6 +1411,18 @@ app.MapGet("/api/whoami", (HttpContext context) =>
     var language = Languages.Resolve(
         runtimeStore.Users.FirstOrDefault(candidate => candidate.Slug == rootSlug)?.Language);
 
+    // The person who set this machine up is the owner, and it is the owner alone
+    // who sees the "Manage this machine" area. SetupService.OwnerSlug() is null
+    // once there is more than one human, so fall back to the first-created user —
+    // the same "founding owner" the owner-keyed-spreadsheet migration uses
+    // (ORDER BY rowid LIMIT 1). Extensible: a grantable-admin role later only has
+    // to OR an extra slug into this predicate.
+    var founderSlug = caller.Kind == PrincipalKind.Human
+        ? setup.OwnerSlug() ?? runtimeStore.Users.FirstOrDefault()?.Slug
+        : null;
+    var isOwner = founderSlug is not null
+        && string.Equals(caller.Slug, founderSlug, StringComparison.Ordinal);
+
     return Results.Ok(new
     {
         caller.Slug,
@@ -1419,7 +1431,8 @@ app.MapGet("/api/whoami", (HttpContext context) =>
         homes = ownedHomes,
         deskProfile = deskProfile.Id,
         deskProfileLabel = deskProfile.Label,
-        language = language.Code
+        language = language.Code,
+        isOwner
     });
 });
 
