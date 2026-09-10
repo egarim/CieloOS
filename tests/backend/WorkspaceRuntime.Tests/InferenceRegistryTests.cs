@@ -82,6 +82,55 @@ public class InferenceRegistryTests
         Assert.Contains("prism-ml/Ternary-Bonsai-4B-gguf", handler.Body);
     }
 
+    [Fact]
+    public void File_registry_finds_the_payload_in_a_bundle_layout()
+    {
+        // A run.sh bundle and an install.sh installation flatten distro/ away, so
+        // config/ and models/ sit beside the binary. That is the layout every real
+        // installation has, and it reported "not configured" for months while a git
+        // checkout worked — the registry was looking under distro/ and nothing else.
+        var repositoryRoot = FindRepositoryRoot();
+        var bundleRoot = Path.Combine(Path.GetTempPath(), "workspace-runtime-bundle-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(bundleRoot, "config"));
+            File.Copy(
+                Path.Combine(repositoryRoot, "distro", "config", "local-inference.json"),
+                Path.Combine(bundleRoot, "config", "local-inference.json"));
+            CopyDirectory(
+                Path.Combine(repositoryRoot, "distro", "models"),
+                Path.Combine(bundleRoot, "models"));
+
+            var status = new FileLocalInferenceRegistry(bundleRoot).GetStatus();
+
+            Assert.True(status.Configured);
+            Assert.Equal("prism-bonsai-4b", status.ActiveProviderId);
+            Assert.NotNull(status.ActiveProvider);
+            Assert.Contains(status.AvailableProviders, entry => entry.Id == "qwen3-4b");
+        }
+        finally
+        {
+            if (Directory.Exists(bundleRoot))
+            {
+                Directory.Delete(bundleRoot, recursive: true);
+            }
+        }
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var file in Directory.GetFiles(source))
+        {
+            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
+        }
+
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            CopyDirectory(directory, Path.Combine(destination, Path.GetFileName(directory)));
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
