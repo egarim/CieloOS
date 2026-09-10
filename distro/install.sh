@@ -182,6 +182,10 @@ if [[ "$LIVE" -eq 1 && "$CI" -eq 0 ]]; then
 fi
 install -d /opt/cielo
 cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cielo/
+# models/ holds the local-inference registry and its provider manifests, which
+# config/local-inference.json points at. Older bundles predate it, so tolerate its
+# absence rather than failing an upgrade from one.
+[[ -d "$BUNDLE/models" ]] && cp -a "$BUNDLE/models" /opt/cielo/
 # The third-party attribution lands with the files it describes, not in the data
 # dir: it is documentation of what /opt/cielo runs, so /opt/cielo is the right home.
 if [[ -f "$BUNDLE/THIRD-PARTY.md" ]]; then

@@ -12,13 +12,22 @@ public sealed class FileLocalInferenceRegistry : ILocalInferenceRegistry
         Converters = { new JsonStringEnumConverter() }
     };
 
-    private readonly string repositoryRoot;
+    private readonly string payloadRoot;
     private readonly string configPath;
 
     public FileLocalInferenceRegistry(string repositoryRoot)
     {
-        this.repositoryRoot = repositoryRoot;
-        configPath = Path.Combine(repositoryRoot, "distro", "config", "local-inference.json");
+        // The same payload sits at two depths. A git checkout keeps it under
+        // distro/; a run.sh bundle and an install.sh installation flatten that away,
+        // so config/ and models/ land beside the binary. Locate the config first and
+        // resolve everything it points at against the SAME root — this class was the
+        // last one still assuming a checkout, which is why /api/inference/status
+        // reported "not configured" on every installed layout.
+        var checkoutRoot = Path.Combine(repositoryRoot, "distro");
+        payloadRoot = File.Exists(Path.Combine(checkoutRoot, "config", "local-inference.json"))
+            ? checkoutRoot
+            : repositoryRoot;
+        configPath = Path.Combine(payloadRoot, "config", "local-inference.json");
     }
 
     public LocalInferenceStatus GetStatus()
@@ -132,16 +141,21 @@ public sealed class FileLocalInferenceRegistry : ILocalInferenceRegistry
     {
         if (Path.IsPathRooted(path))
         {
-            const string installRoot = "/opt/workspace-runtime/";
-            if (path.StartsWith(installRoot, StringComparison.Ordinal))
+            // registryPath is written as an absolute install path. Rebase the known
+            // install roots onto wherever the payload actually is, so the shipped
+            // config works unchanged in a checkout, a bundle and an installation.
+            foreach (var installRoot in new[] { "/opt/workspace-runtime/", "/opt/cielo/" })
             {
-                return Path.Combine(repositoryRoot, "distro", path[installRoot.Length..]);
+                if (path.StartsWith(installRoot, StringComparison.Ordinal))
+                {
+                    return Path.Combine(payloadRoot, path[installRoot.Length..]);
+                }
             }
 
             return path;
         }
 
-        return Path.Combine(repositoryRoot, "distro", path);
+        return Path.Combine(payloadRoot, path);
     }
 
     private static T ReadJson<T>(string path)

@@ -42,6 +42,14 @@ if [[ -d "$ROOT/surfaces/i18n" ]]; then
   cp -a "$ROOT/surfaces/i18n/." "$STAGE/surfaces/i18n/"
 fi
 cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
+# Local inference: the config names a model registry, and the registry names the
+# per-provider manifests. All three have to travel or /api/inference/status reports
+# "not configured" on every installed layout — which it did, because only a git
+# checkout ever had them. Flattened out of distro/ so the runtime finds them beside
+# the binary, the same shape branding.json already uses.
+cp "$ROOT/distro/config/local-inference.json" "$STAGE/config/local-inference.json"
+mkdir -p "$STAGE/models"
+cp -a "$ROOT/distro/models/." "$STAGE/models/"
 
 echo "==> Staging installer + foreground launcher + service unit + self-test"
 cp "$ROOT/distro/install.sh" "$STAGE/install.sh"
