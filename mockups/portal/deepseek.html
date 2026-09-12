@@ -1,0 +1,1707 @@
+<!--
+CieloOS Portal — "The Sky Desk" concept.
+Central idea: The agent is a colleague at a shared desk. Chat is the conversation, Files are the work on the desk, Messages are notes left for you, Widgets are the tools you keep close. Permission moments are the colleague tapping your shoulder — a clear, interruptible question, not a technical checkbox.
+Trade-off: To keep it legible to non-technical people, all technical detail (session IDs, token counts, container names) is deliberately absent from the portal — it lives only in the admin panel, exactly as the brief intends.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CieloOS</title>
+    <style>
+        /* ============================
+           CIELOOS PORTAL — THE SKY DESK
+           Design system: calm, warm, spatial.
+           All labels use flexible sizing so Russian (30% longer) fits.
+           ============================ */
+
+        :root {
+            --bg: #f7f5f0;
+            --bg-gradient: linear-gradient(180deg, #e8eef5 0%, #f7f5f0 220px);
+            --surface: #ffffff;
+            --surface-hover: #f5f2ec;
+            --surface-raised: #ffffff;
+            --surface-sunken: #f0ede7;
+            --border: #e4e0d8;
+            --border-strong: #d0cac0;
+            --text: #1d1d1f;
+            --text-secondary: #5c5a56;
+            --text-muted: #8a877f;
+            --accent: #3d6f9e;
+            --accent-hover: #345e87;
+            --accent-soft: #e3edf5;
+            --agent: #1f7a5e;
+            --agent-soft: #e0f0e9;
+            --agent-hover: #18684d;
+            --warning: #b5781a;
+            --warning-soft: #fbf0de;
+            --danger: #b3403a;
+            --danger-soft: #fbeae8;
+            --shadow: 0 2px 12px rgba(0, 0, 0, 0.06), 0 8px 32px rgba(0, 0, 0, 0.05);
+            --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12), 0 16px 64px rgba(0, 0, 0, 0.08);
+            --radius: 12px;
+            --radius-sm: 8px;
+            --radius-lg: 20px;
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+            --rail-width: 200px;
+            --agent-bar-height: 56px;
+            --top-bar-height: 52px;
+            --transition: 0.2s ease;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #0e1116;
+                --bg-gradient: linear-gradient(180deg, #131b2d 0%, #0e1116 220px);
+                --surface: #181d25;
+                --surface-hover: #212833;
+                --surface-raised: #1c222b;
+                --surface-sunken: #0f1419;
+                --border: #2a313c;
+                --border-strong: #3b4450;
+                --text: #e8e6e1;
+                --text-secondary: #b0aca3;
+                --text-muted: #716e67;
+                --accent: #6ba3d1;
+                --accent-hover: #82b2dc;
+                --accent-soft: #1a2530;
+                --agent: #3aaf92;
+                --agent-soft: #162520;
+                --agent-hover: #50c4a5;
+                --warning: #d4a03c;
+                --warning-soft: #2a2214;
+                --danger: #d46a62;
+                --danger-soft: #2a1715;
+                --shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 8px 32px rgba(0, 0, 0, 0.3);
+                --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.55), 0 16px 64px rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html {
+            font-size: 16px;
+            -webkit-text-size-adjust: 100%;
+            text-size-adjust: 100%;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            background-image: var(--bg-gradient);
+            background-repeat: no-repeat;
+            background-size: 100% 220px;
+            color: var(--text);
+            min-height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ---------- TOP BAR ---------- */
+        .top-bar {
+            height: var(--top-bar-height);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .top-bar .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 1.05rem;
+            letter-spacing: 0.01em;
+            color: var(--text);
+            text-decoration: none;
+            min-width: 0;
+            flex-shrink: 1;
+        }
+        .top-bar .brand .logo-mark {
+            width: 28px;
+            height: 28px;
+            flex-shrink: 0;
+            border-radius: 8px;
+            background: linear-gradient(135deg, var(--accent), #5a8fc4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 700;
+        }
+        .top-bar .top-status {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+            white-space: nowrap;
+            overflow: hidden;
+        }
+        .top-bar .top-status .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--agent);
+            display: inline-block;
+            margin-right: 6px;
+            animation: pulse-dot 2.5s ease-in-out infinite;
+        }
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .top-bar .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--accent-soft);
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+
+        /* ---------- APP LAYOUT ---------- */
+        .app {
+            display: flex;
+            flex: 1;
+            min-height: 0;
+            position: relative;
+        }
+
+        /* ---------- LEFT RAIL ---------- */
+        .rail {
+            width: var(--rail-width);
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 12px 8px;
+            gap: 2px;
+            flex-shrink: 0;
+            position: sticky;
+            top: var(--top-bar-height);
+            height: calc(100dvh - var(--top-bar-height) - var(--agent-bar-height));
+            z-index: 10;
+            /* Russian strings are longer — rail items wrap gracefully */
+            min-width: 0;
+        }
+        .rail .rail-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            padding: 8px 12px 6px;
+            font-weight: 600;
+            user-select: none;
+        }
+        .rail-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            user-select: none;
+            transition: background var(--transition), color var(--transition);
+            color: var(--text-secondary);
+            text-decoration: none;
+            min-width: 0;
+            border: none;
+            background: none;
+            font-family: inherit;
+            font-size: 0.9rem;
+            text-align: left;
+            width: 100%;
+            /* Allow long labels to wrap instead of truncate */
+            word-break: break-word;
+            overflow-wrap: anywhere;
+        }
+        .rail-item:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+        .rail-item.active {
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-weight: 500;
+        }
+        .rail-item .icon {
+            font-size: 1.1rem;
+            flex-shrink: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .rail-item .badge {
+            margin-left: auto;
+            background: var(--warning);
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: 600;
+            border-radius: 10px;
+            padding: 1px 7px;
+            min-width: 18px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .rail-footer {
+            margin-top: auto;
+            padding: 12px 8px 4px;
+            border-top: 1px solid var(--border);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .rail-footer .lang-select {
+            background: var(--surface-sunken);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: default;
+            font-family: inherit;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .rail-footer .lang-select span {
+            opacity: 0.8;
+        }
+
+        /* ---------- MAIN CONTENT ---------- */
+        .main {
+            flex: 1;
+            min-width: 0;
+            padding: 24px 28px;
+            overflow-y: auto;
+            max-height: calc(100dvh - var(--top-bar-height) - var(--agent-bar-height));
+            scroll-behavior: smooth;
+        }
+        .view {
+            display: none;
+            max-width: 880px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        .view.active {
+            display: block;
+            animation: fade-in 0.25s ease;
+        }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(4px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* View headers */
+        .view-header {
+            margin-bottom: 20px;
+        }
+        .view-header h2 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: var(--text);
+            /* Long Russian titles wrap naturally */
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .view-header .subtitle {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 2px;
+            overflow-wrap: anywhere;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px 18px;
+            box-shadow: var(--shadow);
+            transition: transform var(--transition), box-shadow var(--transition);
+            min-width: 0;
+        }
+        .card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.07), 0 12px 42px rgba(0,0,0,0.06);
+        }
+
+        /* ---------- CHAT VIEW ---------- */
+        .chat-thread {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .chat-msg {
+            display: flex;
+            flex-direction: column;
+            max-width: 85%;
+            min-width: 0;
+            animation: fade-in 0.3s ease;
+        }
+        .chat-msg.user {
+            align-self: flex-end;
+            align-items: flex-end;
+        }
+        .chat-msg.agent {
+            align-self: flex-start;
+            align-items: flex-start;
+        }
+        .chat-msg .bubble {
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 0.92rem;
+            line-height: 1.5;
+            min-width: 0;
+            word-break: break-word;
+            overflow-wrap: anywhere;
+            max-width: 100%;
+        }
+        .chat-msg.user .bubble {
+            background: var(--accent);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+        }
+        .chat-msg.agent .bubble {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+            color: var(--text);
+        }
+        .chat-msg .meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+            padding: 0 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .chat-msg .agent-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--agent-soft);
+            color: var(--agent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 600;
+            flex-shrink: 0;
+            margin-bottom: 2px;
+        }
+
+        /* Working indicator in chat */
+        .working-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--agent-soft);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 16px;
+            max-width: 400px;
+            min-width: 0;
+            animation: fade-in 0.3s ease;
+        }
+        .working-card .spinner {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--agent);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .working-card .working-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .working-card .working-text strong {
+            color: var(--agent);
+            font-weight: 500;
+        }
+
+        /* Permission trigger button in chat */
+        .permission-trigger {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--warning-soft);
+            color: var(--warning);
+            border: 1px solid var(--warning);
+            border-radius: 8px;
+            padding: 8px 14px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background var(--transition);
+            margin-top: 4px;
+            flex-wrap: wrap;
+            max-width: 100%;
+        }
+        .permission-trigger:hover {
+            background: var(--warning);
+            color: #fff;
+        }
+
+        /* Chat input */
+        .chat-input-row {
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+        .chat-input-row input {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px 16px;
+            border-radius: 24px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--text);
+            font-size: 0.9rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color var(--transition), box-shadow var(--transition);
+        }
+        .chat-input-row input:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-soft);
+        }
+        .chat-input-row button {
+            padding: 12px 20px;
+            border-radius: 24px;
+            border: none;
+            background: var(--accent);
+            color: #fff;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: background var(--transition);
+            flex-shrink: 0;
+        }
+        .chat-input-row button:hover {
+            background: var(--accent-hover);
+        }
+
+        /* ---------- FILES VIEW ---------- */
+        .files-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 14px;
+        }
+        .file-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px;
+            cursor: default;
+            transition: border-color var(--transition), box-shadow var(--transition);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            min-width: 0;
+        }
+        .file-card:hover {
+            border-color: var(--border-strong);
+            box-shadow: var(--shadow);
+        }
+        .file-card .file-icon {
+            font-size: 1.8rem;
+            line-height: 1;
+        }
+        .file-card .file-name {
+            font-size: 0.88rem;
+            font-weight: 500;
+            color: var(--text);
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .file-card .file-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .file-card .agent-badge {
+            background: var(--agent-soft);
+            color: var(--agent);
+            font-size: 0.7rem;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            width: fit-content;
+        }
+        .file-card.folder {
+            border-style: dashed;
+        }
+
+        /* ---------- MESSAGES VIEW ---------- */
+        .messages-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .message-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 14px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            cursor: default;
+            transition: background var(--transition);
+            min-width: 0;
+        }
+        .message-item:hover {
+            background: var(--surface-hover);
+        }
+        .message-item.unread {
+            border-left: 3px solid var(--accent);
+        }
+        .message-item .msg-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .message-item .msg-avatar.agent {
+            background: var(--agent-soft);
+            color: var(--agent);
+        }
+        .message-item .msg-avatar.person {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+        .message-item .msg-content {
+            flex: 1;
+            min-width: 0;
+        }
+        .message-item .msg-sender {
+            font-weight: 500;
+            font-size: 0.88rem;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .message-item .msg-preview {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .message-item .msg-time {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .message-item .unread-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+            align-self: center;
+        }
+
+        /* ---------- WIDGETS VIEW ---------- */
+        .widgets-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 14px;
+        }
+        .widget-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            min-width: 0;
+            transition: box-shadow var(--transition);
+        }
+        .widget-card:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 12px 42px rgba(0,0,0,0.07);
+        }
+        .widget-card .widget-title {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow-wrap: anywhere;
+        }
+        .widget-card .widget-body {
+            flex: 1;
+            min-width: 0;
+        }
+        .todo-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            font-size: 0.88rem;
+            color: var(--text);
+            cursor: default;
+            min-width: 0;
+        }
+        .todo-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--agent);
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+        .todo-item .done {
+            text-decoration: line-through;
+            color: var(--text-muted);
+        }
+        .note-text {
+            font-size: 0.88rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+            background: var(--surface-sunken);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            min-height: 60px;
+        }
+        .weather-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .weather-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .quick-task-btn {
+            padding: 10px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--accent);
+            background: var(--accent-soft);
+            color: var(--accent);
+            font-size: 0.88rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all var(--transition);
+            text-align: left;
+            width: 100%;
+            overflow-wrap: anywhere;
+        }
+        .quick-task-btn:hover {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        /* ---------- AGENT BAR (bottom) ---------- */
+        .agent-bar {
+            height: var(--agent-bar-height);
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            padding: 0 20px;
+            gap: 12px;
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            z-index: 15;
+            min-width: 0;
+        }
+        .agent-bar .agent-mini {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+            flex: 1;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-family: inherit;
+            text-align: left;
+            padding: 4px;
+            border-radius: 8px;
+            transition: background var(--transition);
+            overflow: hidden;
+        }
+        .agent-bar .agent-mini:hover {
+            background: var(--surface-hover);
+        }
+        .agent-bar .agent-mini .a-spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--agent);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            flex-shrink: 0;
+        }
+        .agent-bar .agent-mini .a-status {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            overflow-wrap: anywhere;
+            min-width: 0;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .agent-bar .agent-mini .a-status strong {
+            color: var(--agent);
+            font-weight: 500;
+        }
+        .agent-bar .quick-open-chat {
+            padding: 8px 14px;
+            border-radius: 20px;
+            border: 1px solid var(--border-strong);
+            background: var(--surface);
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all var(--transition);
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+        .agent-bar .quick-open-chat:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        /* ---------- PERMISSION DIALOG ---------- */
+        .perm-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.25s ease;
+            padding: 20px;
+        }
+        .perm-overlay.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .perm-dialog {
+            background: var(--surface);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            max-width: 480px;
+            width: 100%;
+            padding: 28px 28px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            transform: translateY(12px) scale(0.97);
+            transition: transform 0.25s ease;
+            border: 1px solid var(--border);
+            max-height: 90dvh;
+            overflow-y: auto;
+        }
+        .perm-overlay.open .perm-dialog {
+            transform: translateY(0) scale(1);
+        }
+        .perm-dialog .perm-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: var(--warning-soft);
+            color: var(--warning);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .perm-dialog .perm-icon svg {
+            width: 22px;
+            height: 22px;
+        }
+        .perm-dialog h3 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            color: var(--text);
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .perm-dialog .perm-question {
+            font-size: 0.92rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .perm-dialog .perm-question strong {
+            color: var(--text);
+            font-weight: 500;
+        }
+        .perm-dialog .perm-url-box {
+            background: var(--surface-sunken);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            overflow-wrap: anywhere;
+            word-break: break-all;
+            min-width: 0;
+        }
+        .perm-dialog .perm-context {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            font-style: italic;
+            overflow-wrap: anywhere;
+            min-width: 0;
+        }
+        .perm-dialog .perm-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            margin-top: 4px;
+        }
+        .perm-dialog .perm-actions button {
+            padding: 13px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            border: none;
+            transition: all var(--transition);
+            text-align: center;
+            width: 100%;
+            overflow-wrap: anywhere;
+        }
+        .perm-dialog .btn-allow {
+            background: var(--warning);
+            color: #fff;
+        }
+        .perm-dialog .btn-allow:hover {
+            background: #9c6515;
+            transform: translateY(-1px);
+        }
+        .perm-dialog .btn-always {
+            background: var(--surface-sunken);
+            color: var(--text-secondary);
+            border: 1px solid var(--border-strong);
+        }
+        .perm-dialog .btn-always:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+        .perm-dialog .btn-deny {
+            background: transparent;
+            color: var(--danger);
+            border: 1px solid transparent;
+        }
+        .perm-dialog .btn-deny:hover {
+            background: var(--danger-soft);
+            border-color: var(--danger);
+        }
+        .perm-dialog .perm-footer {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-align: center;
+            border-top: 1px solid var(--border);
+            padding-top: 12px;
+            overflow-wrap: anywhere;
+        }
+        .perm-dialog .perm-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 1.2rem;
+            font-family: inherit;
+            padding: 4px 8px;
+            border-radius: 6px;
+            transition: color var(--transition), background var(--transition);
+            line-height: 1;
+        }
+        .perm-dialog .perm-close:hover {
+            color: var(--text);
+            background: var(--surface-hover);
+        }
+
+        /* ---------- RESPONSIVE ---------- */
+        /* Tablet: rail narrows to icons only */
+        @media (max-width: 900px) {
+            :root {
+                --rail-width: 60px;
+            }
+            .rail .rail-label {
+                display: none;
+            }
+            .rail-item {
+                justify-content: center;
+                padding: 10px 8px;
+                flex-direction: column;
+                gap: 2px;
+                font-size: 0.65rem;
+            }
+            .rail-item .icon {
+                font-size: 1.2rem;
+                width: 28px;
+                height: 28px;
+            }
+            .rail-item .badge {
+                position: absolute;
+                margin-left: 0;
+                margin-top: -28px;
+                font-size: 0.6rem;
+                padding: 0 5px;
+                min-width: 14px;
+            }
+            .rail-item .label-text {
+                font-size: 0.6rem;
+                text-align: center;
+                width: 100%;
+                overflow-wrap: anywhere;
+                line-height: 1.2;
+            }
+            .rail-footer {
+                flex-direction: column;
+                align-items: center;
+                gap: 4px;
+                font-size: 0.65rem;
+                padding: 8px 4px;
+            }
+            .rail-footer .lang-select {
+                font-size: 0.6rem;
+                padding: 2px 4px;
+            }
+            .main {
+                padding: 18px 16px;
+            }
+        }
+
+        /* Phone: bottom nav bar, stack everything */
+        @media (max-width: 600px) {
+            body {
+                flex-direction: column;
+            }
+            .top-bar {
+                padding: 0 12px;
+                height: 48px;
+            }
+            :root {
+                --top-bar-height: 48px;
+                --agent-bar-height: 48px;
+            }
+            .top-bar .brand {
+                font-size: 0.95rem;
+            }
+            .top-bar .top-status .status-text {
+                display: none; /* hide long status text on phone */
+            }
+            .rail {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                top: auto;
+                width: 100%;
+                height: 56px;
+                flex-direction: row;
+                border-right: none;
+                border-top: 1px solid var(--border);
+                z-index: 25;
+                padding: 4px 6px;
+                gap: 0;
+                justify-content: space-around;
+                align-items: stretch;
+            }
+            .rail .rail-label {
+                display: none;
+            }
+            .rail-item {
+                flex: 1;
+                flex-direction: column;
+                justify-content: center;
+                gap: 2px;
+                padding: 4px 2px;
+                font-size: 0.6rem;
+                border-radius: 8px;
+                position: relative;
+                align-items: center;
+            }
+            .rail-item .icon {
+                font-size: 1.2rem;
+                width: 24px;
+                height: 24px;
+            }
+            .rail-item .label-text {
+                font-size: 0.55rem;
+                text-align: center;
+                width: 100%;
+                overflow-wrap: anywhere;
+                line-height: 1.15;
+            }
+            .rail-item .badge {
+                position: absolute;
+                top: 2px;
+                right: 50%;
+                margin-right: -16px;
+                font-size: 0.6rem;
+                min-width: 14px;
+                padding: 0 4px;
+            }
+            .rail-footer {
+                display: none;
+            }
+            .main {
+                padding: 12px 10px;
+                max-height: calc(100dvh - var(--top-bar-height) - var(--agent-bar-height) - 56px);
+                padding-bottom: 8px;
+            }
+            .agent-bar {
+                height: 48px;
+                padding: 0 10px;
+                position: sticky;
+                bottom: 56px;
+                gap: 8px;
+                border-top: 1px solid var(--border);
+            }
+            .agent-bar .agent-mini .a-status {
+                font-size: 0.78rem;
+            }
+            .agent-bar .quick-open-chat {
+                padding: 6px 10px;
+                font-size: 0.75rem;
+                white-space: nowrap;
+            }
+            .perm-overlay {
+                padding: 0;
+                align-items: flex-end;
+            }
+            .perm-dialog {
+                border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+                padding: 24px 20px 20px;
+                max-height: 85dvh;
+                border: none;
+                border-top: 1px solid var(--border);
+            }
+            .view-header h2 {
+                font-size: 1.2rem;
+            }
+            .chat-msg {
+                max-width: 92%;
+            }
+            .files-grid {
+                grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+                gap: 10px;
+            }
+            .widgets-grid {
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .perm-dialog .perm-actions {
+                gap: 6px;
+            }
+            .perm-dialog .perm-actions button {
+                padding: 12px 14px;
+                font-size: 0.85rem;
+            }
+        }
+
+        /* Narrow desktop: also handle long text */
+        @media (max-width: 1200px) and (min-width: 901px) {
+            .files-grid {
+                grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+            }
+            .widgets-grid {
+                grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            }
+        }
+
+        /* Accessibility */
+        :focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        button:focus-visible, input:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============ TOP BAR ============ -->
+    <header class="top-bar">
+        <a class="brand" href="#" onclick="switchView('chat'); return false;">
+            <div class="logo-mark">C</div>
+            <span>CieloOS</span>
+        </a>
+        <div class="top-status">
+            <span class="status-text"><span class="status-dot"></span>All systems calm</span>
+            <div class="avatar" title="Your profile">AS</div>
+        </div>
+    </header>
+
+    <!-- ============ APP LAYOUT ============ -->
+    <div class="app">
+        <!-- Left Rail -->
+        <nav class="rail" id="railNav" aria-label="Main navigation">
+            <div class="rail-label">Your workspace</div>
+            <button class="rail-item active" data-view="chat" onclick="switchView('chat')">
+                <span class="icon">💬</span>
+                <span class="label-text">Chat</span>
+            </button>
+            <button class="rail-item" data-view="files" onclick="switchView('files')">
+                <span class="icon">📁</span>
+                <span class="label-text">Files</span>
+            </button>
+            <button class="rail-item" data-view="messages" onclick="switchView('messages')">
+                <span class="icon">✉️</span>
+                <span class="label-text">Messages</span>
+                <span class="badge" id="msgBadge">2</span>
+            </button>
+            <button class="rail-item" data-view="widgets" onclick="switchView('widgets')">
+                <span class="icon">🧩</span>
+                <span class="label-text">Widgets</span>
+            </button>
+            <div class="rail-footer">
+                <div class="lang-select" title="Language — layout survives Russian, Spanish, and English">
+                    <span>🌐</span><span>EN</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main" id="mainContent">
+
+            <!-- ===== CHAT VIEW ===== -->
+            <section class="view active" id="view-chat" aria-label="Chat">
+                <div class="view-header">
+                    <h2>Chat with Maya</h2>
+                    <div class="subtitle">Your AI coworker — always at your desk</div>
+                </div>
+                <div class="chat-thread" id="chatThread">
+                    <!-- Message 1: User -->
+                    <div class="chat-msg user">
+                        <div class="bubble">Could you pull last month's sales figures and make a spreadsheet?</div>
+                        <div class="meta">You · 10:24 AM</div>
+                    </div>
+                    <!-- Message 2: Agent -->
+                    <div class="chat-msg agent">
+                        <div style="display:flex;align-items:flex-start;gap:8px;">
+                            <div class="agent-avatar">M</div>
+                            <div>
+                                <div class="bubble">Sure, I'll find the data in the shared drive and build the file for you.</div>
+                                <div class="meta">Maya · 10:24 AM</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Message 3: Working indicator -->
+                    <div class="chat-msg agent">
+                        <div style="display:flex;align-items:flex-start;gap:8px;">
+                            <div class="agent-avatar">M</div>
+                            <div>
+                                <div class="working-card">
+                                    <div class="spinner"></div>
+                                    <div class="working-text"><strong>Maya</strong> is searching the finance shared drive…</div>
+                                </div>
+                                <div class="meta">Maya · 10:25 AM</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Message 4: Permission request in chat -->
+                    <div class="chat-msg agent" id="chatPermMsg">
+                        <div style="display:flex;align-items:flex-start;gap:8px;">
+                            <div class="agent-avatar">M</div>
+                            <div>
+                                <div class="bubble">I found the sales data. To download it, I need to open a website:</div>
+                                <button class="permission-trigger" onclick="openPermissionDialog()">
+                                    ⚠️ Review permission request
+                                </button>
+                                <div class="meta">Maya · 10:27 AM</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Message 5: Post-permission success (hidden initially) -->
+                    <div class="chat-msg agent" id="chatPermSuccess" style="display:none;">
+                        <div style="display:flex;align-items:flex-start;gap:8px;">
+                            <div class="agent-avatar">M</div>
+                            <div>
+                                <div class="bubble">Thank you! I've created <strong>Q2 Sales Report.xlsx</strong> with the figures from the finance drive. Would you like me to open it for you?</div>
+                                <div class="meta">Maya · 10:29 AM</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-row">
+                    <input type="text" placeholder="Ask Maya to do something…" id="chatInput" aria-label="Message Maya">
+                    <button onclick="sendChatMessage()">Send</button>
+                </div>
+            </section>
+
+            <!-- ===== FILES VIEW ===== -->
+            <section class="view" id="view-files" aria-label="Files">
+                <div class="view-header">
+                    <h2>Files</h2>
+                    <div class="subtitle">Everything you and Maya have made</div>
+                </div>
+                <div class="files-grid">
+                    <div class="file-card">
+                        <div class="file-icon">📊</div>
+                        <div class="file-name">Q2 Sales Report.xlsx</div>
+                        <div class="file-meta">
+                            <span class="agent-badge">Maya made this</span>
+                            <span>· 12 KB · just now</span>
+                        </div>
+                    </div>
+                    <div class="file-card">
+                        <div class="file-icon">📄</div>
+                        <div class="file-name">Budget Draft 2025.docx</div>
+                        <div class="file-meta"><span>You · 2 days ago</span></div>
+                    </div>
+                    <div class="file-card folder">
+                        <div class="file-icon">📁</div>
+                        <div class="file-name">Team Photos</div>
+                        <div class="file-meta"><span>You · last week</span></div>
+                    </div>
+                    <div class="file-card">
+                        <div class="file-icon">📝</div>
+                        <div class="file-name">Notes from Monday.txt</div>
+                        <div class="file-meta"><span>You · Monday</span></div>
+                    </div>
+                    <div class="file-card">
+                        <div class="file-icon">📊</div>
+                        <div class="file-name">Q1 Sales Report.xlsx</div>
+                        <div class="file-meta"><span class="agent-badge">Maya made this</span><span>· 45 KB</span></div>
+                    </div>
+                    <div class="file-card">
+                        <div class="file-icon">📕</div>
+                        <div class="file-name">Marketing Plan.pdf</div>
+                        <div class="file-meta"><span>Elena · 3 days ago</span></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== MESSAGES VIEW ===== -->
+            <section class="view" id="view-messages" aria-label="Messages">
+                <div class="view-header">
+                    <h2>Messages</h2>
+                    <div class="subtitle">Conversations with your teammates — and with Maya</div>
+                </div>
+                <div class="messages-list">
+                    <div class="message-item unread">
+                        <div class="msg-avatar agent">M</div>
+                        <div class="msg-content">
+                            <div class="msg-sender">Maya <span style="font-weight:400;font-size:0.7rem;color:var(--text-muted);">· your agent</span></div>
+                            <div class="msg-preview">I need permission to open a website for the sales report.</div>
+                        </div>
+                        <span class="unread-dot"></span>
+                        <span class="msg-time">10:27 AM</span>
+                    </div>
+                    <div class="message-item unread">
+                        <div class="msg-avatar person" style="background:var(--accent-soft);color:var(--accent);">E</div>
+                        <div class="msg-content">
+                            <div class="msg-sender">Elena</div>
+                            <div class="msg-preview">Can you review the proposal before Friday's meeting?</div>
+                        </div>
+                        <span class="unread-dot"></span>
+                        <span class="msg-time">9:45 AM</span>
+                    </div>
+                    <div class="message-item">
+                        <div class="msg-avatar agent">M</div>
+                        <div class="msg-content">
+                            <div class="msg-sender">Maya <span style="font-weight:400;font-size:0.7rem;color:var(--text-muted);">· your agent</span></div>
+                            <div class="msg-preview">Your Q1 sales chart is ready in Files.</div>
+                        </div>
+                        <span class="msg-time">Yesterday</span>
+                    </div>
+                    <div class="message-item">
+                        <div class="msg-avatar person" style="background:var(--accent-soft);color:var(--accent);">D</div>
+                        <div class="msg-content">
+                            <div class="msg-sender">David</div>
+                            <div class="msg-preview">Team stand-up at 3pm — I'll bring the agenda.</div>
+                        </div>
+                        <span class="msg-time">Yesterday</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ===== WIDGETS VIEW ===== -->
+            <section class="view" id="view-widgets" aria-label="Widgets">
+                <div class="view-header">
+                    <h2>Widgets</h2>
+                    <div class="subtitle">Small tools that live on your desk</div>
+                </div>
+                <div class="widgets-grid">
+                    <div class="widget-card">
+                        <div class="widget-title">📋 To-do</div>
+                        <div class="widget-body">
+                            <div class="todo-item">
+                                <input type="checkbox" checked>
+                                <span class="done">Review Q2 Sales Report</span>
+                            </div>
+                            <div class="todo-item">
+                                <input type="checkbox">
+                                <span>Send budget draft to Elena</span>
+                            </div>
+                            <div class="todo-item">
+                                <input type="checkbox">
+                                <span>Prepare for Friday meeting</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="widget-card">
+                        <div class="widget-title">📝 Note</div>
+                        <div class="widget-body">
+                            <div class="note-text">Remember to ask Maya to pull the customer feedback numbers before next week's review.</div>
+                        </div>
+                    </div>
+                    <div class="widget-card">
+                        <div class="widget-title">☀️ Weather</div>
+                        <div class="widget-body">
+                            <div class="weather-value">72°F <span>☀️</span></div>
+                            <div class="weather-desc">Sunny in San Francisco</div>
+                        </div>
+                    </div>
+                    <div class="widget-card">
+                        <div class="widget-title">⚡ Quick task</div>
+                        <div class="widget-body">
+                            <button class="quick-task-btn" onclick="runWeeklyReport()">Run the weekly sales report</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- ============ AGENT STATUS BAR ============ -->
+    <div class="agent-bar" id="agentBar">
+        <button class="agent-mini" onclick="switchView('chat')" title="Open chat with Maya">
+            <div class="a-spinner" id="agentBarSpinner"></div>
+            <div class="a-status" id="agentBarStatus">
+                <strong>Maya</strong> is working: searching finance drive…
+            </div>
+        </button>
+        <button class="quick-open-chat" onclick="switchView('chat'); focusChatInput();">Ask Maya</button>
+    </div>
+
+    <!-- ============ PERMISSION DIALOG ============ -->
+    <div class="perm-overlay" id="permOverlay" role="dialog" aria-modal="true" aria-labelledby="permTitle">
+        <div class="perm-dialog">
+            <button class="perm-close" onclick="closePermissionDialog()" aria-label="Close">✕</button>
+            <div class="perm-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L4 5v6c0 5.25 3.5 9.75 8 11 4.5-1.25 8-5.75 8-11V5l-8-3z"/>
+                    <path d="M12 8v4"/>
+                    <path d="M12 16h.01"/>
+                </svg>
+            </div>
+            <h3 id="permTitle">May Maya open a website?</h3>
+            <div class="perm-question">
+                Your agent, <strong>Maya</strong>, wants to open this website to download the sales report you asked for:
+            </div>
+            <div class="perm-url-box">bank.example.com/export?format=csv</div>
+            <div class="perm-context">
+                Maya will only view this page. She won't make any changes on the site, and she won't share anything.
+            </div>
+            <div class="perm-actions">
+                <button class="btn-allow" onclick="handlePermission('allow')">Allow this time</button>
+                <button class="btn-always" onclick="handlePermission('always')">Always allow this site</button>
+                <button class="btn-deny" onclick="handlePermission('deny')">Deny</button>
+            </div>
+            <div class="perm-footer">This will be recorded in your audit trail.</div>
+        </div>
+    </div>
+
+    <!-- ============ JAVASCRIPT ============ -->
+    <script>
+        // CieloOS Portal — The Sky Desk
+        // Simple view switching + permission dialog + agent status
+
+        const viewMap = {
+            chat: 'Chat',
+            files: 'Files',
+            messages: 'Messages',
+            widgets: 'Widgets'
+        };
+
+        let currentView = 'chat';
+        let permissionResolved = false;
+
+        // ---- View switching ----
+        function switchView(viewName) {
+            if (!viewMap[viewName]) return;
+            currentView = viewName;
+
+            // Update rail active state
+            document.querySelectorAll('.rail-item').forEach(function(el) {
+                el.classList.toggle('active', el.getAttribute('data-view') === viewName);
+            });
+
+            // Update main content
+            document.querySelectorAll('.view').forEach(function(el) {
+                el.classList.remove('active');
+            });
+            var targetView = document.getElementById('view-' + viewName);
+            if (targetView) targetView.classList.add('active');
+
+            // Update page URL hash for deep-linking feel
+            if (window.history.replaceState) {
+                window.history.replaceState(null, '', '#/' + viewName);
+            }
+
+            // Scroll main to top on view change
+            var mainEl = document.getElementById('mainContent');
+            if (mainEl) mainEl.scrollTop = 0;
+        }
+
+        // ---- Permission dialog ----
+        function openPermissionDialog() {
+            var overlay = document.getElementById('permOverlay');
+            if (overlay) overlay.classList.add('open');
+        }
+
+        function closePermissionDialog() {
+            var overlay = document.getElementById('permOverlay');
+            if (overlay) overlay.classList.remove('open');
+        }
+
+        function handlePermission(choice) {
+            closePermissionDialog();
+            permissionResolved = true;
+
+            // Update the chat to reflect the decision
+            var permMsg = document.getElementById('chatPermMsg');
+            var successMsg = document.getElementById('chatPermSuccess');
+
+            if (choice === 'allow' || choice === 'always') {
+                if (permMsg) permMsg.style.display = 'none';
+                if (successMsg) {
+                    successMsg.style.display = 'block';
+                    // Update success text based on choice
+                    var bubble = successMsg.querySelector('.bubble');
+                    if (bubble) {
+                        if (choice === 'always') {
+                            bubble.innerHTML =
+                                'Thank you! I\'ve created <strong>Q2 Sales Report.xlsx</strong> with the figures from the finance drive. I\'ll remember to always allow this site. Would you like me to open it for you?';
+                        } else {
+                            bubble.innerHTML =
+                                'Thank you! I\'ve created <strong>Q2 Sales Report.xlsx</strong> with the figures from the finance drive. Would you like me to open it for you?';
+                        }
+                    }
+                }
+            } else {
+                // Denied — show an appropriate response
+                if (permMsg) {
+                    var bubble = permMsg.querySelector('.bubble');
+                    if (bubble) bubble.textContent = 'That\'s okay. I won\'t open that website. I\'ll look for another way to get the data.';
+                    var trigger = permMsg.querySelector('.permission-trigger');
+                    if (trigger) trigger.style.display = 'none';
+                }
+                if (successMsg) successMsg.style.display = 'none';
+            }
+        }
+
+        // ---- Agent bar status ----
+        function updateAgentStatus(text, working) {
+            var statusEl = document.getElementById('agentBarStatus');
+            var spinnerEl = document.getElementById('agentBarSpinner');
+            if (statusEl) statusEl.innerHTML = text;
+            if (spinnerEl) {
+                spinnerEl.style.display = working ? 'block' : 'none';
+            }
+        }
+
+        // ---- Chat input ----
+        function sendChatMessage() {
+            var input = document.getElementById('chatInput');
+            var thread = document.getElementById('chatThread');
+            if (!input || !thread) return;
+            var text = input.value.trim();
+            if (!text) return;
+
+            // Add user message
+            var userMsg = document.createElement('div');
+            userMsg.className = 'chat-msg user';
+            userMsg.innerHTML = '<div class="bubble">' + escapeHtml(text) + '</div>' +
+                '<div class="meta">You · just now</div>';
+            thread.appendChild(userMsg);
+
+            // Add agent response
+            var agentMsg = document.createElement('div');
+            agentMsg.className = 'chat-msg agent';
+            agentMsg.innerHTML =
+                '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+                '<div class="agent-avatar">M</div>' +
+                '<div><div class="bubble">I\'m on it. I\'ll let you know when it\'s done.</div>' +
+                '<div class="meta">Maya · just now</div></div></div>';
+            thread.appendChild(agentMsg);
+
+            // Clear input
+            input.value = '';
+            thread.scrollTop = thread.scrollHeight;
+
+            // If the permission wasn't resolved yet, maybe open the dialog after a moment
+            // (only if current view is chat and permissionResolved is false)
+            if (!permissionResolved && currentView === 'chat') {
+                setTimeout(function() {
+                    if (!permissionResolved) {
+                        openPermissionDialog();
+                    }
+                }, 800);
+            }
+        }
+
+        function focusChatInput() {
+            var input = document.getElementById('chatInput');
+            if (input) setTimeout(function() { input.focus(); }, 150);
+        }
+
+        function runWeeklyReport() {
+            switchView('chat');
+            updateAgentStatus('<strong>Maya</strong> is running the weekly sales report…', true);
+            var thread = document.getElementById('chatThread');
+            if (thread) {
+                var agentMsg = document.createElement('div');
+                agentMsg.className = 'chat-msg agent';
+                agentMsg.innerHTML =
+                    '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+                    '<div class="agent-avatar">M</div>' +
+                    '<div><div class="working-card"><div class="spinner"></div>' +
+                    '<div class="working-text"><strong>Maya</strong> is running the weekly sales report…</div></div>' +
+                    '<div class="meta">Maya · just now</div></div></div>';
+                thread.appendChild(agentMsg);
+                setTimeout(function() {
+                    var doneMsg = document.createElement('div');
+                    doneMsg.className = 'chat-msg agent';
+                    doneMsg.innerHTML =
+                        '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+                        '<div class="agent-avatar">M</div>' +
+                        '<div><div class="bubble">Your weekly report is ready. I\'ve saved it to Files. ' +
+                        'Total sales are up 8% from last week.</div>' +
+                        '<div class="meta">Maya · just now</div></div></div>';
+                    thread.appendChild(doneMsg);
+                    updateAgentStatus('<strong>Maya</strong> is idle — ready to help', false);
+                    thread.scrollTop = thread.scrollHeight;
+                }, 2200);
+            }
+            thread.scrollTop = thread.scrollHeight;
+        }
+
+        // Simple HTML escaping
+        function escapeHtml(str) {
+            var div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // Handle initial hash for deep-linking
+        function handleHashChange() {
+            var hash = window.location.hash.replace('#/', '');
+            if (hash && viewMap[hash]) {
+                switchView(hash);
+            }
+        }
+
+        window.addEventListener('hashchange', handleHashChange);
+        document.addEventListener('DOMContentLoaded', function() {
+            handleHashChange();
+            // Auto-scroll chat to bottom
+            var mainEl = document.getElementById('mainContent');
+            if (mainEl) mainEl.scrollTop = 0;
+        });
+
+        // Close permission dialog on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closePermissionDialog();
+            }
+        });
+
+        // Close permission dialog if clicking outside the dialog
+        document.addEventListener('click', function(e) {
+            var overlay = document.getElementById('permOverlay');
+            if (overlay && e.target === overlay) {
+                closePermissionDialog();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,352 @@
+<!doctype html>
+<!--
+Central idea: CieloOS is one calm shared workday, not four separate apps.
+Chat is the starting place; files, messages, and widgets orbit the same agent work.
+An always-visible activity strip makes away-work easy to leave and return to.
+Permission requests interrupt clearly, in plain language, with consequences first.
+Trade-off: the persistent activity strip uses some screen space to preserve trust.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CieloOS — Your workday, moving</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f7fb;
+      --panel: rgba(255,255,255,.88);
+      --panel-solid: #fff;
+      --soft: #edf3f9;
+      --soft-blue: #e7f2ff;
+      --text: #172131;
+      --muted: #647083;
+      --line: rgba(45,65,91,.13);
+      --blue: #2267d8;
+      --blue-ink: #164a9c;
+      --sky: #6eb9ff;
+      --green: #19835b;
+      --green-soft: #e2f6ed;
+      --amber: #a45a05;
+      --amber-soft: #fff1d8;
+      --red: #aa342d;
+      --shadow: 0 18px 55px rgba(31,55,85,.12);
+      --radius: 24px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0c111a;
+        --panel: rgba(20,28,40,.9);
+        --panel-solid: #141c28;
+        --soft: #1d2735;
+        --soft-blue: #172a45;
+        --text: #f3f7fc;
+        --muted: #aab6c6;
+        --line: rgba(212,227,245,.12);
+        --blue: #79b5ff;
+        --blue-ink: #b9d8ff;
+        --sky: #49a1f5;
+        --green: #61d0a2;
+        --green-soft: #17362e;
+        --amber: #ffc775;
+        --amber-soft: #3b2b16;
+        --red: #ff928b;
+        --shadow: 0 22px 60px rgba(0,0,0,.3);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 82% -10%, rgba(97,177,255,.25), transparent 35%),
+        radial-gradient(circle at 10% 100%, rgba(139,205,255,.13), transparent 30%), var(--bg);
+    }
+    button, input, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid color-mix(in srgb, var(--sky) 65%, transparent); outline-offset: 2px; }
+    .shell { display: grid; grid-template-columns: 104px minmax(0,1fr) 310px; height: 100%; padding: 14px; gap: 14px; }
+    .rail, .activity, .workspace { border: 1px solid var(--line); background: var(--panel); backdrop-filter: blur(20px); box-shadow: var(--shadow); }
+    .rail { border-radius: 28px; padding: 18px 10px 12px; display: flex; flex-direction: column; align-items: center; }
+    .brand { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 17px; background: linear-gradient(145deg,#63b9ff,#3074ed); color: #fff; font-size: 25px; box-shadow: 0 10px 26px rgba(47,116,232,.3); margin-bottom: 26px; }
+    .nav { display: grid; gap: 7px; width: 100%; }
+    .nav-btn { border: 0; background: transparent; border-radius: 17px; min-height: 68px; padding: 8px 4px; display: grid; place-items: center; align-content: center; gap: 3px; color: var(--muted); cursor: pointer; position: relative; }
+    .nav-btn .icon { font-size: 21px; line-height: 1; }
+    .nav-btn .label { font-size: 11px; font-weight: 700; }
+    .nav-btn.active { color: var(--blue-ink); background: var(--soft-blue); }
+    .nav-btn.active::before { content: ""; position: absolute; left: -10px; width: 4px; height: 28px; border-radius: 0 4px 4px 0; background: var(--blue); }
+    .nav-btn .badge { position: absolute; top: 9px; right: 13px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 9px; background: #dd463e; color: white; font-size: 10px; font-weight: 800; display: grid; place-items: center; border: 2px solid var(--panel-solid); }
+    .avatar { margin-top: auto; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; background: linear-gradient(145deg,#f6c795,#d98568); color: #542a1d; font-weight: 800; border: 3px solid var(--panel-solid); box-shadow: 0 4px 15px rgba(0,0,0,.12); }
+    .workspace { border-radius: 28px; overflow: hidden; min-width: 0; display: flex; flex-direction: column; }
+    .topbar { min-height: 77px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 15px 24px; border-bottom: 1px solid var(--line); }
+    .eyebrow { color: var(--muted); font-size: 12px; font-weight: 650; }
+    h1 { margin: 1px 0 0; font-size: clamp(22px,2vw,30px); line-height: 1.15; letter-spacing: -.035em; }
+    .agent-pill { display: flex; align-items: center; gap: 9px; border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 8px 12px; white-space: nowrap; }
+    .agent-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px color-mix(in srgb,var(--green) 15%,transparent); }
+    .view { flex: 1; min-height: 0; display: none; }
+    .view.active { display: flex; }
+    .chat-view { flex-direction: column; }
+    .thread { flex: 1; overflow: auto; padding: 24px clamp(18px,4vw,58px); }
+    .dayline { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; margin-bottom: 22px; }
+    .dayline::before, .dayline::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+    .message { max-width: 670px; margin-bottom: 18px; }
+    .message.me { margin-left: auto; }
+    .bubble { padding: 15px 18px; border-radius: 20px 20px 20px 6px; background: var(--soft); }
+    .me .bubble { border-radius: 20px 20px 6px 20px; background: var(--blue); color: #fff; }
+    .sender { font-size: 12px; font-weight: 750; margin: 0 0 6px; color: var(--blue-ink); }
+    .me .sender { text-align: right; color: var(--muted); }
+    .bubble p { margin: 0; }
+    .work-card { margin-top: 12px; border: 1px solid var(--line); background: var(--panel-solid); border-radius: 17px; padding: 14px; color: var(--text); }
+    .work-row { display: flex; gap: 12px; align-items: center; }
+    .spinner { width: 20px; height: 20px; border: 2px solid var(--line); border-top-color: var(--blue); border-radius: 50%; animation: spin 1.1s linear infinite; flex: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .work-title { font-weight: 750; }
+    .work-sub { color: var(--muted); font-size: 13px; }
+    .progress { height: 5px; margin-top: 13px; overflow: hidden; border-radius: 5px; background: var(--soft); }
+    .progress i { display: block; width: 66%; height: 100%; background: linear-gradient(90deg,var(--sky),var(--blue)); border-radius: inherit; animation: breathe 2s ease-in-out infinite alternate; }
+    @keyframes breathe { to { opacity: .55; } }
+    .composer-wrap { padding: 14px clamp(16px,3vw,34px) 20px; background: linear-gradient(transparent,var(--panel-solid) 20%); }
+    .composer { max-width: 800px; margin: auto; display: grid; grid-template-columns: auto minmax(0,1fr) auto; gap: 10px; align-items: end; border: 1px solid var(--line); border-radius: 22px; background: var(--panel-solid); padding: 9px; box-shadow: 0 10px 30px rgba(32,56,86,.09); }
+    .composer textarea { resize: none; border: 0; outline: 0; background: transparent; color: var(--text); padding: 9px 4px; min-height: 42px; max-height: 96px; }
+    .circle-btn { width: 42px; height: 42px; border: 0; border-radius: 14px; cursor: pointer; background: var(--soft); display: grid; place-items: center; font-size: 18px; }
+    .send { background: var(--blue); color: #fff; }
+    .area-grid { padding: 24px; overflow: auto; width: 100%; align-content: start; }
+    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 18px; }
+    .section-head h2 { font-size: 18px; margin: 0; }
+    .search { border: 1px solid var(--line); border-radius: 14px; background: var(--soft); color: var(--text); padding: 10px 13px; width: min(260px,45%); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 14px; }
+    .file-card, .person-card { border: 1px solid var(--line); border-radius: 19px; background: var(--panel-solid); padding: 16px; min-width: 0; }
+    .file-thumb { aspect-ratio: 1.6; border-radius: 13px; margin-bottom: 13px; display: grid; place-items: center; font-size: 34px; background: linear-gradient(145deg,var(--soft-blue),var(--soft)); }
+    .file-name { font-weight: 750; overflow-wrap: anywhere; }
+    .meta { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .people { display: grid; gap: 10px; }
+    .person-card { display: grid; grid-template-columns: auto 1fr auto; gap: 13px; align-items: center; cursor: pointer; }
+    .face { width: 45px; height: 45px; border-radius: 15px; display: grid; place-items: center; background: var(--soft-blue); font-weight: 800; }
+    .preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); margin-top: 2px; }
+    .time { color: var(--muted); font-size: 12px; align-self: start; }
+    .unread { background: var(--blue); color: #fff; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px; font-size: 11px; display: grid; place-items: center; justify-self: end; margin-top: 7px; }
+    .widget-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+    .widget { border: 1px solid var(--line); border-radius: 21px; background: var(--panel-solid); padding: 18px; min-height: 174px; position: relative; overflow: hidden; }
+    .widget h3 { margin: 0 0 13px; font-size: 15px; }
+    .weather { background: linear-gradient(145deg,#2774dc,#6dbfff); color: white; }
+    .weather .big { font-size: 42px; font-weight: 300; }
+    .todo { display: grid; gap: 9px; }
+    .check { display: flex; gap: 9px; align-items: flex-start; }
+    .check i { width: 18px; height: 18px; flex: none; border: 2px solid var(--line); border-radius: 6px; }
+    .run-btn, .add-btn { border: 0; border-radius: 12px; background: var(--blue); color: white; padding: 10px 14px; font-weight: 750; cursor: pointer; }
+    .add-btn { background: var(--soft-blue); color: var(--blue-ink); }
+    .note { color: var(--muted); font-size: 18px; font-family: Georgia,serif; line-height: 1.5; }
+    .activity { border-radius: 28px; padding: 20px; overflow: auto; }
+    .activity-head { display: flex; justify-content: space-between; align-items: start; gap: 10px; margin-bottom: 18px; }
+    .activity h2 { font-size: 17px; margin: 0; }
+    .activity-head span { color: var(--muted); font-size: 12px; }
+    .attention-card { border-radius: 19px; padding: 16px; background: var(--amber-soft); border: 1px solid color-mix(in srgb,var(--amber) 25%,transparent); margin-bottom: 14px; }
+    .attention-label { text-transform: uppercase; letter-spacing: .08em; color: var(--amber); font-weight: 850; font-size: 10px; }
+    .attention-card h3 { margin: 6px 0 6px; font-size: 15px; line-height: 1.25; }
+    .attention-card p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+    .review-btn { width: 100%; border: 0; border-radius: 12px; background: var(--amber); color: #fff; padding: 10px; font-weight: 800; cursor: pointer; }
+    .activity-item { display: grid; grid-template-columns: auto 1fr; gap: 11px; padding: 14px 3px; border-bottom: 1px solid var(--line); }
+    .status-icon { width: 31px; height: 31px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; font-size: 14px; }
+    .status-icon.done { background: var(--green-soft); color: var(--green); }
+    .activity-item strong { display: block; font-size: 13px; line-height: 1.3; }
+    .activity-item small { color: var(--muted); }
+    .activity-item .mini-progress { height: 4px; background: var(--soft); border-radius: 4px; margin-top: 8px; overflow: hidden; }
+    .activity-item .mini-progress i { display: block; height: 100%; width: 66%; background: var(--blue); }
+    .return-note { margin-top: 18px; padding: 13px; border-radius: 15px; color: var(--muted); background: var(--soft); font-size: 12px; }
+    dialog { width: min(600px,calc(100% - 28px)); border: 0; padding: 0; border-radius: 26px; color: var(--text); background: var(--panel-solid); box-shadow: 0 35px 100px rgba(0,0,0,.42); }
+    dialog::backdrop { background: rgba(8,15,25,.65); backdrop-filter: blur(6px); }
+    .dialog-top { padding: 24px 26px 18px; border-bottom: 1px solid var(--line); }
+    .ask-mark { display: inline-flex; align-items: center; gap: 8px; color: var(--amber); font-size: 12px; font-weight: 850; text-transform: uppercase; letter-spacing: .06em; }
+    .ask-mark i { width: 27px; height: 27px; border-radius: 9px; background: var(--amber-soft); display: grid; place-items: center; font-style: normal; font-size: 16px; }
+    dialog h2 { margin: 14px 0 7px; font-size: clamp(22px,4vw,29px); line-height: 1.14; letter-spacing: -.03em; }
+    .dialog-top > p { color: var(--muted); margin: 0; font-size: 16px; }
+    .permission-body { padding: 18px 26px; }
+    .plain-fact { display: grid; grid-template-columns: 120px 1fr; gap: 16px; padding: 11px 0; border-bottom: 1px solid var(--line); }
+    .plain-fact:last-child { border-bottom: 0; }
+    .plain-fact span { color: var(--muted); font-size: 13px; }
+    .plain-fact strong { overflow-wrap: anywhere; }
+    .warning { margin-top: 14px; padding: 13px 14px; border-radius: 13px; background: var(--soft); font-size: 13px; }
+    .dialog-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 18px 26px 26px; }
+    .dialog-actions button { min-height: 54px; border-radius: 15px; font-weight: 800; cursor: pointer; padding: 10px 16px; }
+    .deny { background: transparent; border: 1px solid var(--line); }
+    .allow { color: #fff; background: var(--blue); border: 1px solid var(--blue); }
+    .decision-note { grid-column: 1/-1; text-align: center; color: var(--muted); font-size: 11px; }
+    .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%,130%); background: var(--text); color: var(--panel-solid); padding: 12px 17px; border-radius: 13px; box-shadow: var(--shadow); transition: transform .25s ease; z-index: 5; font-weight: 700; }
+    .toast.show { transform: translate(-50%,0); }
+    .mobile-activity { display: none; }
+    @media (max-width: 980px) {
+      .shell { grid-template-columns: 88px minmax(0,1fr); }
+      .activity { display: none; }
+      .mobile-activity { display: inline-flex; border: 0; border-radius: 12px; background: var(--amber-soft); color: var(--amber); padding: 9px 12px; font-weight: 800; cursor: pointer; }
+    }
+    @media (max-width: 620px) {
+      body { overflow: hidden; }
+      .shell { display: flex; padding: 0; height: 100%; }
+      .workspace { border: 0; border-radius: 0; width: 100%; box-shadow: none; padding-bottom: 73px; }
+      .rail { position: fixed; z-index: 4; left: 10px; right: 10px; bottom: 9px; height: 64px; border-radius: 22px; padding: 6px; flex-direction: row; }
+      .brand, .avatar { display: none; }
+      .nav { grid-template-columns: repeat(4,1fr); gap: 2px; }
+      .nav-btn { min-height: 52px; border-radius: 16px; padding: 4px; }
+      .nav-btn .icon { font-size: 19px; }
+      .nav-btn.active::before { left: 50%; top: -6px; width: 26px; height: 3px; transform: translateX(-50%); border-radius: 0 0 4px 4px; }
+      .nav-btn .badge { top: 2px; right: calc(50% - 25px); }
+      .topbar { min-height: 68px; padding: 11px 16px; }
+      .eyebrow { display: none; }
+      h1 { font-size: 23px; }
+      .agent-pill span:last-child { display: none; }
+      .agent-pill { padding: 10px; }
+      .thread { padding: 18px 14px; }
+      .message { max-width: 91%; }
+      .bubble { padding: 13px 14px; }
+      .composer-wrap { padding: 8px 10px 10px; }
+      .composer { border-radius: 19px; }
+      .composer .circle-btn:first-child { display: none; }
+      .composer { grid-template-columns: minmax(0,1fr) auto; }
+      .area-grid { padding: 18px 14px; }
+      .cards { grid-template-columns: 1fr 1fr; gap: 10px; }
+      .file-card { padding: 11px; }
+      .file-thumb { font-size: 28px; }
+      .widget-grid { grid-template-columns: 1fr; }
+      .search { width: 48%; }
+      .plain-fact { grid-template-columns: 1fr; gap: 2px; }
+      .dialog-top, .permission-body { padding-left: 20px; padding-right: 20px; }
+      .dialog-actions { grid-template-columns: 1fr; padding: 14px 20px 20px; }
+      .decision-note { grid-column: auto; }
+    }
+    @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation: none !important; transition: none !important; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <aside class="rail" aria-label="Main areas">
+      <div class="brand" aria-label="CieloOS">☁</div>
+      <nav class="nav">
+        <button class="nav-btn active" data-view="chat"><span class="icon">✦</span><span class="label">Chat</span></button>
+        <button class="nav-btn" data-view="files"><span class="icon">▤</span><span class="label">Files</span></button>
+        <button class="nav-btn" data-view="messages"><span class="icon">◌</span><span class="label">Messages</span><span class="badge">2</span></button>
+        <button class="nav-btn" data-view="widgets"><span class="icon">✣</span><span class="label">Widgets</span></button>
+      </nav>
+      <div class="avatar" title="Maya Chen">MC</div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div><div class="eyebrow">Friday, September 12</div><h1 id="viewTitle">Good afternoon, Maya</h1></div>
+        <button class="mobile-activity" id="mobileReview">Needs you · 1</button>
+        <div class="agent-pill"><span class="agent-dot"></span><span>Ari is working</span></div>
+      </header>
+
+      <section class="view chat-view active" id="chat" aria-label="Chat with Ari">
+        <div class="thread" id="thread">
+          <div class="dayline">Today</div>
+          <article class="message me"><div class="sender">You · 2:14 PM</div><div class="bubble"><p>Compare the final three venue quotes, update the budget, and draft a recommendation for Monday.</p></div></article>
+          <article class="message"><div class="sender">Ari · your AI coworker</div><div class="bubble">
+            <p>I’m on it. I found all three quotes and the event budget. I’ll check the totals, update the comparison, and leave the recommendation as a draft for you.</p>
+            <div class="work-card"><div class="work-row"><span class="spinner"></span><div><div class="work-title">Comparing venue quotes</div><div class="work-sub">Checking catering costs in Northstar Events</div></div></div><div class="progress"><i></i></div></div>
+          </div></article>
+          <article class="message"><div class="sender">Ari · a moment ago</div><div class="bubble"><p>I need your okay before I can type the new totals into the shared budget. I’ve paused there; the rest can keep moving.</p></div></article>
+        </div>
+        <div class="composer-wrap"><div class="composer">
+          <button class="circle-btn" aria-label="Attach a file">＋</button>
+          <textarea rows="1" id="chatInput" aria-label="Message Ari" placeholder="Ask Ari to do something…"></textarea>
+          <button class="circle-btn send" id="sendBtn" aria-label="Send message">↑</button>
+        </div></div>
+      </section>
+
+      <section class="view area-grid" id="files" aria-label="Files">
+        <div><div class="section-head"><h2>Made by you and Ari</h2><input class="search" placeholder="Find a file" aria-label="Find a file"></div>
+          <div class="cards">
+            <article class="file-card"><div class="file-thumb">📊</div><div class="file-name">Venue comparison — September.xlsx</div><div class="meta">Ari is updating this now</div></article>
+            <article class="file-card"><div class="file-thumb">📝</div><div class="file-name">Monday venue recommendation.docx</div><div class="meta">Draft · made 4 minutes ago</div></article>
+            <article class="file-card"><div class="file-thumb">📄</div><div class="file-name">Bluebird Hotel final quote.pdf</div><div class="meta">Opened today</div></article>
+            <article class="file-card"><div class="file-thumb">🎬</div><div class="file-name">Autumn campaign rough cut.mp4</div><div class="meta">48 MB · yesterday</div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="view area-grid" id="messages" aria-label="Messages">
+        <div><div class="section-head"><h2>Your conversations</h2><input class="search" placeholder="Find a conversation" aria-label="Find a conversation"></div>
+          <div class="people">
+            <article class="person-card"><div class="face">AR</div><div><strong>Ari</strong><div class="preview">I’ll let you know as soon as the venue work is ready.</div></div><div><div class="time">Now</div><span class="unread">1</span></div></article>
+            <article class="person-card"><div class="face" style="background:#f8e6dc">JL</div><div><strong>Jordan Lee</strong><div class="preview">Could you share the recommendation before Monday?</div></div><div><div class="time">2:08 PM</div><span class="unread">1</span></div></article>
+            <article class="person-card"><div class="face" style="background:#e9e4f8">OP</div><div><strong>Operations planning</strong><div class="preview">Mina: The headcount is confirmed at 180.</div></div><div class="time">11:32 AM</div></article>
+            <article class="person-card"><div class="face" style="background:#e2f3e8">RS</div><div><strong>Rafael Santos</strong><div class="preview">Thanks, that timeline works for our team.</div></div><div class="time">Yesterday</div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="view area-grid" id="widgets" aria-label="Widgets">
+        <div><div class="section-head"><h2>Your everyday tools</h2><button class="add-btn" id="addWidget">＋ Add a widget</button></div>
+          <div class="widget-grid">
+            <article class="widget weather"><h3>Moscow · Friday</h3><div class="big">16°</div><div>Light rain easing by 5 PM</div></article>
+            <article class="widget"><h3>Today</h3><div class="todo"><div class="check"><i></i><span>Review venue recommendation</span></div><div class="check"><i></i><span>Reply to Jordan</span></div><div class="check"><i></i><span>Book design review room</span></div></div></article>
+            <article class="widget"><h3>Quick note</h3><div class="note">Ask catering about vegetarian desserts before Monday.</div></article>
+            <article class="widget"><h3>Weekly update</h3><p class="meta" style="font-size:14px;margin:0 0 18px">Ari gathers your finished work and prepares a draft for the team.</p><button class="run-btn" id="runWidget">Prepare it now</button></article>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <aside class="activity" aria-label="Ari's activity">
+      <div class="activity-head"><div><h2>Ari’s activity</h2><span>Safe to close this window</span></div></div>
+      <section class="attention-card"><div class="attention-label">Waiting for you</div><h3>Update the shared event budget?</h3><p>Ari will not make this change until you decide.</p><button class="review-btn" id="reviewBtn">Review request</button></section>
+      <div class="activity-item"><div class="status-icon">↻</div><div><strong>Comparing venue quotes</strong><small>Working now · about 2 min left</small><div class="mini-progress"><i></i></div></div></div>
+      <div class="activity-item"><div class="status-icon done">✓</div><div><strong>Created Monday recommendation</strong><small>Ready to review · 2:18 PM</small></div></div>
+      <div class="activity-item"><div class="status-icon done">✓</div><div><strong>Gathered three final quotes</strong><small>Finished · 2:16 PM</small></div></div>
+      <div class="return-note">Come back later and Ari’s finished work will be here. You’ll also get a message when everything is ready.</div>
+    </aside>
+  </main>
+
+  <dialog id="permissionDialog" aria-labelledby="permissionTitle">
+    <div class="dialog-top"><div class="ask-mark"><i>!</i> Your choice is needed</div><h2 id="permissionTitle">May Ari update the shared event budget?</h2><p>Ari wants to type three venue totals into a spreadsheet used by the Operations team.</p></div>
+    <div class="permission-body">
+      <div class="plain-fact"><span>What will change</span><strong>Cells C12–C14 in “Northstar Events — 2026 Budget”</strong></div>
+      <div class="plain-fact"><span>Where</span><strong>docs.google.com/spreadsheets/d/1NorthstarBudget</strong></div>
+      <div class="plain-fact"><span>What Ari will enter</span><strong>Bluebird Hotel €24,800 · Foundry Hall €26,150 · Riverside House €27,300</strong></div>
+      <div class="warning"><strong>This changes a shared file.</strong> People on the Operations team may see the new numbers right away. Ari will not send or publish anything.</div>
+    </div>
+    <div class="dialog-actions">
+      <button class="deny" value="deny">No, don’t change it</button><button class="allow" value="allow">Yes, update these cells</button>
+      <div class="decision-note">Your choice and Ari’s change will be recorded.</div>
+    </div>
+  </dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const titles={chat:'Good afternoon, Maya',files:'Files',messages:'Messages',widgets:'Widgets'};
+    const buttons=[...document.querySelectorAll('.nav-btn')];
+    const views=[...document.querySelectorAll('.view')];
+    buttons.forEach(btn=>btn.addEventListener('click',()=>{
+      buttons.forEach(b=>b.classList.toggle('active',b===btn));
+      views.forEach(v=>v.classList.toggle('active',v.id===btn.dataset.view));
+      document.getElementById('viewTitle').textContent=titles[btn.dataset.view];
+    }));
+    const dialog=document.getElementById('permissionDialog');
+    document.getElementById('reviewBtn').addEventListener('click',()=>dialog.showModal());
+    document.getElementById('mobileReview').addEventListener('click',()=>dialog.showModal());
+    const toast=document.getElementById('toast');
+    function notice(text){ toast.textContent=text; toast.classList.add('show'); setTimeout(()=>toast.classList.remove('show'),2600); }
+    dialog.querySelector('.deny').addEventListener('click',()=>{dialog.close();notice('Ari will leave the budget unchanged.');});
+    dialog.querySelector('.allow').addEventListener('click',()=>{
+      dialog.close(); notice('Okay — Ari is updating only those three cells.');
+      document.querySelector('.attention-card').innerHTML='<div class="attention-label" style="color:var(--green)">You allowed this</div><h3>Updating three budget cells</h3><p>Ari is making the change now.</p>';
+      document.getElementById('mobileReview').textContent='Ari is working';
+    });
+    const input=document.getElementById('chatInput');
+    function send(){
+      const value=input.value.trim(); if(!value)return;
+      const article=document.createElement('article'); article.className='message me';
+      const sender=document.createElement('div'); sender.className='sender'; sender.textContent='You · just now';
+      const bubble=document.createElement('div'); bubble.className='bubble'; const p=document.createElement('p'); p.textContent=value;
+      bubble.appendChild(p); article.append(sender,bubble); document.getElementById('thread').appendChild(article); input.value=''; article.scrollIntoView({behavior:'smooth'}); notice('Sent to Ari');
+    }
+    document.getElementById('sendBtn').addEventListener('click',send);
+    input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+    document.getElementById('runWidget').addEventListener('click',e=>{e.currentTarget.textContent='Ari is preparing it…';e.currentTarget.disabled=true;notice('Started. You can go anywhere in CieloOS.');});
+    document.getElementById('addWidget').addEventListener('click',()=>notice('Widget chooser would open here.'));
+  </script>
+</body>
+</html>

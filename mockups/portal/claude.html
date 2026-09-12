@@ -1,0 +1,666 @@
+<!--
+IDEA: Your agent is a colleague, not a feature. So the portal is shaped like a
+workplace: Chat and Messages are the same kind of thing (conversations), Files is
+the drawer, Pinboard is the wall. Permission requests arrive the way a coworker's
+question arrives — inside the conversation, phrased as a question, with the literal
+address and the reason you asked. The consent question is set in a SERIF, larger and
+slower than everything else, because that is the one moment we want read, not skimmed.
+
+TRADE-OFF: Chat and Messages share one visual language, so a person who wants a
+dedicated "AI app" experience will find the agent sitting in a list next to Yulia
+from accounting. I think that is correct — it is what the agent actually is — but it
+deliberately refuses the familiar big-chat-box product shape.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CieloOS — portal</title>
+<style>
+  :root {
+    --paper:        #EEF2F7;
+    --surface:      #FFFFFF;
+    --surface-2:    #F5F8FC;
+    --ink:          #16202E;
+    --ink-soft:     #4B5B70;
+    --ink-mute:     #7C8CA3;
+    --rule:         #D8E0EA;
+    --rule-soft:    #E8EDF4;
+    --sky:          #1A6DA8;
+    --sky-soft:     #E2EFF9;
+    --ask:          #A4661B;
+    --ask-soft:     #FCF0DC;
+    --ask-edge:     #E8C48A;
+    --good:         #1B7355;
+    --good-soft:    #DFF0E9;
+    --bubble-me:    #1A6DA8;
+    --bubble-me-ink:#FFFFFF;
+    --shadow:       0 1px 2px rgba(22,32,46,.06), 0 10px 30px -18px rgba(22,32,46,.35);
+    --radius:       12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:        #0C121B;
+      --surface:      #141C27;
+      --surface-2:    #1A2533;
+      --ink:          #E7ECF3;
+      --ink-soft:     #AFBCCD;
+      --ink-mute:     #7E8DA3;
+      --rule:         #293544;
+      --rule-soft:    #1F2A38;
+      --sky:          #6BAAE0;
+      --sky-soft:     #172A3C;
+      --ask:          #E0AF67;
+      --ask-soft:     #2B2213;
+      --ask-edge:     #5A4526;
+      --good:         #63C6A2;
+      --good-soft:    #142C24;
+      --bubble-me:    #2E6E9E;
+      --bubble-me-ink:#FFFFFF;
+      --shadow:       0 1px 2px rgba(0,0,0,.5), 0 12px 34px -20px rgba(0,0,0,.9);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0C121B; --surface:#141C27; --surface-2:#1A2533; --ink:#E7ECF3;
+    --ink-soft:#AFBCCD; --ink-mute:#7E8DA3; --rule:#293544; --rule-soft:#1F2A38;
+    --sky:#6BAAE0; --sky-soft:#172A3C; --ask:#E0AF67; --ask-soft:#2B2213;
+    --ask-edge:#5A4526; --good:#63C6A2; --good-soft:#142C24; --bubble-me:#2E6E9E;
+    --bubble-me-ink:#FFFFFF;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 12px 34px -20px rgba(0,0,0,.9);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  :focus-visible { outline: 2px solid var(--sky); outline-offset: 2px; border-radius: 6px; }
+
+  /* ---------- shell ---------- */
+  .app { display: grid; grid-template-columns: 248px 1fr; height: 100dvh; }
+
+  .rail {
+    background: var(--surface); border-right: 1px solid var(--rule);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .brand { padding: 18px 18px 14px; display: flex; align-items: center; gap: 10px; }
+  .mark { width: 26px; height: 26px; flex: none; }
+  .brand b { font-size: 1.02rem; letter-spacing: -.01em; }
+  .brand span { display: block; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-mute); }
+
+  nav { padding: 4px 10px; display: flex; flex-direction: column; gap: 2px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    background: none; border: 0; padding: 9px 10px; border-radius: 9px;
+    text-align: left; color: var(--ink-soft); font-weight: 500;
+  }
+  .nav-item:hover { background: var(--surface-2); }
+  .nav-item[aria-current="true"] { background: var(--sky-soft); color: var(--sky); font-weight: 600; }
+  .nav-item .ico { width: 19px; height: 19px; flex: none; }
+  .nav-item .label { flex: 1; min-width: 0; }
+  .badge {
+    flex: none; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px;
+    background: var(--ask); color: #fff; font-size: .7rem; font-weight: 700;
+    display: grid; place-items: center;
+  }
+  .badge.quiet { background: var(--rule); color: var(--ink-mute); }
+
+  .rail-foot { margin-top: auto; padding: 12px; border-top: 1px solid var(--rule-soft); display: flex; flex-direction: column; gap: 10px; }
+  .me { display: flex; align-items: center; gap: 10px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex: none; display: grid; place-items: center;
+    background: var(--sky); color: #fff; font-weight: 700; font-size: .8rem;
+  }
+  .me small { display: block; color: var(--ink-mute); font-size: .76rem; }
+  .langs { display: flex; gap: 4px; }
+  .lang {
+    flex: 1; border: 1px solid var(--rule); background: var(--surface); border-radius: 7px;
+    padding: 5px 0; font-size: .74rem; font-weight: 600; color: var(--ink-mute);
+  }
+  .lang[aria-pressed="true"] { background: var(--sky-soft); border-color: var(--sky); color: var(--sky); }
+
+  /* ---------- main ---------- */
+  main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+
+  .pending-bar {
+    display: none; align-items: center; gap: 12px;
+    background: var(--ask-soft); border-bottom: 1px solid var(--ask-edge);
+    padding: 10px 18px; color: var(--ask); font-weight: 600; font-size: .9rem;
+  }
+  .pending-bar.on { display: flex; }
+  .pending-bar button {
+    margin-left: auto; background: var(--ask); color: #fff; border: 0;
+    padding: 6px 13px; border-radius: 7px; font-weight: 600; font-size: .84rem;
+  }
+
+  .view { flex: 1; min-height: 0; display: none; }
+  .view.on { display: flex; }
+
+  /* ---------- conversations ---------- */
+  .list { width: 268px; border-right: 1px solid var(--rule); background: var(--surface); overflow-y: auto; flex: none; }
+  .list h2, .pane h2 { margin: 0; }
+  .list-head { padding: 16px 16px 8px; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-mute); font-weight: 700; }
+  .row {
+    display: flex; gap: 11px; padding: 11px 14px; border: 0; background: none; width: 100%;
+    text-align: left; border-left: 3px solid transparent;
+  }
+  .row:hover { background: var(--surface-2); }
+  .row[aria-current="true"] { background: var(--sky-soft); border-left-color: var(--sky); }
+  .row .who { font-weight: 600; font-size: .92rem; }
+  .row .prev { color: var(--ink-mute); font-size: .82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .body { min-width: 0; flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ask); flex: none; align-self: center; }
+
+  .thread { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--paper); }
+  .thread-head {
+    padding: 13px 20px; border-bottom: 1px solid var(--rule); background: var(--surface);
+    display: flex; align-items: center; gap: 11px;
+  }
+  .thread-head b { font-size: .98rem; }
+  .thread-head small { color: var(--ink-mute); font-size: .8rem; display: block; }
+  .stream { flex: 1; overflow-y: auto; padding: 22px 20px 8px; display: flex; flex-direction: column; gap: 14px; }
+  /* A flex column shrinks its children along the main axis, which silently
+     compressed the tall permission card until it clipped its own buttons. */
+  .stream > * { flex: none; }
+
+  .msg { max-width: min(640px, 78%); display: flex; flex-direction: column; gap: 4px; }
+  .msg .bubble { padding: 11px 14px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+  .msg.mine { align-self: flex-end; align-items: flex-end; }
+  .msg.mine .bubble { background: var(--bubble-me); color: var(--bubble-me-ink); box-shadow: none; }
+  .stamp { font-size: .72rem; color: var(--ink-mute); padding: 0 3px; }
+
+  /* working state */
+  .working {
+    align-self: flex-start; display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 11px 14px; max-width: min(640px, 78%); box-shadow: var(--shadow);
+  }
+  .spin { width: 15px; height: 15px; border-radius: 50%; border: 2px solid var(--rule); border-top-color: var(--sky); animation: sp 1s linear infinite; flex: none; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  .working .steps { font-size: .82rem; color: var(--ink-mute); }
+
+  /* finished-work card */
+  .result {
+    align-self: flex-start; max-width: min(640px, 78%);
+    background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius);
+    padding: 13px 15px; box-shadow: var(--shadow);
+  }
+  .result .file { display: flex; align-items: center; gap: 11px; margin-top: 10px; padding: 10px; background: var(--surface-2); border-radius: 9px; }
+  .result .file .ft { width: 30px; height: 30px; border-radius: 7px; background: var(--good-soft); color: var(--good); display: grid; place-items: center; font-size: .68rem; font-weight: 800; flex: none; }
+  .result .file b { font-size: .88rem; display: block; }
+  .result .file small { color: var(--ink-mute); font-size: .78rem; }
+
+  /* ---------- THE PERMISSION MOMENT ---------- */
+  .ask {
+    align-self: stretch; max-width: 640px;
+    background: var(--surface); border: 1px solid var(--ask-edge);
+    border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden;
+  }
+  .ask-top {
+    background: var(--ask-soft); padding: 9px 16px; display: flex; align-items: center; gap: 8px;
+    font-size: .74rem; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: var(--ask);
+    border-bottom: 1px solid var(--ask-edge);
+  }
+  .ask-body { padding: 18px 16px 16px; }
+  /* The one thing on the page set in a serif: slower to read, on purpose. */
+  .ask-q {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 1.24rem; line-height: 1.35; margin: 0 0 14px; text-wrap: balance;
+  }
+  .facts { display: flex; flex-direction: column; gap: 1px; background: var(--rule-soft); border: 1px solid var(--rule-soft); border-radius: 9px; overflow: hidden; }
+  .fact { display: grid; grid-template-columns: 104px 1fr; gap: 12px; background: var(--surface); padding: 9px 12px; font-size: .88rem; }
+  .fact dt { color: var(--ink-mute); font-size: .78rem; padding-top: 2px; }
+  .fact dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .addr { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; font-weight: 600; }
+  .ask-note { margin: 12px 0 0; font-size: .85rem; color: var(--ink-soft); }
+  .ask-acts { display: flex; gap: 9px; margin-top: 15px; flex-wrap: wrap; }
+  .btn { border: 1px solid var(--rule); background: var(--surface); padding: 9px 16px; border-radius: 8px; font-weight: 600; font-size: .9rem; }
+  .btn.primary { background: var(--sky); border-color: var(--sky); color: #fff; }
+  .btn.ghost { border-color: transparent; color: var(--ink-mute); }
+  .answered { display: flex; align-items: center; gap: 8px; color: var(--good); font-weight: 600; font-size: .9rem; margin-top: 14px; }
+  /* A display rule beats the hidden attribute, so say so explicitly. */
+  [hidden] { display: none !important; }
+
+  .composer { padding: 12px 20px 18px; background: var(--paper); }
+  .composer .box { display: flex; gap: 9px; align-items: flex-end; background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 9px 10px 9px 14px; box-shadow: var(--shadow); }
+  .composer textarea { flex: 1; border: 0; background: none; resize: none; font: inherit; color: inherit; min-height: 22px; max-height: 120px; }
+  .composer textarea:focus { outline: none; }
+  .send { border: 0; background: var(--sky); color: #fff; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; flex: none; }
+
+  /* ---------- files ---------- */
+  .pane { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 26px 40px; }
+  .pane-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+  .pane-head h2 { font-size: 1.32rem; letter-spacing: -.01em; }
+  .pane-head p { margin: 0; color: var(--ink-mute); font-size: .9rem; }
+  .files { display: grid; gap: 10px; }
+  .filerow {
+    display: flex; align-items: center; gap: 14px; background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 10px; padding: 12px 14px;
+  }
+  .filerow .ft { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; font-size: .68rem; font-weight: 800; flex: none; }
+  .ft.doc { background: var(--sky-soft); color: var(--sky); }
+  .ft.sheet { background: var(--good-soft); color: var(--good); }
+  .ft.video { background: var(--ask-soft); color: var(--ask); }
+  .filerow .meta { flex: 1; min-width: 0; }
+  .filerow b { display: block; font-size: .93rem; }
+  .filerow small { color: var(--ink-mute); font-size: .8rem; }
+  .by { font-size: .74rem; padding: 3px 8px; border-radius: 20px; background: var(--sky-soft); color: var(--sky); font-weight: 600; white-space: nowrap; }
+
+  /* ---------- pinboard ---------- */
+  .board { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 14px; align-items: start; }
+  .widget { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 15px; box-shadow: var(--shadow); }
+  .widget h3 { margin: 0 0 10px; font-size: .78rem; letter-spacing: .09em; text-transform: uppercase; color: var(--ink-mute); }
+  .widget ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .widget li { display: flex; gap: 9px; align-items: flex-start; font-size: .9rem; }
+  .check { width: 16px; height: 16px; border: 1.5px solid var(--rule); border-radius: 4px; flex: none; margin-top: 2px; display: grid; place-items: center; }
+  .check.done { background: var(--good); border-color: var(--good); color: #fff; }
+  .done-txt { color: var(--ink-mute); text-decoration: line-through; }
+  .big { font-size: 1.9rem; font-weight: 700; letter-spacing: -.02em; }
+  .widget .sub { color: var(--ink-mute); font-size: .84rem; }
+  .runbtn { width: 100%; margin-top: 10px; border: 1px dashed var(--rule); background: none; color: var(--sky); border-radius: 8px; padding: 8px; font-weight: 600; font-size: .86rem; }
+  .add { border: 1.5px dashed var(--rule); background: none; color: var(--ink-mute); border-radius: 12px; min-height: 112px; font-weight: 600; display: grid; place-items: center; }
+
+  /* ---------- narrow ---------- */
+  @media (max-width: 900px) {
+    .app { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+    .rail { grid-row: 2; flex-direction: row; border-right: 0; border-top: 1px solid var(--rule); align-items: center; overflow-x: auto; }
+    .brand, .rail-foot { display: none; }
+    nav { flex-direction: row; width: 100%; justify-content: space-around; padding: 6px; }
+    .nav-item { flex-direction: column; gap: 3px; font-size: .68rem; padding: 6px 4px; text-align: center; }
+    .nav-item .label { flex: none; }
+    .badge { position: absolute; transform: translate(14px, -6px); }
+    .nav-item { position: relative; }
+    main { grid-row: 1; min-height: 0; }
+    .list { display: none; }          /* phone: the list is a separate screen; thread wins */
+    .ask { max-width: 100%; }
+    .fact { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+
+<div class="app">
+  <!-- ============ rail ============ -->
+  <aside class="rail">
+    <div class="brand">
+      <svg class="mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M5 16.5a3.5 3.5 0 0 1 .6-6.95 5.5 5.5 0 0 1 10.6-1.6A4 4 0 0 1 19 16.5H5Z"
+              fill="var(--sky-soft)" stroke="var(--sky)" stroke-width="1.5" stroke-linejoin="round"/>
+      </svg>
+      <div><b>CieloOS</b><span data-t="tag">Your workplace</span></div>
+    </div>
+
+    <nav>
+      <button class="nav-item" aria-current="true" data-go="chat">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4L3 21l1.1-3.3A8.4 8.4 0 1 1 21 11.5Z" stroke-linejoin="round"/></svg>
+        <span class="label" data-t="chat">Cielo</span>
+        <span class="badge" id="chatBadge">1</span>
+      </button>
+      <button class="nav-item" data-go="files">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h7A1.5 1.5 0 0 1 19 10v7.5A1.5 1.5 0 0 1 17.5 19h-13A1.5 1.5 0 0 1 3 17.5v-10Z" stroke-linejoin="round"/></svg>
+        <span class="label" data-t="files">Files</span>
+      </button>
+      <button class="nav-item" data-go="messages">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H8l-4 3.5V5Z" stroke-linejoin="round"/></svg>
+        <span class="label" data-t="messages">Messages</span>
+        <span class="badge quiet">2</span>
+      </button>
+      <button class="nav-item" data-go="board">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z" stroke-linejoin="round"/></svg>
+        <span class="label" data-t="board">Pinboard</span>
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="langs">
+        <button class="lang" aria-pressed="true"  data-lang="en">EN</button>
+        <button class="lang" aria-pressed="false" data-lang="ru">RU</button>
+        <button class="lang" aria-pressed="false" data-lang="es">ES</button>
+      </div>
+      <div class="me">
+        <div class="avatar">J</div>
+        <div><b style="font-size:.9rem">Joche</b><small data-t="role">Sales</small></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ main ============ -->
+  <main>
+    <div class="pending-bar" id="pendBar">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v5m0 3.5h.01M10.3 3.9 2.4 18a1.9 1.9 0 0 0 1.7 2.9h15.8a1.9 1.9 0 0 0 1.7-2.9L13.7 3.9a1.9 1.9 0 0 0-3.4 0Z" stroke-linejoin="round"/></svg>
+      <span data-t="pending">Cielo is waiting for your answer</span>
+      <button data-go="chat" data-t="show">Show me</button>
+    </div>
+
+    <!-- ---- chat ---- -->
+    <section class="view on" id="v-chat">
+      <div class="list">
+        <div class="list-head" data-t="today">Today</div>
+        <button class="row" aria-current="true">
+          <div class="avatar" style="background:var(--sky)">C</div>
+          <div class="body"><div class="who">Cielo</div><div class="prev" data-t="prev1">May I open the supplier's site?</div></div>
+          <div class="dot"></div>
+        </button>
+        <button class="row">
+          <div class="avatar" style="background:#6C7A8C">C</div>
+          <div class="body"><div class="who" data-t="yest">Yesterday</div><div class="prev" data-t="prev2">Made the Q3 revenue sheet</div></div>
+        </button>
+      </div>
+
+      <div class="thread">
+        <div class="thread-head">
+          <div class="avatar" style="background:var(--sky)">C</div>
+          <div><b>Cielo</b><small data-t="sub">Your assistant · working on the invoice</small></div>
+        </div>
+
+        <div class="stream" id="stream">
+          <div class="msg mine">
+            <div class="bubble" data-t="m1">Get the September invoice from our supplier and put the total in the Q3 sheet.</div>
+            <div class="stamp">09:41</div>
+          </div>
+
+          <div class="msg">
+            <div class="bubble" data-t="m2">I'll find it on their site. I'll ask before I open anything.</div>
+            <div class="stamp">09:41</div>
+          </div>
+
+          <div class="working">
+            <div class="spin"></div>
+            <div>
+              <div style="font-weight:600;font-size:.9rem" data-t="w1">Looking for the invoice</div>
+              <div class="steps" data-t="w2">Step 2 of 4 · about a minute left</div>
+            </div>
+          </div>
+
+          <!-- ========== THE PERMISSION MOMENT ========== -->
+          <div class="ask" id="askCard">
+            <div class="ask-top">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 8v5m0 3.5h.01M10.3 3.9 2.4 18a1.9 1.9 0 0 0 1.7 2.9h15.8a1.9 1.9 0 0 0 1.7-2.9L13.7 3.9a1.9 1.9 0 0 0-3.4 0Z" stroke-linejoin="round"/></svg>
+              <span data-t="asks">Cielo is asking</span>
+            </div>
+            <div class="ask-body">
+              <p class="ask-q" data-t="q">May I open this website?</p>
+
+              <dl class="facts">
+                <div class="fact"><dt data-t="f1">Address</dt><dd class="addr">invoices.acme-supplier.com</dd></div>
+                <div class="fact"><dt data-t="f2">What for</dt><dd data-t="f2v">To download your September invoice.</dd></div>
+                <div class="fact"><dt data-t="f3">Because</dt><dd data-t="f3v">You asked: “Get the September invoice from our supplier.”</dd></div>
+              </dl>
+
+              <p class="ask-note" data-t="note">Opening a page lets that site load. Cielo cannot send anything of yours anywhere without asking you again.</p>
+
+              <div class="ask-acts" id="askActs">
+                <button class="btn primary" data-answer="yes" data-t="yes">Open it</button>
+                <button class="btn" data-answer="no" data-t="no">Not now</button>
+                <button class="btn ghost" data-t="why">Why is it asking?</button>
+              </div>
+              <div class="answered" id="answered" hidden>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 13 4 4L19 7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span data-t="ok">You said yes. Cielo is carrying on.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- finished work -->
+          <div class="result">
+            <div style="font-weight:600" data-t="r1">Earlier — I finished the revenue sheet.</div>
+            <div class="file">
+              <div class="ft">XLS</div>
+              <div style="min-width:0"><b>Q3 revenue.xlsx</b><small data-t="r2">Updated 09:12 · 3 sheets</small></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="box">
+            <textarea rows="1" placeholder="Ask Cielo to do something…" data-ph="ph"></textarea>
+            <button class="send" aria-label="Send">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 12 16-8-6 16-2.5-6L4 12Z" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- files ---- -->
+    <section class="view" id="v-files">
+      <div class="pane">
+        <div class="pane-head">
+          <h2 data-t="files">Files</h2>
+          <p data-t="fsub">Everything you and Cielo have made.</p>
+        </div>
+        <div class="files">
+          <div class="filerow">
+            <div class="ft sheet">XLS</div>
+            <div class="meta"><b>Q3 revenue.xlsx</b><small data-t="fa">Today at 09:12</small></div>
+            <span class="by" data-t="byc">Made by Cielo</span>
+          </div>
+          <div class="filerow">
+            <div class="ft video">MP4</div>
+            <div class="meta"><b>How to file expenses.mp4</b><small data-t="fb">Yesterday · 2 min 40 s</small></div>
+            <span class="by" data-t="byc">Made by Cielo</span>
+          </div>
+          <div class="filerow">
+            <div class="ft doc">DOC</div>
+            <div class="meta"><b>Supplier list.docx</b><small data-t="fc">Monday · you edited it</small></div>
+          </div>
+          <div class="filerow">
+            <div class="ft doc">PDF</div>
+            <div class="meta"><b>September invoice.pdf</b><small data-t="fd">Waiting — Cielo is fetching this</small></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---- messages ---- -->
+    <section class="view" id="v-messages">
+      <div class="list">
+        <div class="list-head" data-t="people">People here</div>
+        <button class="row" aria-current="true">
+          <div class="avatar" style="background:#8A5A9E">Y</div>
+          <div class="body"><div class="who">Yulia</div><div class="prev" data-t="p1">Can you send me the Q3 numbers?</div></div>
+          <div class="dot"></div>
+        </button>
+        <button class="row">
+          <div class="avatar" style="background:#3E7D6B">M</div>
+          <div class="body"><div class="who">Marco</div><div class="prev" data-t="p2">Thanks — got it</div></div>
+        </button>
+      </div>
+      <div class="thread">
+        <div class="thread-head">
+          <div class="avatar" style="background:#8A5A9E">Y</div>
+          <div><b>Yulia</b><small data-t="acc">Accounting</small></div>
+        </div>
+        <div class="stream">
+          <div class="msg"><div class="bubble" data-t="p1">Can you send me the Q3 numbers?</div><div class="stamp">09:05</div></div>
+          <div class="msg mine"><div class="bubble" data-t="p3">Cielo is finishing the sheet now — I'll send it over shortly.</div><div class="stamp">09:07</div></div>
+        </div>
+        <div class="composer"><div class="box">
+          <textarea rows="1" placeholder="Write to Yulia…" data-ph="ph2"></textarea>
+          <button class="send" aria-label="Send"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m4 12 16-8-6 16-2.5-6L4 12Z" stroke-linejoin="round"/></svg></button>
+        </div></div>
+      </div>
+    </section>
+
+    <!-- ---- pinboard ---- -->
+    <section class="view" id="v-board">
+      <div class="pane">
+        <div class="pane-head">
+          <h2 data-t="board">Pinboard</h2>
+          <p data-t="bsub">Small things you want within reach.</p>
+        </div>
+        <div class="board">
+          <div class="widget">
+            <h3 data-t="wtodo">To do</h3>
+            <ul>
+              <li><span class="check done"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><path d="m5 13 4 4L19 7" stroke-linecap="round"/></svg></span><span class="done-txt" data-t="t1">Send Yulia the Q3 numbers</span></li>
+              <li><span class="check"></span><span data-t="t2">Approve the supplier invoice</span></li>
+              <li><span class="check"></span><span data-t="t3">Book the team lunch</span></li>
+            </ul>
+          </div>
+          <div class="widget">
+            <h3 data-t="wnote">Note</h3>
+            <p style="margin:0;font-size:.92rem" data-t="n1">Supplier changed their bank details — check with Marco before paying anything.</p>
+          </div>
+          <div class="widget">
+            <h3 data-t="wask">Ask Cielo</h3>
+            <div class="big" data-t="n2">Weekly report</div>
+            <div class="sub" data-t="n3">Last run Monday 08:00</div>
+            <button class="runbtn" data-t="run">Run it now</button>
+          </div>
+          <div class="widget">
+            <h3 data-t="wweather">Outside</h3>
+            <div class="big">14°</div>
+            <div class="sub" data-t="n4">Saint Petersburg · cloudy</div>
+          </div>
+          <button class="add" data-t="add">+ Add a widget</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+  // ---- navigation -------------------------------------------------------
+  const views = { chat: 'v-chat', files: 'v-files', messages: 'v-messages', board: 'v-board' };
+  function go(name) {
+    for (const [k, id] of Object.entries(views))
+      document.getElementById(id).classList.toggle('on', k === name);
+    document.querySelectorAll('.nav-item').forEach(b =>
+      b.setAttribute('aria-current', String(b.dataset.go === name)));
+  }
+  document.querySelectorAll('[data-go]').forEach(b =>
+    b.addEventListener('click', () => go(b.dataset.go)));
+
+  // ---- the permission moment -------------------------------------------
+  // Unanswered requests raise a bar across the whole portal: a question you have
+  // not answered should follow you out of the room you left it in.
+  const bar = document.getElementById('pendBar');
+  bar.classList.add('on');
+
+  document.getElementById('askActs').addEventListener('click', e => {
+    const answer = e.target.closest('[data-answer]');
+    if (!answer) return;
+    document.getElementById('askActs').hidden = true;
+    const done = document.getElementById('answered');
+    done.hidden = false;
+    done.querySelector('span').textContent =
+      answer.dataset.answer === 'yes' ? T[lang].ok : T[lang].no2;
+    done.style.color = answer.dataset.answer === 'yes' ? 'var(--good)' : 'var(--ink-mute)';
+    bar.classList.remove('on');
+    document.getElementById('chatBadge').remove();
+  });
+
+  // ---- language ---------------------------------------------------------
+  // Not a translation exercise: proof that the layout survives Russian, which
+  // runs ~30% longer than English. Switch to RU and nothing reflows badly.
+  const T = {
+    en: {
+      tag:'Your workplace', chat:'Cielo', files:'Files', messages:'Messages', board:'Pinboard',
+      role:'Sales', pending:'Cielo is waiting for your answer', show:'Show me', today:'Today',
+      prev1:'May I open the supplier’s site?', yest:'Yesterday', prev2:'Made the Q3 revenue sheet',
+      sub:'Your assistant · working on the invoice',
+      m1:'Get the September invoice from our supplier and put the total in the Q3 sheet.',
+      m2:'I’ll find it on their site. I’ll ask before I open anything.',
+      w1:'Looking for the invoice', w2:'Step 2 of 4 · about a minute left',
+      asks:'Cielo is asking', q:'May I open this website?',
+      f1:'Address', f2:'What for', f2v:'To download your September invoice.',
+      f3:'Because', f3v:'You asked: “Get the September invoice from our supplier.”',
+      note:'Opening a page lets that site load. Cielo cannot send anything of yours anywhere without asking you again.',
+      yes:'Open it', no:'Not now', why:'Why is it asking?',
+      ok:'You said yes. Cielo is carrying on.', no2:'You said no. Cielo stopped.',
+      r1:'Earlier — I finished the revenue sheet.', r2:'Updated 09:12 · 3 sheets',
+      fsub:'Everything you and Cielo have made.', fa:'Today at 09:12', fb:'Yesterday · 2 min 40 s',
+      fc:'Monday · you edited it', fd:'Waiting — Cielo is fetching this', byc:'Made by Cielo',
+      people:'People here', p1:'Can you send me the Q3 numbers?', p2:'Thanks — got it',
+      p3:'Cielo is finishing the sheet now — I’ll send it over shortly.', acc:'Accounting',
+      bsub:'Small things you want within reach.', wtodo:'To do', t1:'Send Yulia the Q3 numbers',
+      t2:'Approve the supplier invoice', t3:'Book the team lunch', wnote:'Note',
+      n1:'Supplier changed their bank details — check with Marco before paying anything.',
+      wask:'Ask Cielo', n2:'Weekly report', n3:'Last run Monday 08:00', run:'Run it now',
+      wweather:'Outside', n4:'Saint Petersburg · cloudy', add:'+ Add a widget',
+      ph:'Ask Cielo to do something…', ph2:'Write to Yulia…'
+    },
+    ru: {
+      tag:'Ваше рабочее место', chat:'Сьело', files:'Файлы',
+      messages:'Сообщения', board:'Доска', role:'Продажи',
+      pending:'Сьело ждёт вашего ответа', show:'Показать', today:'Сегодня',
+      prev1:'Можно открыть сайт поставщика?', yest:'Вчера',
+      prev2:'Сделала таблицу выручки за 3‑й квартал',
+      sub:'Ваш помощник · занимается счётом',
+      m1:'Найди счёт за сентябрь у поставщика и внеси сумму в таблицу за 3‑й квартал.',
+      m2:'Найду его на их сайте. Спрошу, прежде чем что‑то открывать.',
+      w1:'Ищу счёт', w2:'Шаг 2 из 4 · осталось около минуты',
+      asks:'Сьело спрашивает', q:'Можно открыть этот сайт?',
+      f1:'Адрес', f2:'Зачем', f2v:'Чтобы скачать ваш счёт за сентябрь.',
+      f3:'Почему', f3v:'Вы попросили: «Найди счёт за сентябрь у поставщика».',
+      note:'Открытие страницы позволит сайту загрузиться. Сьело не сможет никуда отправить ваши данные, не спросив снова.',
+      yes:'Открыть', no:'Не сейчас', why:'Почему спрашивают?',
+      ok:'Вы разрешили. Сьело продолжает.', no2:'Вы отказали. Сьело остановилось.',
+      r1:'Ранее — таблица выручки готова.', r2:'Обновлено 09:12 · 3 листа',
+      fsub:'Всё, что сделали вы и Сьело.', fa:'Сегодня в 09:12',
+      fb:'Вчера · 2 мин 40 с', fc:'Понедельник · вы редактировали',
+      fd:'Ожидание — Сьело загружает', byc:'Сделало Сьело',
+      people:'Люди здесь', p1:'Пришлёшь цифры за 3‑й квартал?',
+      p2:'Спасибо — получил', p3:'Сьело заканчивает таблицу — скоро пришлю.',
+      acc:'Бухгалтерия', bsub:'Небольшие вещи под рукой.',
+      wtodo:'Задачи', t1:'Отправить Юле цифры за 3‑й квартал',
+      t2:'Согласовать счёт поставщика', t3:'Заказать обед для команды',
+      wnote:'Заметка', n1:'Поставщик сменил банковские реквизиты — уточните у Марко.',
+      wask:'Попросить Сьело', n2:'Недельный отчёт',
+      n3:'Последний запуск — понедельник, 08:00', run:'Запустить',
+      wweather:'На улице', n4:'Санкт‑Петербург · облачно', add:'+ Добавить виджет',
+      ph:'Попросите Сьело что‑то сделать…', ph2:'Напишите Юле…'
+    },
+    es: {
+      tag:'Tu lugar de trabajo', chat:'Cielo', files:'Archivos', messages:'Mensajes', board:'Tablero',
+      role:'Ventas', pending:'Cielo espera tu respuesta', show:'Ver', today:'Hoy',
+      prev1:'¿Puedo abrir el sitio del proveedor?', yest:'Ayer', prev2:'Hizo la hoja de ingresos del T3',
+      sub:'Tu asistente · trabajando en la factura',
+      m1:'Busca la factura de septiembre del proveedor y pon el total en la hoja del T3.',
+      m2:'La buscaré en su sitio. Preguntaré antes de abrir nada.',
+      w1:'Buscando la factura', w2:'Paso 2 de 4 · falta un minuto',
+      asks:'Cielo pregunta', q:'¿Puedo abrir este sitio web?',
+      f1:'Dirección', f2:'Para qué', f2v:'Para descargar tu factura de septiembre.',
+      f3:'Porque', f3v:'Pediste: “Busca la factura de septiembre del proveedor”.',
+      note:'Abrir una página permite que ese sitio cargue. Cielo no puede enviar nada tuyo a ninguna parte sin volver a preguntarte.',
+      yes:'Abrirlo', no:'Ahora no', why:'¿Por qué pregunta?',
+      ok:'Dijiste que sí. Cielo continúa.', no2:'Dijiste que no. Cielo se detuvo.',
+      r1:'Antes — terminé la hoja de ingresos.', r2:'Actualizado 09:12 · 3 hojas',
+      fsub:'Todo lo que tú y Cielo habéis hecho.', fa:'Hoy a las 09:12', fb:'Ayer · 2 min 40 s',
+      fc:'Lunes · lo editaste tú', fd:'Esperando — Cielo lo está descargando', byc:'Hecho por Cielo',
+      people:'Personas aquí', p1:'¿Me envías los números del T3?', p2:'Gracias — recibido',
+      p3:'Cielo está terminando la hoja — te la envío enseguida.', acc:'Contabilidad',
+      bsub:'Cosas pequeñas que quieres a mano.', wtodo:'Tareas', t1:'Enviar a Yulia los números del T3',
+      t2:'Aprobar la factura del proveedor', t3:'Reservar la comida del equipo', wnote:'Nota',
+      n1:'El proveedor cambió sus datos bancarios — consulta con Marco antes de pagar.',
+      wask:'Pedir a Cielo', n2:'Informe semanal', n3:'Última vez: lunes 08:00', run:'Ejecutar ahora',
+      wweather:'Fuera', n4:'San Petersburgo · nublado', add:'+ Añadir un widget',
+      ph:'Pide algo a Cielo…', ph2:'Escribe a Yulia…'
+    }
+  };
+  let lang = 'en';
+  function setLang(code) {
+    lang = code;
+    document.documentElement.lang = code;
+    document.querySelectorAll('[data-t]').forEach(el => {
+      const v = T[code][el.dataset.t];
+      if (v !== undefined) el.textContent = v;
+    });
+    document.querySelectorAll('[data-ph]').forEach(el => {
+      const v = T[code][el.dataset.ph];
+      if (v !== undefined) el.placeholder = v;
+    });
+    document.querySelectorAll('.lang').forEach(b =>
+      b.setAttribute('aria-pressed', String(b.dataset.lang === code)));
+  }
+  document.querySelectorAll('.lang').forEach(b =>
+    b.addEventListener('click', () => setLang(b.dataset.lang)));
+
+  // grow the composer with its content
+  document.querySelectorAll('.composer textarea').forEach(t =>
+    t.addEventListener('input', () => {
+      t.style.height = 'auto';
+      t.style.height = Math.min(t.scrollHeight, 120) + 'px';
+    }));
+</script>
