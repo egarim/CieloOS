@@ -1,0 +1,370 @@
+<!--
+IDEA: "The horizon." Cielo means sky. So the sky IS the agent — a live gradient at
+the top of every screen whose colour is its state: calm blue while it works, warm
+dusk when it needs you, clear pale when it is idle. You read the agent before you
+read a word. Your work sits below on solid neutral ground: cards, files, tiles.
+Ambient status above, concrete things below, and the horizon between them.
+
+Rendered here as HTML so it can be looked at. The real implementation is XAML —
+every element below maps to a WinUI/Uno primitive, see uno-mobile.md.
+-->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CieloOS — mobile (Uno)</title>
+<style>
+  :root {
+    --page:     #E7EAF0;
+    --page-2:   #D9DEE7;
+    --ink:      #111821;
+    --ink-soft: #55617A;
+    --ground:   #F3F5F9;
+    --card:     #FFFFFF;
+    --rule:     #E2E7EF;
+    --accent:   #2E7CC4;
+    --amber:    #B3761F;
+    --amber-bg: #FDF2DE;
+    --green:    #2C8466;
+    --green-bg: #E2F1EB;
+    --shadow:   0 1px 2px rgba(17,24,33,.05), 0 8px 22px -12px rgba(17,24,33,.28);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page:#0A0E14; --page-2:#05080C; --ink:#E8EDF4; --ink-soft:#9FADC2;
+      --ground:#0E141C; --card:#161D27; --rule:#232C39;
+      --accent:#6FAEE8; --amber:#E0AC62; --amber-bg:#2A2114;
+      --green:#63C6A2; --green-bg:#13291F;
+      --shadow:0 1px 2px rgba(0,0,0,.6), 0 10px 26px -14px rgba(0,0,0,.9);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: linear-gradient(160deg, var(--page), var(--page-2));
+    color: var(--ink); min-height: 100vh;
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    padding: 40px 24px 64px;
+  }
+  header.top { max-width: 1180px; margin: 0 auto 34px; }
+  header.top h1 { margin: 0 0 6px; font-size: 1.55rem; letter-spacing: -.02em; }
+  header.top p { margin: 0; color: var(--ink-soft); max-width: 62ch; }
+  .rack {
+    max-width: 1180px; margin: 0 auto; display: flex; flex-wrap: wrap;
+    gap: 40px 34px; justify-content: center; align-items: flex-start;
+  }
+  figure { margin: 0; width: 300px; }
+  figcaption { margin-top: 14px; font-size: .84rem; color: var(--ink-soft); text-align: center; }
+  figcaption b { display: block; color: var(--ink); font-size: .9rem; margin-bottom: 2px; }
+
+  /* ---------- phone ---------- */
+  .phone {
+    width: 300px; height: 620px; border-radius: 40px; padding: 9px;
+    background: linear-gradient(170deg, #2a3140, #11151d);
+    box-shadow: 0 3px 8px rgba(0,0,0,.3), 0 30px 60px -30px rgba(0,0,0,.7);
+    position: relative;
+  }
+  .screen {
+    width: 100%; height: 100%; border-radius: 32px; overflow: hidden;
+    background: var(--ground); position: relative; display: flex; flex-direction: column;
+  }
+  .status {
+    position: absolute; inset: 0 0 auto 0; height: 34px; z-index: 5;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; font-size: .7rem; font-weight: 700; color: #fff;
+    letter-spacing: .02em; pointer-events: none;
+  }
+  .status .dots { display: flex; gap: 3px; align-items: center; }
+  .status i { width: 3px; border-radius: 1px; background: #fff; display: block; }
+
+  /* ---------- the sky = the agent's state ---------- */
+  .sky {
+    position: relative; padding: 42px 20px 22px; color: #fff; flex: none;
+    background: linear-gradient(178deg, #16294A 0%, #2F5C93 46%, #6F9AC9 78%, #A8C4E2 100%);
+  }
+  .sky.needs {
+    background: linear-gradient(178deg, #3A2536 0%, #8C5334 48%, #C3854C 78%, #E3B583 100%);
+  }
+  .sky.clear {
+    background: linear-gradient(178deg, #3E6EA3 0%, #79A5D2 45%, #B7D2EA 80%, #DDE9F5 100%);
+  }
+  /* soft light, so the gradient reads as sky rather than a colour block */
+  .sky::after {
+    content: ""; position: absolute; left: -10%; top: 4%; width: 120%; height: 90%;
+    background: radial-gradient(60% 52% at 26% 18%, rgba(255,255,255,.34), transparent 70%);
+    pointer-events: none;
+  }
+  .sky > * { position: relative; z-index: 2; }
+
+  .orb {
+    width: 40px; height: 40px; border-radius: 50%; margin-bottom: 14px;
+    background: radial-gradient(circle at 32% 30%, #fff, rgba(255,255,255,.55) 42%, rgba(255,255,255,.12) 70%);
+    box-shadow: 0 0 22px rgba(255,255,255,.55);
+  }
+  .orb.pulse { animation: breathe 3.4s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .95 } 50% { transform: scale(1.09); opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .orb.pulse { animation: none } }
+
+  .sky .state { font-size: .68rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; opacity: .82; }
+  .sky h2 { margin: 5px 0 0; font-size: 1.3rem; line-height: 1.24; font-weight: 600; letter-spacing: -.015em; }
+  .sky .sub { margin-top: 7px; font-size: .82rem; opacity: .86; }
+
+  .track { margin-top: 14px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.28); overflow: hidden; }
+  .track span { display: block; height: 100%; width: 56%; background: #fff; border-radius: 3px; }
+
+  /* ---------- ground ---------- */
+  .ground { flex: 1; overflow: hidden; padding: 16px 14px 0; display: flex; flex-direction: column; gap: 11px; }
+  .lbl { font-size: .67rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-soft); padding-left: 3px; }
+
+  .card {
+    background: var(--card); border-radius: 16px; padding: 13px 14px;
+    box-shadow: var(--shadow); border: 1px solid var(--rule);
+  }
+  .card .row { display: flex; align-items: center; gap: 11px; }
+  .ft {
+    width: 34px; height: 34px; border-radius: 10px; flex: none;
+    display: grid; place-items: center; font-size: .6rem; font-weight: 800;
+  }
+  .ft.xls { background: var(--green-bg); color: var(--green); }
+  .ft.mp4 { background: var(--amber-bg); color: var(--amber); }
+  .ft.pdf { background: rgba(46,124,196,.12); color: var(--accent); }
+  .card b { font-size: .87rem; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card small { color: var(--ink-soft); font-size: .76rem; }
+  .pill {
+    font-size: .66rem; font-weight: 700; padding: 3px 8px; border-radius: 20px;
+    background: var(--green-bg); color: var(--green); white-space: nowrap;
+  }
+
+  /* ---------- composer ---------- */
+  .composer { margin-top: auto; padding: 0 0 8px; }
+  .composer .box {
+    display: flex; align-items: center; gap: 8px; background: var(--card);
+    border: 1px solid var(--rule); border-radius: 22px; padding: 9px 9px 9px 15px;
+    box-shadow: var(--shadow); color: var(--ink-soft); font-size: .84rem;
+  }
+  .composer .go {
+    margin-left: auto; width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); display: grid; place-items: center; flex: none;
+  }
+
+  /* ---------- tab bar ---------- */
+  .tabs {
+    flex: none; display: grid; grid-template-columns: repeat(4, 1fr);
+    background: var(--card); border-top: 1px solid var(--rule);
+    padding: 8px 4px 16px;
+  }
+  .tab { display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink-soft); font-size: .62rem; font-weight: 600; position: relative; }
+  .tab.on { color: var(--accent); }
+  .tab .dot { position: absolute; top: -1px; right: 50%; transform: translateX(19px); width: 7px; height: 7px; border-radius: 50%; background: var(--amber); border: 1.5px solid var(--card); }
+
+  /* ---------- permission sheet ---------- */
+  .scrim { position: absolute; inset: 0; background: rgba(8,12,18,.55); z-index: 8; }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 9;
+    background: var(--card); border-radius: 26px 26px 32px 32px;
+    padding: 10px 18px 20px; box-shadow: 0 -12px 40px rgba(0,0,0,.34);
+    max-height: 88%; overflow: auto;
+  }
+  .grab { width: 34px; height: 4px; border-radius: 2px; background: var(--rule); margin: 0 auto 14px; }
+  .asking { display: flex; align-items: center; gap: 7px; font-size: .66rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); }
+  /* The one serif on the device. A consent question should be read, not skimmed. */
+  .q {
+    font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    font-size: 1.32rem; line-height: 1.28; margin: 11px 0 15px; letter-spacing: -.01em;
+  }
+  .receipt { border: 1px solid var(--rule); border-radius: 13px; overflow: hidden; }
+  .receipt div { display: flex; flex-direction: column; gap: 2px; padding: 10px 13px; border-bottom: 1px solid var(--rule); }
+  .receipt div:last-child { border-bottom: 0; }
+  .receipt dt { font-size: .68rem; color: var(--ink-soft); letter-spacing: .04em; text-transform: uppercase; font-weight: 700; }
+  .receipt dd { margin: 0; font-size: .87rem; }
+  .addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-weight: 600; font-size: .88rem; word-break: break-all; }
+  .note { font-size: .78rem; color: var(--ink-soft); margin: 12px 0 0; line-height: 1.45; }
+  .acts { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; }
+  .btn { border: 0; border-radius: 13px; padding: 13px; font-size: .92rem; font-weight: 700; text-align: center; }
+  .btn.yes { background: var(--accent); color: #fff; }
+  .btn.no { background: transparent; color: var(--ink-soft); border: 1px solid var(--rule); }
+
+  /* ---------- widget tiles ---------- */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .tile { background: var(--card); border: 1px solid var(--rule); border-radius: 16px; padding: 12px; box-shadow: var(--shadow); }
+  .tile.wide { grid-column: 1 / -1; }
+  .tile h4 { margin: 0 0 8px; font-size: .64rem; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+  .big { font-size: 1.65rem; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+  .tile .sub { font-size: .73rem; color: var(--ink-soft); margin-top: 3px; }
+  .todo { display: flex; flex-direction: column; gap: 7px; }
+  .todo span { display: flex; gap: 8px; font-size: .79rem; align-items: flex-start; }
+  .box3 { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid var(--rule); flex: none; margin-top: 1px; display: grid; place-items: center; }
+  .box3.on { background: var(--green); border-color: var(--green); color: #fff; }
+  .strike { color: var(--ink-soft); text-decoration: line-through; }
+  .runbtn { margin-top: 9px; width: 100%; border: 1px dashed var(--rule); background: none; color: var(--accent); border-radius: 10px; padding: 7px; font-size: .76rem; font-weight: 700; }
+</style>
+
+<header class="top">
+  <h1>CieloOS on a phone — “the horizon”</h1>
+  <p>The sky is the agent. Its colour is its state, so you read it before you read a word: calm blue while it works, warm dusk when it needs you. Your work sits below on solid ground. Every element maps to a WinUI/Uno primitive.</p>
+</header>
+
+<div class="rack">
+
+  <!-- ============ 1. working ============ -->
+  <figure>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>9:41</span>
+        <span class="dots"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+      </div>
+      <div class="sky">
+        <div class="orb pulse"></div>
+        <div class="state">Working</div>
+        <h2>Looking for your September invoice</h2>
+        <div class="sub">Step 2 of 4 · about a minute left</div>
+        <div class="track"><span></span></div>
+      </div>
+      <div class="ground">
+        <div class="lbl">Earlier today</div>
+        <div class="card"><div class="row">
+          <div class="ft xls">XLS</div>
+          <div style="min-width:0;flex:1"><b>Q3 revenue.xlsx</b><small>Updated 09:12</small></div>
+          <span class="pill">Made for you</span>
+        </div></div>
+        <div class="card"><div class="row">
+          <div class="ft mp4">MP4</div>
+          <div style="min-width:0;flex:1"><b>How to file expenses.mp4</b><small>2 min 40 s</small></div>
+        </div></div>
+        <div class="composer"><div class="box">Ask Cielo to do something…
+          <span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 19V5M5 12l7-7 7 7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </div></div>
+      </div>
+      <nav class="tabs">
+        <div class="tab on"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8.5Z" stroke-linejoin="round"/></svg>Home</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L10.5 8H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H4.5A1.5 1.5 0 0 1 3 17.5v-10Z" stroke-linejoin="round"/></svg>Files</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 5h16v11H8.5L4 19.5V5Z" stroke-linejoin="round"/></svg>Messages<span class="dot"></span></div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z" stroke-linejoin="round"/></svg>Widgets</div>
+      </nav>
+    </div></div>
+    <figcaption><b>Working</b>The sky is calm blue. The orb breathes while the agent is busy — ambient, not a spinner you have to find.</figcaption>
+  </figure>
+
+  <!-- ============ 2. needs you ============ -->
+  <figure>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>9:43</span>
+        <span class="dots"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+      </div>
+      <div class="sky needs">
+        <div class="orb"></div>
+        <div class="state">Needs you</div>
+        <h2>Cielo stopped to ask you something</h2>
+        <div class="sub">Everything else is still moving</div>
+      </div>
+      <div class="ground">
+        <div class="lbl">Waiting for you</div>
+        <div class="card" style="border-color:var(--amber);background:var(--amber-bg)">
+          <div class="asking">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 8v5m0 3.5h.01M10.3 3.9 2.4 18a1.9 1.9 0 0 0 1.7 2.9h15.8a1.9 1.9 0 0 0 1.7-2.9L13.7 3.9a1.9 1.9 0 0 0-3.4 0Z" stroke-linejoin="round"/></svg>
+            Asking
+          </div>
+          <div style="font-weight:600;margin-top:7px;font-size:.9rem">May I open this website?</div>
+          <div class="addr" style="margin-top:4px;color:var(--ink-soft)">invoices.acme-supplier.com</div>
+        </div>
+        <div class="lbl">Earlier today</div>
+        <div class="card"><div class="row">
+          <div class="ft xls">XLS</div>
+          <div style="min-width:0;flex:1"><b>Q3 revenue.xlsx</b><small>Updated 09:12</small></div>
+        </div></div>
+        <div class="composer"><div class="box">Ask Cielo to do something…
+          <span class="go"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6"><path d="M12 19V5M5 12l7-7 7 7" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+        </div></div>
+      </div>
+      <nav class="tabs">
+        <div class="tab on"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8.5Z" stroke-linejoin="round"/></svg>Home</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L10.5 8H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H4.5A1.5 1.5 0 0 1 3 17.5v-10Z" stroke-linejoin="round"/></svg>Files</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 5h16v11H8.5L4 19.5V5Z" stroke-linejoin="round"/></svg>Messages<span class="dot"></span></div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z" stroke-linejoin="round"/></svg>Widgets</div>
+      </nav>
+    </div></div>
+    <figcaption><b>Needs you</b>The whole sky turns to dusk. You can tell across the room, before reading anything, that the agent is blocked.</figcaption>
+  </figure>
+
+  <!-- ============ 3. the permission sheet ============ -->
+  <figure>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>9:43</span>
+        <span class="dots"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+      </div>
+      <div class="sky needs" style="filter:saturate(.8)">
+        <div class="orb"></div>
+        <div class="state">Needs you</div>
+        <h2>Cielo stopped to ask you something</h2>
+      </div>
+      <div class="ground"></div>
+      <nav class="tabs"></nav>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <div class="asking">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 8v5m0 3.5h.01M10.3 3.9 2.4 18a1.9 1.9 0 0 0 1.7 2.9h15.8a1.9 1.9 0 0 0 1.7-2.9L13.7 3.9a1.9 1.9 0 0 0-3.4 0Z" stroke-linejoin="round"/></svg>
+          Cielo is asking
+        </div>
+        <p class="q">May I open this website?</p>
+        <dl class="receipt">
+          <div><dt>Address</dt><dd class="addr">invoices.acme-supplier.com</dd></div>
+          <div><dt>What for</dt><dd>To download your September invoice.</dd></div>
+          <div><dt>Because you asked</dt><dd>“Get the September invoice from our supplier.”</dd></div>
+        </dl>
+        <p class="note">Opening a page lets that site load. Cielo cannot send anything of yours anywhere without asking you again.</p>
+        <div class="acts">
+          <div class="btn yes">Open it</div>
+          <div class="btn no">Not now</div>
+        </div>
+      </div>
+    </div></div>
+    <figcaption><b>The permission moment</b>A sheet takes the screen. The question is the only serif on the device — bigger, slower to read. The address is set like a receipt, never a sentence.</figcaption>
+  </figure>
+
+  <!-- ============ 4. widgets ============ -->
+  <figure>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>9:45</span>
+        <span class="dots"><i style="height:5px"></i><i style="height:7px"></i><i style="height:9px"></i><i style="height:11px"></i></span>
+      </div>
+      <div class="sky clear" style="padding-bottom:18px">
+        <div class="state">Your things</div>
+        <h2 style="font-size:1.18rem">Widgets</h2>
+      </div>
+      <div class="ground">
+        <div class="tiles">
+          <div class="tile wide">
+            <h4>To do</h4>
+            <div class="todo">
+              <span><i class="box3 on"><svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="4"><path d="m5 13 4 4L19 7" stroke-linecap="round"/></svg></i><span class="strike">Send Yulia the Q3 numbers</span></span>
+              <span><i class="box3"></i>Approve the supplier invoice</span>
+              <span><i class="box3"></i>Book the team lunch</span>
+            </div>
+          </div>
+          <div class="tile">
+            <h4>Outside</h4>
+            <div class="big">14°</div>
+            <div class="sub">Cloudy</div>
+          </div>
+          <div class="tile">
+            <h4>This week</h4>
+            <div class="big">€48.2k</div>
+            <div class="sub">+6% on last</div>
+          </div>
+          <div class="tile wide">
+            <h4>Ask Cielo</h4>
+            <div style="font-weight:600;font-size:.92rem">Weekly report</div>
+            <div class="sub">Last run Monday 08:00</div>
+            <div class="runbtn">Run it now</div>
+          </div>
+        </div>
+      </div>
+      <nav class="tabs">
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8.5Z" stroke-linejoin="round"/></svg>Home</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4L10.5 8H19a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 19 19H4.5A1.5 1.5 0 0 1 3 17.5v-10Z" stroke-linejoin="round"/></svg>Files</div>
+        <div class="tab"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 5h16v11H8.5L4 19.5V5Z" stroke-linejoin="round"/></svg>Messages</div>
+        <div class="tab on"><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z" stroke-linejoin="round"/></svg>Widgets</div>
+      </nav>
+    </div></div>
+    <figcaption><b>Widgets</b>The sky goes pale and quiet when the agent has nothing to say. Tiles vary in size and shape so the wall never reads as a grid of identical boxes.</figcaption>
+  </figure>
+
+</div>

@@ -1,0 +1,109 @@
+<!--
+  The consent moment. Hosted in a Popup anchored to the bottom of the window
+  (WinUI's ContentDialog centres itself, which is wrong for a phone — a sheet
+  should rise from the thumb, not land in the middle of the screen).
+
+  Two deliberate typographic decisions, both load-bearing rather than decorative:
+
+  · The question is the only serif in the application. It is larger and slower to
+    read than anything else on the device, because this is the one moment we need
+    read rather than skimmed. A prompt somebody does not understand is worse than
+    no prompt — they will approve it to make it go away.
+
+  · The address is set as a receipt row in a monospace face, never inside a
+    sentence. A hostname hidden mid-paragraph is a hostname nobody checks.
+-->
+<UserControl
+    x:Class="Cielo.Portal.PermissionSheet"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <Grid>
+    <!-- Scrim. Tapping it does NOT dismiss: an unanswered consent question must be
+         answered, not brushed aside by a stray tap. -->
+    <Rectangle Fill="#8C080C12"/>
+
+    <Border VerticalAlignment="Bottom"
+            CornerRadius="26,26,0,0"
+            Padding="18,10,18,20"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+      <Border.Shadow>
+        <ThemeShadow/>
+      </Border.Shadow>
+
+      <StackPanel Spacing="0">
+
+        <!-- grab handle -->
+        <Border Width="34" Height="4" CornerRadius="2" Margin="0,0,0,14"
+                HorizontalAlignment="Center"
+                Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+
+        <StackPanel Orientation="Horizontal" Spacing="7">
+          <FontIcon Glyph="&#xE7BA;" FontSize="12"
+                    Foreground="{ThemeResource SystemFillColorCautionBrush}"/>
+          <TextBlock Text="CIELO IS ASKING" FontSize="11" FontWeight="SemiBold"
+                     CharacterSpacing="180"
+                     Foreground="{ThemeResource SystemFillColorCautionBrush}"/>
+        </StackPanel>
+
+        <!-- The one serif on the device. -->
+        <TextBlock Text="{x:Bind Request.Question, Mode=OneWay}"
+                   FontFamily="Georgia, Times New Roman, serif"
+                   FontSize="22" LineHeight="28" TextWrapping="Wrap"
+                   Margin="0,11,0,15"/>
+
+        <!-- The facts, as a receipt. -->
+        <Border CornerRadius="13" BorderThickness="1"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}">
+          <StackPanel>
+            <StackPanel Padding="13,10" Spacing="2">
+              <TextBlock Text="ADDRESS" FontSize="10" FontWeight="SemiBold"
+                         CharacterSpacing="120" Opacity="0.6"/>
+              <TextBlock Text="{x:Bind Request.Address, Mode=OneWay}"
+                         FontFamily="Consolas" FontSize="14" FontWeight="SemiBold"
+                         TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+            </StackPanel>
+
+            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+
+            <StackPanel Padding="13,10" Spacing="2">
+              <TextBlock Text="WHAT FOR" FontSize="10" FontWeight="SemiBold"
+                         CharacterSpacing="120" Opacity="0.6"/>
+              <TextBlock Text="{x:Bind Request.Purpose, Mode=OneWay}"
+                         FontSize="14" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}"/>
+
+            <!-- Provenance. The sentence of THEIRS that caused this. Without it a
+                 person cannot tell their own request apart from something a web
+                 page talked the agent into. -->
+            <StackPanel Padding="13,10" Spacing="2">
+              <TextBlock Text="BECAUSE YOU ASKED" FontSize="10" FontWeight="SemiBold"
+                         CharacterSpacing="120" Opacity="0.6"/>
+              <TextBlock Text="{x:Bind Request.Provenance, Mode=OneWay}"
+                         FontSize="14" TextWrapping="Wrap" FontStyle="Italic"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+
+        <TextBlock Text="{x:Bind Request.Consequence, Mode=OneWay}"
+                   FontSize="12.5" Opacity="0.7" TextWrapping="Wrap"
+                   LineHeight="18" Margin="0,12,0,0"/>
+
+        <!-- Stacked, full width, generous targets. Never side-by-side: equal-weight
+             buttons at thumb width are how people say yes by accident. -->
+        <Button Content="Open it" Margin="0,15,0,0"
+                HorizontalAlignment="Stretch" Height="46" CornerRadius="13"
+                FontSize="15" FontWeight="SemiBold"
+                Style="{StaticResource AccentButtonStyle}"
+                Command="{x:Bind ApproveCommand}"/>
+
+        <Button Content="Not now" Margin="0,8,0,0"
+                HorizontalAlignment="Stretch" Height="46" CornerRadius="13"
+                FontSize="15"
+                Command="{x:Bind RejectCommand}"/>
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>
