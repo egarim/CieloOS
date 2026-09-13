@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -20,6 +24,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\backend\WorkspaceRuntime.Domain\WorkspaceRuntime.Domain.csproj" />
+    <ProjectReference Include="..\..\..\src\backend\WorkspaceRuntime.Api\WorkspaceRuntime.Api.csproj" />
     <ProjectReference Include="..\..\..\src\backend\WorkspaceRuntime.Application\WorkspaceRuntime.Application.csproj" />
     <ProjectReference Include="..\..\..\src\backend\WorkspaceRuntime.Infrastructure\WorkspaceRuntime.Infrastructure.csproj" />
   </ItemGroup>

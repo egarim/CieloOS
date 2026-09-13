@@ -309,6 +309,160 @@ public sealed class EfRuntimeStore : IRuntimeStore
     public RuntimePrincipal? FindPrincipalBySlug(string slug) =>
         PrincipalResolver.BySlug(Users, Agents, slug);
 
+    public IReadOnlyList<WorkspaceRuntime.Domain.Thread> Threads
+    {
+        get
+        {
+            using var context = contextFactory.CreateDbContext();
+            return context.Threads.AsNoTracking()
+                .OrderByDescending(thread => thread.LastActivityAtTicks)
+                .AsEnumerable()
+                .Select(ToThread)
+                .ToList();
+        }
+    }
+
+    public WorkspaceRuntime.Domain.Thread CreateThread(string ownerSlug, string title, string firstMessage)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var now = DateTimeOffset.UtcNow;
+        var threadId = Guid.NewGuid();
+        context.Threads.Add(new ThreadRow
+        {
+            Id = threadId,
+            OwnerSlug = ownerSlug,
+            Title = title,
+            State = ThreadStatus.Working.ToString(),
+            CreatedAt = now,
+            CreatedAtTicks = now.UtcTicks,
+            LastActivityAt = now,
+            LastActivityAtTicks = now.UtcTicks
+        });
+        context.ThreadMessages.Add(new ThreadMessageRow
+        {
+            Id = Guid.NewGuid(),
+            ThreadId = threadId,
+            Role = ThreadMessageRole.Person.ToString(),
+            Text = firstMessage,
+            CreatedAt = now,
+            CreatedAtTicks = now.UtcTicks,
+            Sequence = 1
+        });
+        context.SaveChanges();
+        return new WorkspaceRuntime.Domain.Thread(threadId, ownerSlug, title, ThreadStatus.Working, now, now);
+    }
+
+    // Reading MAX(Sequence) and inserting are two statements, so two concurrent
+    // messages can both read the same maximum and claim the same position. The unique
+    // index on (ThreadId, Sequence) makes a collision impossible to persist; this lock
+    // makes it impossible to attempt, so the common case never has to handle a
+    // constraint violation. A second RUNTIME PROCESS against the same Postgres would
+    // still need retry-on-conflict — the index is what keeps that case correct rather
+    // than corrupt.
+    private static readonly object appendGate = new();
+
+    public ThreadMessage AppendThreadMessage(Guid threadId, ThreadMessageRole role, string text)
+    {
+        // The lock serialises appends inside THIS process; it says nothing about a
+        // second one. Two runtimes sharing a Postgres can still read the same
+        // MAX(Sequence), and then the unique index rejects the loser — correctly, but
+        // as an unhandled 500 unless we catch it. Recompute and retry: the index is
+        // what makes the retry safe, the retry is what makes it invisible.
+        const int attempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return AppendThreadMessageOnce(threadId, role, text);
+            }
+            catch (DbUpdateException) when (attempt < attempts)
+            {
+                // Another writer took this position. Loop and read the new maximum.
+            }
+        }
+    }
+
+    private ThreadMessage AppendThreadMessageOnce(Guid threadId, ThreadMessageRole role, string text)
+    {
+        lock (appendGate)
+        {
+            using var context = contextFactory.CreateDbContext();
+            var row = context.Threads.SingleOrDefault(thread => thread.Id == threadId);
+            if (row is null)
+            {
+                throw new InvalidOperationException($"Thread '{threadId}' not found.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            row.LastActivityAt = now;
+            row.LastActivityAtTicks = now.UtcTicks;
+            var nextSequence = (context.ThreadMessages
+                .Where(message => message.ThreadId == threadId)
+                .Max(message => (long?)message.Sequence) ?? 0L) + 1L;
+            var message = new ThreadMessageRow
+            {
+                Id = Guid.NewGuid(),
+                ThreadId = threadId,
+                Role = role.ToString(),
+                Text = text,
+                CreatedAt = now,
+                CreatedAtTicks = now.UtcTicks,
+                Sequence = nextSequence
+            };
+            context.ThreadMessages.Add(message);
+            context.SaveChanges();
+            return ToThreadMessage(message);
+        }
+    }
+
+    public IReadOnlyList<WorkspaceRuntime.Domain.Thread> ListThreadsByOwner(string ownerSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        return context.Threads.AsNoTracking()
+            .Where(thread => thread.OwnerSlug == ownerSlug)
+            .OrderByDescending(thread => thread.LastActivityAtTicks)
+            .AsEnumerable()
+            .Select(ToThread)
+            .ToList();
+    }
+
+    public ThreadWithMessages? GetThread(Guid id)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Threads.AsNoTracking().SingleOrDefault(thread => thread.Id == id);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var messages = context.ThreadMessages.AsNoTracking()
+            .Where(message => message.ThreadId == id)
+            // Sequence IS the append order. Ordering by wall clock first meant a
+            // backward clock adjustment could reorder a conversation, which is the one
+            // thing a transcript must never do.
+            .OrderBy(message => message.Sequence)
+            .AsEnumerable()
+            .Select(ToThreadMessage)
+            .ToList();
+        return new ThreadWithMessages(ToThread(row), messages);
+    }
+
+    public void SetThreadState(Guid id, ThreadStatus state)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Threads.SingleOrDefault(thread => thread.Id == id);
+        if (row is null)
+        {
+            throw new InvalidOperationException($"Thread '{id}' not found.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        row.State = state.ToString();
+        row.LastActivityAt = now;
+        row.LastActivityAtTicks = now.UtcTicks;
+        context.SaveChanges();
+    }
+
     public bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent)
     {
         using var context = contextFactory.CreateDbContext();
@@ -415,6 +569,21 @@ public sealed class EfRuntimeStore : IRuntimeStore
         row.Principal,
         row.OnBehalfOf,
         row.SessionId);
+
+    private static WorkspaceRuntime.Domain.Thread ToThread(ThreadRow row) => new(
+        row.Id,
+        row.OwnerSlug,
+        row.Title,
+        Enum.Parse<ThreadStatus>(row.State),
+        row.CreatedAt,
+        row.LastActivityAt);
+
+    private static ThreadMessage ToThreadMessage(ThreadMessageRow row) => new(
+        row.Id,
+        row.ThreadId,
+        Enum.Parse<ThreadMessageRole>(row.Role),
+        row.Text,
+        row.CreatedAt);
 
     private static AuditEventRow ToRow(AuditEvent auditEvent) => new()
     {

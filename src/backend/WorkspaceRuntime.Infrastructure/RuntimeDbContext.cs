@@ -80,6 +80,29 @@ public sealed class SpreadsheetRow
     public long Revision { get; set; }
 }
 
+public sealed class ThreadRow
+{
+    public Guid Id { get; set; }
+    public string OwnerSlug { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string State { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+    public DateTimeOffset LastActivityAt { get; set; }
+    public long LastActivityAtTicks { get; set; }
+}
+
+public sealed class ThreadMessageRow
+{
+    public Guid Id { get; set; }
+    public Guid ThreadId { get; set; }
+    public string Role { get; set; } = "";
+    public string Text { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+    public long Sequence { get; set; }
+}
+
 public sealed class RuntimeDbContext : DbContext
 {
     public RuntimeDbContext(DbContextOptions<RuntimeDbContext> options) : base(options)
@@ -97,6 +120,8 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<TokenLimitRow> TokenLimits => Set<TokenLimitRow>();
     public DbSet<SessionRow> Sessions => Set<SessionRow>();
     public DbSet<ApiKeyRow> ApiKeys => Set<ApiKeyRow>();
+    public DbSet<ThreadRow> Threads => Set<ThreadRow>();
+    public DbSet<ThreadMessageRow> ThreadMessages => Set<ThreadMessageRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -119,6 +144,15 @@ public sealed class RuntimeDbContext : DbContext
             .HasIndex(row => row.SecretHash).IsUnique();
         modelBuilder.Entity<ApiKeyRow>().ToTable("runtime_api_keys")
             .HasIndex(row => row.SecretHash).IsUnique();
+        modelBuilder.Entity<ThreadRow>().ToTable("runtime_threads")
+            .HasIndex(row => row.OwnerSlug);
+        modelBuilder.Entity<ThreadMessageRow>().ToTable("runtime_thread_messages")
+            .HasIndex(row => row.ThreadId);
+        // A position in a thread belongs to exactly one message. Without this, two
+        // concurrent appends that read the same MAX(Sequence) both persist and the
+        // order they arrived in is lost for good.
+        modelBuilder.Entity<ThreadMessageRow>()
+            .HasIndex(row => new { row.ThreadId, row.Sequence }).IsUnique();
     }
 }
 

@@ -110,3 +110,41 @@ public sealed record EffectPreview(
     bool Supported,
     string Summary,
     IReadOnlyList<CellChange> Changes);
+
+// A delegated piece of work. The thread is the unit the panel comes back to:
+// one thing asked for, with its own history, approval context and artifacts.
+public enum ThreadStatus
+{
+    Working,
+    NeedsYou,
+    Done,
+    Failed,
+    Abandoned
+}
+
+public enum ThreadMessageRole
+{
+    Person,
+    Agent
+}
+
+public sealed record Thread(
+    Guid Id,
+    string OwnerSlug,
+    string Title,
+    ThreadStatus State,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset LastActivityAt);
+
+public sealed record ThreadMessage(
+    Guid Id,
+    Guid ThreadId,
+    ThreadMessageRole Role,
+    string Text,
+    DateTimeOffset CreatedAt);
+
+// A thread is persisted separately from its messages; reads that need both
+// get this shape rather than a thread with a mutable message list.
+public sealed record ThreadWithMessages(
+    Thread Thread,
+    IReadOnlyList<ThreadMessage> Messages);

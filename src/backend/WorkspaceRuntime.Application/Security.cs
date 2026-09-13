@@ -29,6 +29,21 @@ public static class AccessPolicy
             return AccessLevel.Public;
         }
 
+        // Normalise ONCE, here, rather than asking every rule below to remember.
+        // ASP.NET routes case-insensitively and treats a trailing slash as the same
+        // route, so "/API/USERS" and "/api/users/" both reach the endpoint that
+        // "/api/users" guards. Every `==` rule below is case-sensitive, so without
+        // this they matched nothing and fell through to AnyPrincipal — which for a
+        // HumanOnly route means an agent token could invite a teammate or rewire the
+        // model providers. Public rules failed the safe way (closed); the human-only
+        // ones failed open. A single normalisation cannot be forgotten by whoever
+        // writes the next rule.
+        path = path.ToLowerInvariant();
+        if (path.Length > 1 && path.EndsWith('/'))
+        {
+            path = path.TrimEnd('/');
+        }
+
         // /api/inference/status is public because `workspace-agent status` can
         // run before any token exists on a fresh installation. It reports
         // provider readiness only, never identity-bearing data.
@@ -102,6 +117,19 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // Threads are delegated work. Starting one is a person's act, so an
+        // agent cannot invent its own assignment; once a thread exists, the
+        // agent must be able to speak in it (with the role forced from the
+        // caller by the handler).
+        if (isPost && path == "/api/threads")
+        {
+            return AccessLevel.HumanOnly;
+        }
+        if (isPost && path.StartsWith("/api/threads/", StringComparison.OrdinalIgnoreCase)
+            && path.EndsWith("/messages", StringComparison.OrdinalIgnoreCase))
+        {
+            return AccessLevel.AnyPrincipal;
+        }
         return AccessLevel.AnyPrincipal;
     }
 }

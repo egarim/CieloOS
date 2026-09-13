@@ -13,6 +13,8 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly Dictionary<Guid, ToolRequest> pendingRequests = new();
     private readonly Dictionary<string, SpreadsheetState> spreadsheets = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> spreadsheetRevisions = new(StringComparer.Ordinal);
+    private readonly List<WorkspaceRuntime.Domain.Thread> threads = new();
+    private readonly List<(ThreadMessage Message, long Sequence)> threadMessages = new();
 
     // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
     // unit-test fixtures) populated with the joche/yulia demo identities. A real,
@@ -106,6 +108,68 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public RuntimePrincipal? FindPrincipalBySlug(string slug) =>
         PrincipalResolver.BySlug(Users, Agents, slug);
+
+    public IReadOnlyList<WorkspaceRuntime.Domain.Thread> Threads =>
+        threads.OrderByDescending(thread => thread.LastActivityAt).ToList();
+
+    public WorkspaceRuntime.Domain.Thread CreateThread(string ownerSlug, string title, string firstMessage)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var thread = new WorkspaceRuntime.Domain.Thread(Guid.NewGuid(), ownerSlug, title, ThreadStatus.Working, now, now);
+        threads.Add(thread);
+        threadMessages.Add((new ThreadMessage(Guid.NewGuid(), thread.Id, ThreadMessageRole.Person, firstMessage, now), 1L));
+        return thread;
+    }
+
+    public ThreadMessage AppendThreadMessage(Guid threadId, ThreadMessageRole role, string text)
+    {
+        var index = threads.FindIndex(thread => thread.Id == threadId);
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Thread '{threadId}' not found.");
+        }
+
+        // Reading the count and appending must be one step. Two concurrent messages
+        // that both read "3" would both become 4, and the order they were sent in is
+        // then unrecoverable — the thing the sequence exists to preserve.
+        lock (threadMessages)
+        {
+            var now = DateTimeOffset.UtcNow;
+            threads[index] = threads[index] with { LastActivityAt = now };
+            var sequence = threadMessages.Count(entry => entry.Message.ThreadId == threadId) + 1L;
+            var message = new ThreadMessage(Guid.NewGuid(), threadId, role, text, now);
+            threadMessages.Add((message, sequence));
+            return message;
+        }
+    }
+
+    public IReadOnlyList<WorkspaceRuntime.Domain.Thread> ListThreadsByOwner(string ownerSlug) =>
+        threads.Where(thread => string.Equals(thread.OwnerSlug, ownerSlug, StringComparison.Ordinal))
+            .OrderByDescending(thread => thread.LastActivityAt)
+            .ToList();
+
+    public ThreadWithMessages? GetThread(Guid id)
+    {
+        var thread = threads.FirstOrDefault(candidate => candidate.Id == id);
+        return thread is null
+            ? null
+            : new ThreadWithMessages(thread, threadMessages
+                .Where(entry => entry.Message.ThreadId == id)
+                .OrderBy(entry => entry.Sequence)
+                .Select(entry => entry.Message)
+                .ToList());
+    }
+
+    public void SetThreadState(Guid id, ThreadStatus state)
+    {
+        var index = threads.FindIndex(thread => thread.Id == id);
+        if (index < 0)
+        {
+            throw new InvalidOperationException($"Thread '{id}' not found.");
+        }
+
+        threads[index] = threads[index] with { State = state, LastActivityAt = DateTimeOffset.UtcNow };
+    }
 
     public bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent)
     {

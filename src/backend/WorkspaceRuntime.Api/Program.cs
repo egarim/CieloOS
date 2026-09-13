@@ -1088,6 +1088,8 @@ app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, ID
     return Results.Ok(views);
 });
 
+ThreadApi.Map(app);
+
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {
     var language = CallerLanguage(Caller(context), store);
@@ -2392,6 +2394,8 @@ static string Shorten(string value, int limit) =>
     string.IsNullOrEmpty(value) ? "" : value.Length <= limit ? value : value[..limit] + "…";
 }
 
+public sealed record CreateThreadRequest(string? Title, string? Message);
+public sealed record AddThreadMessageRequest(string? Text);
 public sealed record ExampleRunRequest(string? SessionId, Guid? AgentId);
 
 public sealed record AgentRunRequest(string? Goal, int? MaxSteps, Guid? AgentId);

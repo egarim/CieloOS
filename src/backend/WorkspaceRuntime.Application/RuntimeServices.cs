@@ -51,6 +51,15 @@ public interface IRuntimeStore
     ToolRequest? FindPendingRequest(Guid approvalId);
     RuntimePrincipal? FindPrincipalBySlug(string slug);
 
+    // Threads are delegated work, so every read and write stays inside one home
+    // or the homes its owner controls.
+    IReadOnlyList<WorkspaceRuntime.Domain.Thread> Threads { get; }
+    WorkspaceRuntime.Domain.Thread CreateThread(string ownerSlug, string title, string firstMessage);
+    ThreadMessage AppendThreadMessage(Guid threadId, ThreadMessageRole role, string text);
+    IReadOnlyList<WorkspaceRuntime.Domain.Thread> ListThreadsByOwner(string ownerSlug);
+    ThreadWithMessages? GetThread(Guid id);
+    void SetThreadState(Guid id, ThreadStatus state);
+
     // First-run ownership: create the first owner (+ their workspace and agent)
     // in one transaction. Returns false if an owner already exists — the
     // at-most-one-owner guard that makes a re-issued claim a no-op rather than a
