@@ -5,8 +5,9 @@ installed into those images, as a self-contained runtime, and as the panel's
 frontend build. This file names what is shipped and under what licence.
 
 > This is attribution for bundled third-party software. It is **not** the CieloOS
-> project licence; the licence of CieloOS itself is the repository owner's choice
-> and is not recorded here.
+> project licence. CieloOS itself is licensed under the **GNU Affero General Public
+> License v3.0** — see [LICENSE](LICENSE). Nothing in this file changes the terms of
+> any component it describes: each third-party work stays under its own licence.
 
 Where a component is a distribution (Ubuntu) rather than a single work, the exact
 licence set is per package; the dominant licences are listed rather than one

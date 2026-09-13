@@ -138,6 +138,29 @@ Then add an AI provider from the panel's **Models** tab (works immediately, no r
 
 Design laws, decisions, and the milestone roadmap live in [docs/ai-native-ui.md](docs/ai-native-ui.md). Near-term: the per-user **models config surface** and a **"screenshot-leaves-the-machine" consent** for cloud vision (model-config.md Phase 3); agent **memory** on the audit substrate; and the move from podman to **Incus** system containers (same command shape, only the executor moves).
 
+## Licence
+
+CieloOS is free software under the **GNU Affero General Public License, version 3
+or later** — the full text is in [LICENSE](LICENSE).
+
+Copyright (C) 2026 Joche Ojeda.
+
+AGPL rather than GPL because of what this is. CieloOS is meant to be reached over a
+network — a company runs it and its people use it from their laptops. Under a plain
+GPL, someone could modify it, host it as a service, and never publish a line of that
+work, because they never *distribute* a copy. Section 13 closes that: if you offer a
+modified CieloOS to users over a network, those users are entitled to your source.
+
+What this means in practice:
+
+- **Run it, at home or at work** — no obligation at all. Use is not distribution.
+- **Modify it for yourself** — no obligation while you keep it to yourself.
+- **Give it to someone, or host a modified version for others** — they get the same
+  freedoms you had, including the source of your changes, under the same licence.
+
+The third-party works CieloOS redistributes keep their own licences; they are named
+in [THIRD-PARTY.md](THIRD-PARTY.md).
+
 ## Documentation
 
 | Doc | What |
