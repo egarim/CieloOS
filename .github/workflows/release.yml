@@ -52,10 +52,17 @@ jobs:
           }
 
           assert_entry '^cielo/panel/index\.html$' 'panel/index.html'
+          # The portal is a second entry and fails silently: the panel keeps
+          # working, so a release that stopped emitting it looks completely
+          # healthy right up until someone tries to open it.
+          assert_entry '^cielo/panel/portal\.html$' 'panel/portal.html'
+          assert_entry '^cielo/panel/assets/portal-[^/]+\.js$' 'panel/assets/portal-*.js'
           assert_entry '^cielo/surfaces/[^/]+\.surface\.json$' 'surfaces/*.surface.json'
           assert_entry '^cielo/surfaces/i18n/$' 'surfaces/i18n/'
           assert_entry '^cielo/images/desktop/examples/$' 'images/desktop/examples/'
           assert_entry '^cielo/bin/WorkspaceRuntime\.Api$' 'bin/WorkspaceRuntime.Api'
+          assert_entry '^cielo/LICENSE$' 'LICENSE'
+          assert_entry '^cielo/THIRD-PARTY\.md$' 'THIRD-PARTY.md'
 
       - uses: actions/upload-artifact@v4
         with:

@@ -85,6 +85,10 @@ cp "$ROOT/distro/RELEASE-README.md" "$STAGE/README.md" 2>/dev/null || true
 # The third-party attribution rides in the bundle so it can be placed at
 # /opt/cielo/THIRD-PARTY.md by install.sh alongside the installed runtime.
 cp "$ROOT/THIRD-PARTY.md" "$STAGE/THIRD-PARTY.md"
+# CieloOS is AGPL-3.0 (#25), and section 4 requires the licence to travel with
+# the program — a tarball that omits it is not a licensed copy, it is an
+# unlicensed one. Not `|| true`: a release without its licence must not build.
+cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 # The animated "Installing CieloOS..." page and the first-run auto-claim used by
 # the one-liner install.
 cp "$ROOT/distro/scripts/cielo-install-ui.sh" "$STAGE/cielo-install-ui.sh"
