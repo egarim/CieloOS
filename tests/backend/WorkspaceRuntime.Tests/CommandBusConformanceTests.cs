@@ -30,6 +30,13 @@ public class CommandBusConformanceTests
         "/api/auth/logout",
         "/api/auth/logout-all",
         "/api/auth/password",
+        "/api/auth/language",          // the language YOU read in: your own preference on the
+                                       // control plane, HumanOnly like the rest of /api/auth/*,
+                                       // and it mutates nothing in any workspace. It reached this
+                                       // list late only because nothing shipped had ever called
+                                       // it — main.tsx has no i18n at all — so the portal is the
+                                       // first code to exercise an endpoint that has existed for
+                                       // a while. The guard was right to stop and ask.
         "/api/keys",                   // mint a revocable credential, human-only
         "/api/desk-profiles/*/build"   // build a desk image: provisioning this machine, human-only,
                                        // not a surface mutation (nothing in the workspace changes)

@@ -1055,9 +1055,10 @@ app.MapGet("/api/spreadsheet", (HttpContext context, IRuntimeStore store, string
 });
 app.MapGet("/api/inference/status", (ILocalInferenceRegistry registry) => registry.GetStatus());
 
-app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, IDryRunToolExecutor dryRun, CancellationToken cancellationToken) =>
+app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, IDryRunToolExecutor dryRun, ISurfaceRegistry surfaces, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
+    var language = CallerLanguage(caller, store);
     var views = new List<object>();
     foreach (var approval in store.Approvals.Where(approval =>
         OwnerSlug(approval.UserId, store) is { } owner
@@ -1081,7 +1082,21 @@ app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, ID
             approval.ResolvedAt,
             approval.RequestHash,
             PendingRequest = request is null ? null : new { request.ToolName, request.Operation, request.Arguments },
-            Preview = preview
+            Preview = preview,
+            // The name of the thing being asked about, in the caller's language.
+            // The portal cannot work this out for itself: /api/surfaces/{id}/commands
+            // filters by ValidWhen and then takes only the first eight, so the one
+            // command a person is being asked to approve is exactly the one that can
+            // be missing from that list. An approval carries its own title instead.
+            Title = request is null ? null : surfaces.CommandDisplayName(request.ToolName, request.Operation, language),
+            SurfaceName = request is null ? null : surfaces.DisplayName(request.ToolName, language),
+            // Whether saying yes can be taken back. A person deciding in two seconds
+            // needs this more than they need the policy rationale.
+            Reversible = request is null ? null : ReversibleOf(surfaces, request),
+            // approval.Reason is the manifest's engineering rationale, in English,
+            // written for whoever wrote the policy. It stays available for the
+            // "why am I being asked" disclosure, translated where we have it.
+            PolicyReason = request is null ? null : surfaces.Reason(request.ToolName, request.Operation, language)
         });
     }
 
@@ -1971,6 +1986,23 @@ static async Task<IResult> ResolveAsync(
     {
         return Results.Json(new { error = exception.Message }, statusCode: StatusCodes.Status409Conflict);
     }
+}
+
+// Can the person take this back? The manifest knows, and a person deciding in
+// two seconds needs that far more than the policy rationale. Unknown commands
+// report null rather than false: "we cannot tell you" and "no" are different
+// answers, and showing "cannot be undone" for a command we simply failed to look
+// up would teach people to distrust the label everywhere else.
+static bool? ReversibleOf(ISurfaceRegistry surfaces, ToolRequest request)
+{
+    if (surfaces.Find(request.ToolName) is not { } manifest)
+    {
+        return null;
+    }
+
+    return manifest.Commands.TryGetValue(request.Operation, out var command)
+        ? command.Reversible
+        : null;
 }
 
 static string? OwnerSlug(Guid userId, IRuntimeStore store) =>
