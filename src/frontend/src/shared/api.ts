@@ -12,6 +12,21 @@ export const TOKEN_KEY = "cielo.token";
 
 export class UnauthorizedError extends Error {}
 
+// A non-2xx that is not the 401 above. Carrying the status and parsed body lets
+// callers tell a stale preview (409) from a server failure (500) instead of
+// string-matching whatever the runtime happened to put in the message.
+export class ApiError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+
+  constructor(status: number, body: unknown) {
+    super(typeof body === "string" ? body : JSON.stringify(body));
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 // The token is held in memory as well as in storage, and memory is what makes
 // the guards below honest. A browser with site data blocked throws on setItem,
 // and an earlier version of this file swallowed that and claimed sign-in still
@@ -77,10 +92,66 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     throw new UnauthorizedError("The session token was rejected.");
   }
   if (!response.ok) {
-    throw new Error(await response.text());
+    const text = await response.text();
+    let body: unknown = text;
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = text;
+      }
+    }
+    throw new ApiError(response.status, body);
   }
   return response.json() as Promise<T>;
 }
+
+export type ApprovalChange = {
+  address: string;
+  before: string | null;
+  after: string | null;
+};
+
+export type ApprovalPreview = {
+  supported: boolean;
+  summary: string;
+  changes: ApprovalChange[];
+};
+
+export type PendingApprovalRequest = {
+  toolName: string;
+  operation: string;
+  arguments: Record<string, string>;
+};
+
+export type ApprovalView = {
+  id: string;
+  toolRequestId: string;
+  userId: string;
+  status: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  requestHash: string;
+  reason: string;
+  pendingRequest: PendingApprovalRequest | null;
+  preview: ApprovalPreview | null;
+  title: string | null;
+  surfaceName: string | null;
+  reversible: boolean | null;
+  policyReason: string | null;
+};
+
+export const listApprovals = () => api<ApprovalView[]>("/api/approvals");
+
+export const resolveApproval = (
+  id: string,
+  action: "approve" | "reject",
+  body: { requestHash: string; observedRevision: number | null },
+) =>
+  api<unknown>(`/api/approvals/${encodeURIComponent(id)}/${action}`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 
 // A bus command. Returns the decision as well as the result, because
 // RequireApproval is a normal outcome here rather than an error — it is how the

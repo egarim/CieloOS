@@ -9,6 +9,7 @@ import {
 import { Button } from "./ui/button";
 import { Shell } from "./Shell";
 import { SignIn } from "./SignIn";
+import { PermissionApprovals } from "./PermissionApprovals";
 
 type PortalStatus = "checking" | "signed-out" | "signed-in" | "error";
 
@@ -155,11 +156,14 @@ function PortalContent({
   }
 
   return (
-    <Shell
-      whoami={whoami}
-      language={language}
-      onLanguageChange={onLanguageChange}
-      onSignOut={onSignOut}
-    />
+    <>
+      <Shell
+        whoami={whoami}
+        language={language}
+        onLanguageChange={onLanguageChange}
+        onSignOut={onSignOut}
+      />
+      <PermissionApprovals />
+    </>
   );
 }

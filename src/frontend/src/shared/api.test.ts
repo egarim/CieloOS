@@ -1,5 +1,13 @@
-import { afterEach, expect, test } from "vitest";
-import { authHeaders, clearToken, readToken, writeToken } from "./api";
+import { afterEach, expect, test, vi } from "vitest";
+import {
+  ApiError,
+  UnauthorizedError,
+  api,
+  authHeaders,
+  clearToken,
+  readToken,
+  writeToken,
+} from "./api";
 
 // A browser with site data blocked throws on every localStorage call. That is not
 // exotic — private windows, "block third-party cookies and site data", and managed
@@ -32,6 +40,7 @@ const blocked: Partial<Storage> = {
 
 afterEach(() => {
   clearToken();
+  vi.unstubAllGlobals();
 });
 
 test("a token survives a browser that refuses to store it", () => {
@@ -79,4 +88,34 @@ test("the panel header is always present", () => {
   expect(authHeaders()["X-Cielo-Panel"]).toBe("1");
   writeToken("t");
   expect(authHeaders()["X-Cielo-Panel"]).toBe("1");
+});
+
+test("a non-2xx response is an ApiError carrying its status and parsed body", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      text: async () => JSON.stringify({ error: "The workspace changed." }),
+    }),
+  );
+
+  await expect(api("/api/approvals/1/approve", { method: "POST" })).rejects.toMatchObject({
+    name: "ApiError",
+    status: 409,
+    body: { error: "The workspace changed." },
+  });
+});
+
+test("a 401 response stays an UnauthorizedError", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => "The session token was rejected.",
+    }),
+  );
+
+  await expect(api("/api/whoami")).rejects.toBeInstanceOf(UnauthorizedError);
 });

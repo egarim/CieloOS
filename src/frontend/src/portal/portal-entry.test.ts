@@ -25,6 +25,10 @@ test("Vite really resolves a portal entry, not just a mention of one", async () 
   const loaded = await loadConfigFromFile(
     { command: "build", mode: "production" },
     resolve(frontendRoot, "vite.config.ts"),
+    undefined,
+    undefined,
+    undefined,
+    "native",
   );
 
   expect(loaded, "vite.config.ts did not load at all").not.toBeNull();
