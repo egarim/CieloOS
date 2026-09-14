@@ -1,0 +1,73 @@
+name: ci
+
+# The release workflow builds a bundle and checks what is inside the tarball. It
+# has never run a test. That is how v0.1.8 was tagged with a red backend suite:
+# CI was green, because CI was not looking.
+#
+# This runs on every push and pull request to main, and it runs both suites.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: dotnet test
+        run: dotnet test WorkspaceRuntime.slnx --nologo -v minimal
+
+  frontend:
+    name: Frontend build and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: src/frontend
+        run: npm ci --no-audit --no-fund
+
+      # Build before test: a type error or a missing entry is a failure the test
+      # suite would not notice, because the tests import modules rather than
+      # building the app.
+      - name: npm run build
+        working-directory: src/frontend
+        run: npm run build
+
+      - name: npm test
+        working-directory: src/frontend
+        run: npm test
+
+      # Both entries must be emitted. The vitest guard checks the config resolves
+      # them; this checks the build actually produced them, which is a different
+      # claim and the one an install depends on.
+      - name: Both panel entries were emitted
+        working-directory: src/frontend
+        run: |
+          for page in index.html portal.html; do
+            test -f "dist/$page" || { echo "dist/$page was not built" >&2; exit 1; }
+          done
+          ls dist/assets/portal-*.js >/dev/null 2>&1 || { echo "no portal bundle in dist/assets" >&2; exit 1; }
+          ls dist/assets/main-*.js >/dev/null 2>&1 || { echo "no admin panel bundle in dist/assets" >&2; exit 1; }
