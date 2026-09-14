@@ -518,5 +518,17 @@
   "portal.files.refresh": "Refresh",
   "portal.files.folder": "Folder",
   "portal.files.error": "Could not read your files. Try again.",
-  "portal.files.downloadError": "Could not save that file. Try again."
+  "portal.files.downloadError": "Could not save that file. Try again.",
+  "portal.widgets.lead": "Jobs you ask for often, kept as a button. Give it a name and what to ask Cielo, then run it whenever you need it. Anything it makes lands in Files.",
+  "portal.widgets.add": "New task",
+  "portal.widgets.empty": "No tasks yet. Make one for something you ask Cielo for regularly — a weekly summary, a list you keep refreshing.",
+  "portal.widgets.titleLabel": "Name",
+  "portal.widgets.titlePlaceholder": "Weekly sales summary",
+  "portal.widgets.promptLabel": "What should Cielo do?",
+  "portal.widgets.promptPlaceholder": "Make a spreadsheet of this week s sales by region and save it as sales.xlsx",
+  "portal.widgets.save": "Save task",
+  "portal.widgets.cancel": "Cancel",
+  "portal.widgets.run": "Run",
+  "portal.widgets.remove": "Remove this task",
+  "portal.widgets.done": "Done. Check Files for anything Cielo made."
 }

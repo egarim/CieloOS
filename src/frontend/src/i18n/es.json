@@ -518,5 +518,17 @@
   "portal.files.refresh": "Actualizar",
   "portal.files.folder": "Carpeta",
   "portal.files.error": "No se pudieron leer tus archivos. Inténtalo de nuevo.",
-  "portal.files.downloadError": "No se pudo guardar ese archivo. Inténtalo de nuevo."
+  "portal.files.downloadError": "No se pudo guardar ese archivo. Inténtalo de nuevo.",
+  "portal.widgets.lead": "Tareas que pides a menudo, guardadas como un botón. Ponle un nombre y di qué debe hacer Cielo; ejecútala cuando la necesites. Lo que genere aparecerá en Archivos.",
+  "portal.widgets.add": "Nueva tarea",
+  "portal.widgets.empty": "Aún no hay tareas. Crea una para algo que le pidas a Cielo con frecuencia: un resumen semanal, una lista que actualizas a menudo.",
+  "portal.widgets.titleLabel": "Nombre",
+  "portal.widgets.titlePlaceholder": "Resumen semanal de ventas",
+  "portal.widgets.promptLabel": "¿Qué debe hacer Cielo?",
+  "portal.widgets.promptPlaceholder": "Haz una hoja de cálculo con las ventas de esta semana por región y guárdala como ventas.xlsx",
+  "portal.widgets.save": "Guardar tarea",
+  "portal.widgets.cancel": "Cancelar",
+  "portal.widgets.run": "Ejecutar",
+  "portal.widgets.remove": "Eliminar esta tarea",
+  "portal.widgets.done": "Listo. Mira en Archivos lo que Cielo haya creado."
 }

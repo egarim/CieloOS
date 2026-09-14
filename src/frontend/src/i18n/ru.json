@@ -518,5 +518,17 @@
   "portal.files.refresh": "Обновить",
   "portal.files.folder": "Папка",
   "portal.files.error": "Не удалось прочитать ваши файлы. Попробуйте ещё раз.",
-  "portal.files.downloadError": "Не удалось сохранить этот файл. Попробуйте ещё раз."
+  "portal.files.downloadError": "Не удалось сохранить этот файл. Попробуйте ещё раз.",
+  "portal.widgets.lead": "Задачи, которые вы просите часто, сохранённые как кнопка. Дайте название и опишите, что должен сделать Cielo, — и запускайте, когда нужно. Всё созданное появится в Файлах.",
+  "portal.widgets.add": "Новая задача",
+  "portal.widgets.empty": "Задач пока нет. Создайте её для того, о чём просите Cielo регулярно: еженедельная сводка, список, который вы обновляете.",
+  "portal.widgets.titleLabel": "Название",
+  "portal.widgets.titlePlaceholder": "Еженедельная сводка продаж",
+  "portal.widgets.promptLabel": "Что должен сделать Cielo?",
+  "portal.widgets.promptPlaceholder": "Сделай таблицу продаж за эту неделю по регионам и сохрани как sales.xlsx",
+  "portal.widgets.save": "Сохранить задачу",
+  "portal.widgets.cancel": "Отмена",
+  "portal.widgets.run": "Запустить",
+  "portal.widgets.remove": "Удалить эту задачу",
+  "portal.widgets.done": "Готово. Посмотрите в Файлах, что создал Cielo."
 }
