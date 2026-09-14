@@ -504,5 +504,19 @@
   "portal.permission.waiting": "{count} más en espera",
   "portal.permission.changed": "Esta solicitud cambió mientras decidías. Aquí está la más reciente.",
   "portal.permission.notYours": "Esta solicitud ya no te corresponde decidirla.",
-  "portal.permission.failed": "Cielo no pudo guardar tu respuesta. Inténtalo de nuevo."
+  "portal.permission.failed": "Cielo no pudo guardar tu respuesta. Inténtalo de nuevo.",
+  "portal.chat.lead": "Pídele algo a Cielo. Trabaja en un ordenador propio, así que puede buscar información, escribir documentos y hojas de cálculo, y dejártelos en tus archivos.",
+  "portal.chat.placeholder": "Hazme un top 10 de las montañas más altas en una hoja de cálculo",
+  "portal.chat.inputLabel": "¿Qué quieres que haga Cielo?",
+  "portal.chat.send": "Enviar",
+  "portal.chat.waking": "Despertando a Cielo...",
+  "portal.chat.working": "Cielo está trabajando en ello. Puede tardar un minuto.",
+  "portal.chat.error": "Cielo no pudo terminar eso. Vuelve a pedírselo.",
+  "portal.files.lead": "Archivos que compartes con Cielo. Todo lo que Cielo haga para ti aparece aquí.",
+  "portal.files.empty": "Aquí no hay nada todavía. Pídele algo a Cielo en el chat y aparecerá.",
+  "portal.files.save": "Guardar",
+  "portal.files.refresh": "Actualizar",
+  "portal.files.folder": "Carpeta",
+  "portal.files.error": "No se pudieron leer tus archivos. Inténtalo de nuevo.",
+  "portal.files.downloadError": "No se pudo guardar ese archivo. Inténtalo de nuevo."
 }

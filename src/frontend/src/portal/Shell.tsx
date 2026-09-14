@@ -15,7 +15,7 @@ const PLACES: {
   id: PortalPlace;
   labelKey: string;
   icon: React.ComponentType<{ className?: string }>;
-  View: React.ComponentType;
+  View: React.ComponentType<{ whoami: Whoami }>;
 }[] = [
   { id: "chat", labelKey: "portal.nav.chat", icon: MessageCircle, View: Chat },
   { id: "files", labelKey: "portal.nav.files", icon: Folder, View: Files },
@@ -97,7 +97,7 @@ export function Shell({
         </nav>
 
         <main className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-4 md:p-6 dark:border-slate-800 dark:bg-slate-900">
-          <ActiveView />
+          <ActiveView whoami={whoami} />
         </main>
       </div>
     </div>

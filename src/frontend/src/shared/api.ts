@@ -248,3 +248,70 @@ export type Recording = {
   elapsedSeconds: number;
   truncated: boolean;
 };
+
+// ---------------------------------------------------------------------------
+// The shared workspace: the one folder a person and their agent both reach.
+//
+// This is NOT /api/home/<owner>. That reads the session's home volume, where
+// "shared" exists only as an empty mount point — the agent's deliverables are in
+// a separate volume and the home listing shows none of them. Asking the wrong one
+// makes it look like the agent claimed work it never did.
+
+export type SharedListing = { owner: string; path: string; entries: HomeEntry[] };
+
+export const listShared = (path = "") =>
+  api<SharedListing>(`/api/shared/list${path ? `?path=${encodeURIComponent(path)}` : ""}`);
+
+// Downloads cannot be a plain <a href>. The session cookie is only honoured
+// alongside the X-Cielo-Panel header, and a link element cannot set one — the
+// download would come back 401 with no way to tell the person why. So fetch it
+// with the real headers and hand the browser a blob.
+export async function downloadShared(path: string): Promise<{ blob: Blob; filename: string }> {
+  const response = await fetch(`/api/shared/download?path=${encodeURIComponent(path)}`, {
+    credentials: "same-origin",
+    headers: authHeaders(),
+  });
+  if (response.status === 401) {
+    throw new UnauthorizedError("The session token was rejected.");
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await response.text().catch(() => "Download failed."));
+  }
+  return { blob: await response.blob(), filename: path.split("/").pop() || "file" };
+}
+
+// ---------------------------------------------------------------------------
+// Talking to the agent.
+
+export type AgentChatMessage = { role: "user" | "assistant"; content: string };
+
+type AgentChatResponse = { choices?: { message?: { role?: string; content?: string } }[] };
+
+export async function askAgent(messages: AgentChatMessage[]): Promise<string> {
+  const answer = await api<AgentChatResponse>("/v1/agent/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({ messages }),
+  });
+  return answer.choices?.[0]?.message?.content ?? "";
+}
+
+// The agent can only work inside a running console session, and without one the
+// runtime answers with a sentence telling the person to "open one from the agent's
+// desk (Sessions -> agent-console)". That is administrator vocabulary aimed at
+// somebody who has a panel; the person in the portal has no idea what was just
+// asked of them. So the portal makes sure a session exists and never shows that.
+//
+// Deliberately NOT done by matching that sentence: it is English prose that can be
+// reworded or translated at any time, and a feature that breaks when someone fixes
+// a typo is not a feature.
+export async function ensureAgentSession(agentSlug: string): Promise<void> {
+  const sessions = await api<SessionView[]>("/api/sessions");
+  const live = sessions.some(
+    (session) =>
+      session.owner === agentSlug && session.kind === "console" && session.status === "running",
+  );
+  if (live) {
+    return;
+  }
+  await command("session", "create", { owner: agentSlug, profile: "agent-console" });
+}

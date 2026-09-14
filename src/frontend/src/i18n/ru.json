@@ -504,5 +504,19 @@
   "portal.permission.waiting": "Ещё {count} в очереди",
   "portal.permission.changed": "Запрос изменился, пока вы решали. Вот актуальный.",
   "portal.permission.notYours": "Этот запрос больше не вам решать.",
-  "portal.permission.failed": "Cielo не смог сохранить ваш ответ. Попробуйте ещё раз."
+  "portal.permission.failed": "Cielo не смог сохранить ваш ответ. Попробуйте ещё раз.",
+  "portal.chat.lead": "Попросите Cielo что-нибудь сделать. У него есть собственный компьютер: он может найти информацию, составить документ или таблицу и положить их в ваши файлы.",
+  "portal.chat.placeholder": "Сделай таблицу с десятью самыми высокими горами",
+  "portal.chat.inputLabel": "Что должен сделать Cielo?",
+  "portal.chat.send": "Отправить",
+  "portal.chat.waking": "Бужу Cielo...",
+  "portal.chat.working": "Cielo работает над этим. Это может занять минуту.",
+  "portal.chat.error": "Cielo не смог это закончить. Попробуйте попросить ещё раз.",
+  "portal.files.lead": "Файлы, общие для вас и Cielo. Всё, что Cielo сделает для вас, появится здесь.",
+  "portal.files.empty": "Здесь пока пусто. Попросите что-нибудь у Cielo в чате, и оно появится.",
+  "portal.files.save": "Сохранить",
+  "portal.files.refresh": "Обновить",
+  "portal.files.folder": "Папка",
+  "portal.files.error": "Не удалось прочитать ваши файлы. Попробуйте ещё раз.",
+  "portal.files.downloadError": "Не удалось сохранить этот файл. Попробуйте ещё раз."
 }

@@ -24,6 +24,10 @@ public class CommandBusConformanceTests
         "/api/sessions/*/desktop-run", // runs the desktop loop; every click/keystroke it makes is a policy-checked desktop.*
         "/api/examples/*/run",         // runs a scripted example; every step is an ordinary policy-checked command,
                                        // which is the whole point — a demo that took a private path would prove nothing
+        "/v1/agent/chat/completions",  // the same console loop as /api/sessions/*/agent-run, entered from a
+                                       // chat message instead of a goal field. Every action it takes on the
+                                       // machine is an ordinary policy-checked console.type, so the bus sees
+                                       // all of it; this endpoint only decides what to ask the agent for.
         "/api/users",                  // add a teammate: control-plane identity creation, human-only
         "/api/usage/limits",           // set a model budget: an owner's ceiling on spend, human-only
         "/api/auth/login",             // sign in: the control plane's own front door

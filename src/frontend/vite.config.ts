@@ -16,7 +16,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": `http://127.0.0.1:${process.env.BACKEND_PORT ?? "5148"}`
+      "/api": `http://127.0.0.1:${process.env.BACKEND_PORT ?? "5148"}`,
+      // The agent chat is an OpenAI-compatible endpoint and lives under /v1, not
+      // /api. In a real install the panel is served by the runtime itself, so the
+      // same origin covers both and nobody notices; in dev, Vite answered its own
+      // 404 and the portal reported that the agent had failed.
+      "/v1": `http://127.0.0.1:${process.env.BACKEND_PORT ?? "5148"}`
     }
   },
   test: {

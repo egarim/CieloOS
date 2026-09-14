@@ -504,5 +504,19 @@
   "portal.permission.waiting": "{count} more waiting",
   "portal.permission.changed": "This request changed while you were deciding. Here is the latest one.",
   "portal.permission.notYours": "This request is no longer yours to decide.",
-  "portal.permission.failed": "Cielo could not record your answer. Try again."
+  "portal.permission.failed": "Cielo could not record your answer. Try again.",
+  "portal.chat.lead": "Ask Cielo to do something. It works on a real computer of its own, so it can look things up, write documents and spreadsheets, and put them in your files.",
+  "portal.chat.placeholder": "Make me a top 10 of the tallest mountains as a spreadsheet",
+  "portal.chat.inputLabel": "What would you like Cielo to do?",
+  "portal.chat.send": "Send",
+  "portal.chat.waking": "Waking Cielo up...",
+  "portal.chat.working": "Cielo is working on it. This can take a minute.",
+  "portal.chat.error": "Cielo could not finish that. Try asking again.",
+  "portal.files.lead": "Files you and Cielo share. Anything Cielo makes for you lands here.",
+  "portal.files.empty": "Nothing here yet. Ask Cielo for something in Chat and it will show up.",
+  "portal.files.save": "Save",
+  "portal.files.refresh": "Refresh",
+  "portal.files.folder": "Folder",
+  "portal.files.error": "Could not read your files. Try again.",
+  "portal.files.downloadError": "Could not save that file. Try again."
 }
