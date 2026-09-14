@@ -11,11 +11,9 @@
   "login.tokenSubmit": "Unlock",
   "login.badCredentials": "That name and password do not match.",
   "login.tokenRejected": "That token was rejected.",
-
   "errors.runtimeUnreachable": "The runtime is unreachable.",
   "errors.sessionTokenRejected": "The session token was rejected.",
   "errors.wordedForTheMachine": "It did not go through, and no reason came back that a person could read.",
-
   "setup.connecting": "Connecting to the runtime…",
   "setup.eyebrow": "First run",
   "setup.title": "Claim this machine",
@@ -30,21 +28,17 @@
   "setup.errorNotLocal": "Setup can only run on the machine itself. Open this panel on the box, or over your SSH tunnel.",
   "setup.errorAlreadyClaimed": "This machine already has an owner. Sign in with a token instead.",
   "setup.errorCreateFailed": "Could not create the account.",
-
   "topbar.modelStatusTitle": "Chat model — configure in Models",
   "topbar.noModel": "no model — add one",
   "topbar.signOut": "sign out",
-
   "nav.desks": "Desks",
   "nav.examples": "Examples",
   "nav.models": "Models",
-
   "desks.heading": "Your desks",
   "desks.hint": "You, and the agents you own. Pick one to see its home, sessions, and activity.",
   "desks.loading": "Loading…",
   "desks.kindSelf": "you",
   "desks.kindAgent": "agent",
-
   "teammate.toggle": "+ Add teammate",
   "teammate.cancel": "− Cancel",
   "teammate.hint": "Create another user on this machine — you'll get a token to hand them.",
@@ -55,7 +49,6 @@
   "teammate.namePlaceholder": "their name",
   "teammate.createButton": "Create user",
   "teammate.created": "Created {slug}. Share this token with them:",
-
   "approvals.heading": "Approvals — awaiting your consent",
   "approvals.hint": "Actions any of your agents parked for a decision. Each binds to the exact request it previews.",
   "approvals.empty": "Nothing pending.",
@@ -63,7 +56,6 @@
   "approvals.bindsTo": "binds to {hash}…",
   "approvals.approve": "Approve",
   "approvals.reject": "Reject",
-
   "desk.tagSelf": "your desk",
   "desk.tagAgent": "agent you own",
   "desk.homeVolumeHint": "This desk keeps its own space, {slug}. It outlives every screen you open — nothing here is lost when one closes.",
@@ -128,7 +120,6 @@
   "desk.setupBuildStarted": "Building {label}. It runs in the background and takes minutes; you can carry on.",
   "desk.setupBuildFailedToStart": "The build did not start: {reason}",
   "desk.setupJob": "{label} is building. It keeps going if you close this window.",
-
   "files.homeTitle": "Home — {owner}",
   "files.sharedTitle": "Shared workspace",
   "files.tabHome": "Home",
@@ -142,7 +133,6 @@
   "files.errorNoHome": "There is no space for '{owner}' yet. Open a screen for this desk and one is made.",
   "files.errorNoShared": "No shared workspace yet — open a session (its ~/shared provisions it).",
   "files.errorDownloadFailed": "Could not download '{name}'.",
-
   "files.appTitle": "Files",
   "files.placeYours": "Your files",
   "files.leadYours": "Your documents, and everything Cielo has made for you.",
@@ -175,7 +165,6 @@
   "files.filmLoading": "Fetching the film — a long recording takes a moment.",
   "files.filmFailed": "This browser could not play {name}. Save it and open it in a video player.",
   "files.filmFetchFailed": "Could not fetch {name} to play it.",
-
   "sessions.heading": "Sessions",
   "sessions.hint": "A console or desktop over this desk's home. Create is allowed; destroy asks for your approval.",
   "sessions.profileLabel": "profile",
@@ -186,14 +175,12 @@
   "sessions.watch": "Watch",
   "sessions.destroy": "Destroy",
   "sessions.unavailable": "This machine cannot open screens right now — the part that runs them is not answering.",
-
   "chat.heading": "Chat",
   "chat.hint": "The full chat runs in CieloOS Chat. Every message puts Cielo to work at its own terminal — it uses its tools and runs this machine — under the same checks as everything else here.",
   "chat.firstAgentCaveat": "Note: chat always talks to your first agent, not the desk selected here — per-agent routing needs the per-user credentials tracked in issue #9.",
   "chat.openLink": "Open CieloOS Chat",
   "chat.opensUrl": "Opens {url} in a new tab.",
   "chat.unconfigured": "No chat UI is configured on this machine. CieloOS serves an OpenAI-compatible API for one at /v1/agent; point a client at it and set Chat__Url to that client's address to link it here.",
-
   "console.heading": "Console — give the agent a task",
   "console.hint": "Cielo drives its own terminal toward your goal — every keystroke is checked and written down. Watch it below.",
   "console.goalPlaceholder": "e.g. search the web for the top 10 posts about El Salvador and save them as an Excel file",
@@ -204,10 +191,8 @@
   "console.runCompleted": "Completed",
   "console.runStopped": "Stopped",
   "console.stepDone": "done",
-
   "activity.heading": "Activity — {desk}",
   "activity.empty": "No activity recorded for this desk yet.",
-
   "activity.title": "Activity",
   "activity.lead": "A plain record of what Cielo did, and what you answered. Every answer is kept with the reason that was on screen when you gave it — so you can check later whether you were told the truth.",
   "activity.filterLabel": "What to show",
@@ -291,7 +276,6 @@
   "activity.action.shared.download": "Downloaded a file from the shared folder",
   "activity.action.runtime.seed": "Set this machine up for the first time",
   "activity.action.unknown": "New kind of action — {name}",
-
   "security.heading": "Sign-in and keys",
   "security.hint": "A password proves who you are; a session carries that and can be ended; an API key lets a program act without holding your own credential. Identity tokens still work for agents and the CLI — they never expire, which is why they are not a login.",
   "security.currentPasswordLabel": "Current password",
@@ -312,7 +296,6 @@
   "security.keyUsed": "used",
   "security.keyUnused": "unused",
   "security.revokeKeyLabel": "Revoke {name}",
-
   "usage.heading": "Model spend — {month}",
   "usage.hint": "Tokens are what a provider bills for, so they are what is counted. On-box models are recorded too, but a ceiling never stops them: they cost machine time, not money.",
   "usage.thisDesk": "This desk",
@@ -323,7 +306,6 @@
   "usage.limitPlaceholder": "e.g. 200000",
   "usage.setLimitButton": "Set",
   "usage.limitNote": "0 removes the ceiling. A run that hits it stops with an explanation rather than a provider error.",
-
   "providers.heading": "Model providers",
   "providers.hint": "The brains your agents use. The OS runs with none; add one and it's usable immediately — no restart. A default is what an agent uses unless it has its own choice.",
   "providers.empty": "No providers yet — add one on the right to give your agents a brain.",
@@ -334,7 +316,6 @@
   "providers.defaultBadge": " · default",
   "providers.makeDefault": "Make {capability} default",
   "providers.removeButton": "Remove",
-
   "addProvider.heading": "Add a provider",
   "addProvider.displayNameLabel": "Display name",
   "addProvider.baseUrlLabel": "Base URL",
@@ -350,12 +331,10 @@
   "addProvider.errorRequiredFields": "Name, base URL, model, and at least one capability are required.",
   "addProvider.providerAdded": "Added {name}. Your agent can use it now.",
   "addProvider.providerRemoved": "Removed {id}.",
-
   "presets.deepseek": "DeepSeek",
   "presets.azure": "Azure OpenAI",
   "presets.openai": "OpenAI-compatible",
   "presets.ollama": "Ollama (local)",
-
   "examples.heading": "Examples",
   "examples.hint": "Each of these runs real commands through the same checks as everything else on this machine. Nothing here is a special demo path — if an example works, the machine works.",
   "examples.sessionLabel": "Run desktop examples on",
@@ -371,7 +350,6 @@
   "examples.runsAnywhere": " · runs anywhere",
   "examples.runButton": "Run",
   "examples.errorNeedsDesktop": "This example runs on a desktop session, and there is no running desktop to use. Open one from Desks first.",
-
   "examples.title": "Try an example",
   "examples.loading": "Looking for the examples on this machine…",
   "examples.notInstalledFix": "They ship inside the desktop image. Install or update this machine from a bundle that carries them, and they appear here.",
@@ -400,10 +378,8 @@
   "examples.outcomeRefused": "refused",
   "examples.outcomeDeclined": "you declined",
   "examples.outcomeFailed": "failed",
-
   "settings.title": "Settings",
   "settings.lead": "What Cielo thinks with, what it may spend, who may sign in — and in which language all of it happens.",
-
   "settings.providers.title": "AI provider",
   "settings.providers.lead": "The service Cielo thinks with. Add one and it works straight away — nothing to restart. When there is more than one, the default is the one Cielo reaches for.",
   "settings.providers.loading": "Reading the connected providers…",
@@ -421,12 +397,10 @@
   "settings.providers.localityCloud": "a cloud service",
   "settings.providers.localityRemote": "a server of your own",
   "settings.providers.localityOnBox": "on this computer",
-
   "settings.language.title": "Language",
   "settings.language.lead": "The language of this panel, and the language Cielo answers you in.",
   "settings.language.saved": "Language changed.",
   "settings.language.failed": "Could not change the language: {reason}",
-
   "settings.spend.title": "Spending",
   "settings.spend.lead": "A cloud provider bills for tokens, so tokens are what is counted. A model running on this computer is counted too, but a ceiling never stops it: it costs machine time, not money.",
   "settings.spend.month": "This month · {month}",
@@ -439,19 +413,16 @@
   "settings.spend.failed": "Could not read this month's spending: {reason}",
   "settings.spend.empty": "Nothing counted yet this month. Figures appear here the first time Cielo uses a provider.",
   "settings.spend.recent": "Most recent",
-
   "settings.password.title": "Password",
   "settings.password.lead": "How you prove it is you.",
   "settings.password.tooShort": "A password needs at least {count} characters.",
   "settings.password.failed": "Could not set the password: {reason}",
-
   "settings.signOut.title": "Sign out everywhere",
   "settings.signOut.lead": "Ends every session, in every browser and on every machine — including this one. Nothing else is touched.",
   "settings.signOut.confirm": "Yes — end every session",
   "settings.signOut.cancel": "Keep them",
   "settings.signOut.done": "Every session has been ended. Sign in again to carry on.",
   "settings.signOut.failed": "Could not sign out everywhere: {reason}",
-
   "settings.keys.title": "Keys for programs",
   "settings.keys.lead": "A key lets a program act as you without holding your password. Name each one, so you know what you are revoking later.",
   "settings.keys.loading": "Reading your keys…",
@@ -467,7 +438,6 @@
   "settings.keys.revoked": "Revoked {name}.",
   "settings.keys.createFailed": "Could not create the key: {reason}",
   "settings.keys.revokeFailed": "Could not revoke the key: {reason}",
-
   "settings.people.title": "Teammates",
   "settings.people.lead": "Everyone else who uses this computer. Each one gets their own space and their own Cielo, and cannot see yours.",
   "settings.people.humanOnly": "Only a person can add teammates to this computer.",
@@ -479,5 +449,35 @@
   "settings.people.installing": "installing this setup…",
   "settings.people.installFailed": "Could not start the install: {reason}",
   "settings.people.createFailed": "Could not create the account: {reason}",
-  "settings.people.tokenNote": "This token is shown once. Hand it over — it is how they sign in the first time."
+  "settings.people.tokenNote": "This token is shown once. Hand it over — it is how they sign in the first time.",
+  "portal.title": "CieloOS Portal",
+  "portal.loading": "Checking who you are…",
+  "portal.error.title": "Could not open the portal",
+  "portal.error.hint": "The runtime did not answer. Check that CieloOS is running and try again.",
+  "portal.error.retry": "Try again",
+  "portal.signin.title": "Sign in",
+  "portal.signin.hint": "Sign in with the name and password you were given.",
+  "portal.signin.desk": "Name",
+  "portal.signin.password": "Password",
+  "portal.signin.submit": "Sign in",
+  "portal.signin.tokenFallback": "I have a sign-in code instead",
+  "portal.signin.backToPassword": "Use name and password",
+  "portal.signin.tokenHint": "If you were given a one-off code instead of a password, enter it here. Whoever set up this computer can give you one.",
+  "portal.signin.token": "Sign-in code",
+  "portal.signin.tokenSubmit": "Unlock",
+  "portal.signin.badCredentials": "That name and password do not match.",
+  "portal.signin.tokenRejected": "That code was not accepted.",
+  "portal.signin.error": "Cielo did not respond. Try again.",
+  "portal.navigation": "Portal",
+  "portal.nav.chat": "Chat",
+  "portal.nav.files": "Files",
+  "portal.nav.messages": "Messages",
+  "portal.nav.widgets": "Widgets",
+  "portal.user": "Signed in as {display}",
+  "portal.language": "Language",
+  "portal.signOut": "Sign out",
+  "portal.view.chat": "Talk with Cielo. This experience is coming next.",
+  "portal.view.files": "Your files and documents will live here.",
+  "portal.view.messages": "Team messages will live here.",
+  "portal.view.widgets": "The tools you choose will live here."
 }

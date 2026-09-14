@@ -12,11 +12,45 @@ export const TOKEN_KEY = "cielo.token";
 
 export class UnauthorizedError extends Error {}
 
+// The token is held in memory as well as in storage, and memory is what makes
+// the guards below honest. A browser with site data blocked throws on setItem,
+// and an earlier version of this file swallowed that and claimed sign-in still
+// worked "because the header is built from the value passed to api()". It is
+// not — authHeaders() re-reads storage, so a blocked write meant every request
+// went out with no credential and token sign-in failed as unauthorized, on the
+// one screen a person cannot get past to report it.
+//
+// So: memory is the fallback, storage is the durability. Losing storage costs
+// you "stay signed in", not the ability to sign in.
+let memoryToken: string | null = null;
+
 export function readToken(): string | null {
   try {
-    return window.localStorage.getItem(TOKEN_KEY);
+    const stored = window.localStorage.getItem(TOKEN_KEY);
+    if (stored) {
+      return stored;
+    }
   } catch {
-    return null;
+    // Fall through to memory.
+  }
+  return memoryToken;
+}
+
+export function writeToken(token: string): void {
+  memoryToken = token;
+  try {
+    window.localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // This page load still works. Only surviving a reload is lost.
+  }
+}
+
+export function clearToken(): void {
+  memoryToken = null;
+  try {
+    window.localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Nothing was stored, so nothing needs clearing.
   }
 }
 

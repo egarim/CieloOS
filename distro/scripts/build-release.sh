@@ -29,7 +29,27 @@ chmod +x "$STAGE/bin/WorkspaceRuntime.Api"
 echo "==> Building panel"
 ( cd "$ROOT/src/frontend" && npm install --no-audit --no-fund >/dev/null 2>&1 && npm run build >/dev/null )
 cp -a "$ROOT/src/frontend/dist/." "$STAGE/panel/"
-test -f "$STAGE/panel/index.html" || { echo "ERROR: panel index.html missing" >&2; exit 1; }
+# Both entries, and both actually loadable. "The file exists" is not the same
+# claim: a stale or empty index.html passes that check and ships a release that
+# opens to a blank page. So follow the module script each page declares and prove
+# the bundle it names was staged too.
+check_panel_page() {
+  page="$1"
+  path="$STAGE/panel/$page"
+  test -f "$path" || { echo "ERROR: panel $page missing" >&2; exit 1; }
+
+  asset=$(grep -o '<script[^>]*src="[^"]*"' "$path" | head -1 | sed 's/.*src="//; s/".*//')
+  test -n "$asset" || { echo "ERROR: panel $page declares no module script" >&2; exit 1; }
+
+  case "$asset" in
+    /*) asset_path="$STAGE/panel${asset}" ;;
+     *) asset_path="$STAGE/panel/${asset}" ;;
+  esac
+  test -s "$asset_path" || { echo "ERROR: panel $page points at $asset, which was not staged" >&2; exit 1; }
+}
+
+check_panel_page index.html
+check_panel_page portal.html
 
 echo "==> Staging surfaces + config"
 cp "$ROOT"/surfaces/*.surface.json "$STAGE/surfaces/"

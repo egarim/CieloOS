@@ -11,11 +11,9 @@
   "login.tokenSubmit": "Разблокировать",
   "login.badCredentials": "Это имя и пароль не совпадают.",
   "login.tokenRejected": "Этот токен отклонён.",
-
   "errors.runtimeUnreachable": "Среда выполнения недоступна.",
   "errors.sessionTokenRejected": "Токен сессии отклонён.",
   "errors.wordedForTheMachine": "Не получилось, и понятной человеку причины не вернулось.",
-
   "setup.connecting": "Подключение к среде выполнения…",
   "setup.eyebrow": "Первый запуск",
   "setup.title": "Заявите права на эту машину",
@@ -30,21 +28,17 @@
   "setup.errorNotLocal": "Настройку можно запустить только на самой машине. Откройте эту панель на самой машине или через свой SSH-туннель.",
   "setup.errorAlreadyClaimed": "У этой машины уже есть владелец. Войдите по токену.",
   "setup.errorCreateFailed": "Не удалось создать учётную запись.",
-
   "topbar.modelStatusTitle": "Модель для чата — настраивается в разделе «Модели»",
   "topbar.noModel": "нет модели — добавьте",
   "topbar.signOut": "выйти",
-
   "nav.desks": "Рабочие места",
   "nav.examples": "Примеры",
   "nav.models": "Модели",
-
   "desks.heading": "Ваши рабочие места",
   "desks.hint": "Вы и агенты, которыми вы владеете. Выберите одно, чтобы увидеть его домашний каталог, сессии и активность.",
   "desks.loading": "Загрузка…",
   "desks.kindSelf": "вы",
   "desks.kindAgent": "агент",
-
   "teammate.toggle": "+ Добавить участника",
   "teammate.cancel": "− Отмена",
   "teammate.hint": "Создать на этой машине ещё одного пользователя — вы получите токен, чтобы передать ему.",
@@ -55,7 +49,6 @@
   "teammate.namePlaceholder": "имя участника",
   "teammate.createButton": "Создать пользователя",
   "teammate.created": "Создан {slug}. Передайте этот токен новому пользователю:",
-
   "approvals.heading": "Подтверждения — ждут вашего согласия",
   "approvals.hint": "Действия, которые кто-то из ваших агентов отложил до вашего решения. Каждое привязано ровно к тому запросу, предпросмотр которого показан.",
   "approvals.empty": "Ничего не ожидает.",
@@ -63,7 +56,6 @@
   "approvals.bindsTo": "привязано к {hash}…",
   "approvals.approve": "Одобрить",
   "approvals.reject": "Отклонить",
-
   "desk.tagSelf": "ваше рабочее место",
   "desk.tagAgent": "ваш агент",
   "desk.homeVolumeHint": "У этого рабочего места своё пространство, {slug}. Оно переживает любой открытый экран — при закрытии ничего не теряется.",
@@ -128,7 +120,6 @@
   "desk.setupBuildStarted": "Собираю «{label}». Идёт в фоне и занимает минуты; можно продолжать работу.",
   "desk.setupBuildFailedToStart": "Сборка не началась: {reason}",
   "desk.setupJob": "«{label}» собирается. Сборка продолжится, даже если закрыть это окно.",
-
   "files.homeTitle": "Домашний каталог — {owner}",
   "files.sharedTitle": "Общее пространство",
   "files.tabHome": "Домашний",
@@ -142,7 +133,6 @@
   "files.errorNoHome": "Для «{owner}» пространства пока нет. Откройте экран для этого рабочего места — и оно появится.",
   "files.errorNoShared": "Общего пространства пока нет — откройте сессию (её ~/shared создаёт его).",
   "files.errorDownloadFailed": "Не удалось скачать «{name}».",
-
   "files.appTitle": "Файлы",
   "files.placeYours": "Ваши файлы",
   "files.leadYours": "Ваши документы и всё, что Cielo сделал для вас.",
@@ -175,7 +165,6 @@
   "files.filmLoading": "Загружаем запись — длинная займёт немного времени.",
   "files.filmFailed": "Этот браузер не смог воспроизвести {name}. Сохраните файл и откройте его в видеоплеере.",
   "files.filmFetchFailed": "Не удалось получить {name} для воспроизведения.",
-
   "sessions.heading": "Сессии",
   "sessions.hint": "Консоль или рабочий стол поверх домашнего тома этого рабочего места. Создание разрешено; уничтожение спрашивает вашего одобрения.",
   "sessions.profileLabel": "профиль",
@@ -186,14 +175,12 @@
   "sessions.watch": "Смотреть",
   "sessions.destroy": "Уничтожить",
   "sessions.unavailable": "Сейчас эта машина не может открывать экраны — то, что их запускает, не отвечает.",
-
   "chat.heading": "Чат",
   "chat.hint": "Полноценный чат работает в CieloOS Chat. Каждое сообщение отправляет Cielo работать за своим терминалом — он использует свои инструменты и управляет этой машиной — с теми же проверками, что и всё остальное здесь.",
   "chat.firstAgentCaveat": "Внимание: чат всегда обращается к вашему первому агенту, а не к выбранному здесь рабочему месту — маршрутизация по агентам требует индивидуальных учётных данных пользователей, отслеживаемых в issue #9.",
   "chat.openLink": "Открыть CieloOS Chat",
   "chat.opensUrl": "Откроет {url} в новой вкладке.",
   "chat.unconfigured": "На этой машине не настроен интерфейс чата. CieloOS предоставляет для него OpenAI-совместимый API по адресу /v1/agent; направьте на него клиента и укажите в Chat__Url адрес этого клиента, чтобы связать его отсюда.",
-
   "console.heading": "Консоль — поставьте агенту задачу",
   "console.hint": "Cielo сам ведёт свой терминал к вашей цели — каждое нажатие клавиши проверяется и записывается. Смотрите ниже.",
   "console.goalPlaceholder": "напр. найди в интернете 10 главных постов про Сальвадор и сохрани их в файл Excel",
@@ -204,10 +191,8 @@
   "console.runCompleted": "Завершено",
   "console.runStopped": "Остановлено",
   "console.stepDone": "готово",
-
   "activity.heading": "Активность — {desk}",
   "activity.empty": "Для этого рабочего места активность ещё не записана.",
-
   "activity.title": "Активность",
   "activity.lead": "Простая запись того, что сделал Cielo и что ответили вы. Каждый ответ хранится вместе с причиной, которая была на экране в момент ответа, — чтобы позже вы могли проверить, сказали ли вам правду.",
   "activity.filterLabel": "Что показывать",
@@ -291,7 +276,6 @@
   "activity.action.shared.download": "Скачал файл из общей папки",
   "activity.action.runtime.seed": "Подготовил машину к первому запуску",
   "activity.action.unknown": "Новый вид действия — {name}",
-
   "security.heading": "Вход и ключи",
   "security.hint": "Пароль подтверждает, кто вы; сессия несёт это подтверждение, и её можно завершить; ключ API позволяет программе действовать, не держа ваши собственные учётные данные. Токены идентичности по-прежнему работают для агентов и CLI — они никогда не истекают, поэтому они и не являются входом.",
   "security.currentPasswordLabel": "Текущий пароль",
@@ -312,7 +296,6 @@
   "security.keyUsed": "использовался",
   "security.keyUnused": "не использовался",
   "security.revokeKeyLabel": "Отозвать {name}",
-
   "usage.heading": "Расходы на модели — {month}",
   "usage.hint": "Провайдер выставляет счёт за токены, поэтому считаются именно они. Модели на самой машине тоже учитываются, но потолок их никогда не останавливает: они стоят машинного времени, а не денег.",
   "usage.thisDesk": "Это рабочее место",
@@ -323,7 +306,6 @@
   "usage.limitPlaceholder": "напр. 200000",
   "usage.setLimitButton": "Задать",
   "usage.limitNote": "0 снимает потолок. Запуск, упёршийся в потолок, останавливается с объяснением, а не с ошибкой провайдера.",
-
   "providers.heading": "Провайдеры моделей",
   "providers.hint": "Мозги, которыми пользуются ваши агенты. ОС работает и без них; добавьте одного — и он готов к работе сразу, без перезапуска. Провайдер по умолчанию — это тот, которого агент использует, пока не выбрал свой.",
   "providers.empty": "Провайдеров пока нет — добавьте одного справа, чтобы дать агентам мозг.",
@@ -334,7 +316,6 @@
   "providers.defaultBadge": " · по умолчанию",
   "providers.makeDefault": "Сделать по умолчанию для {capability}",
   "providers.removeButton": "Удалить",
-
   "addProvider.heading": "Добавить провайдера",
   "addProvider.displayNameLabel": "Отображаемое имя",
   "addProvider.baseUrlLabel": "Базовый URL",
@@ -350,12 +331,10 @@
   "addProvider.errorRequiredFields": "Обязательны имя, base URL, модель и хотя бы одна возможность.",
   "addProvider.providerAdded": "{name} добавлен. Ваш агент может использовать его прямо сейчас.",
   "addProvider.providerRemoved": "{id} удалён.",
-
   "presets.deepseek": "DeepSeek",
   "presets.azure": "Azure OpenAI",
   "presets.openai": "OpenAI-совместимый",
   "presets.ollama": "Ollama (локально)",
-
   "examples.heading": "Примеры",
   "examples.hint": "Каждый из них выполняет настоящие команды через те же проверки, что и всё остальное на этой машине. Здесь нет особого демонстрационного пути — если пример работает, значит работает машина.",
   "examples.sessionLabel": "Запускать примеры с рабочим столом в сессии",
@@ -371,7 +350,6 @@
   "examples.runsAnywhere": " · работает везде",
   "examples.runButton": "Запустить",
   "examples.errorNeedsDesktop": "Этот пример выполняется в сессии с рабочим столом, а запущенных рабочих столов нет. Сначала откройте один в разделе «Рабочие места».",
-
   "examples.title": "Попробуйте пример",
   "examples.loading": "Ищем примеры на этой машине…",
   "examples.notInstalledFix": "Они поставляются внутри образа рабочего стола. Установите или обновите эту машину из сборки, где они есть, — и они появятся здесь.",
@@ -400,10 +378,8 @@
   "examples.outcomeRefused": "отказано",
   "examples.outcomeDeclined": "вы отклонили",
   "examples.outcomeFailed": "сбой",
-
   "settings.title": "Настройки",
   "settings.lead": "Чем думает Cielo, сколько ему можно тратить, кто может входить — и на каком языке всё это происходит.",
-
   "settings.providers.title": "Провайдер ИИ",
   "settings.providers.lead": "Сервис, которым думает Cielo. Добавьте — и он заработает сразу, перезапускать ничего не нужно. Когда провайдеров несколько, Cielo берёт того, что назначен по умолчанию.",
   "settings.providers.loading": "Читаем подключённых провайдеров…",
@@ -421,12 +397,10 @@
   "settings.providers.localityCloud": "облачный сервис",
   "settings.providers.localityRemote": "ваш собственный сервер",
   "settings.providers.localityOnBox": "на этом компьютере",
-
   "settings.language.title": "Язык",
   "settings.language.lead": "Язык этой панели и язык, на котором Cielo вам отвечает.",
   "settings.language.saved": "Язык изменён.",
   "settings.language.failed": "Не удалось сменить язык: {reason}",
-
   "settings.spend.title": "Расходы",
   "settings.spend.lead": "Облачный провайдер выставляет счёт за токены — поэтому считаются именно они. Модель, работающая на этом компьютере, тоже учитывается, но потолок её не остановит: она стоит машинного времени, а не денег.",
   "settings.spend.month": "В этом месяце · {month}",
@@ -439,19 +413,16 @@
   "settings.spend.failed": "Не удалось прочитать расходы за этот месяц: {reason}",
   "settings.spend.empty": "В этом месяце пока ничего не насчитано. Цифры появятся здесь, когда Cielo впервые обратится к провайдеру.",
   "settings.spend.recent": "Последнее",
-
   "settings.password.title": "Пароль",
   "settings.password.lead": "Так вы подтверждаете, что это вы.",
   "settings.password.tooShort": "В пароле должно быть не меньше {count} символов.",
   "settings.password.failed": "Не удалось задать пароль: {reason}",
-
   "settings.signOut.title": "Выйти везде",
   "settings.signOut.lead": "Завершает все сессии — в каждом браузере и на каждой машине, включая эту. Больше ничего не затрагивается.",
   "settings.signOut.confirm": "Да — завершить все сессии",
   "settings.signOut.cancel": "Оставить",
   "settings.signOut.done": "Все сессии завершены. Войдите снова, чтобы продолжить.",
   "settings.signOut.failed": "Не удалось выйти везде: {reason}",
-
   "settings.keys.title": "Ключи для программ",
   "settings.keys.lead": "Ключ позволяет программе действовать от вашего имени, не зная вашего пароля. Давайте каждому имя, чтобы потом понимать, что вы отзываете.",
   "settings.keys.loading": "Читаем ваши ключи…",
@@ -467,7 +438,6 @@
   "settings.keys.revoked": "{name} отозван.",
   "settings.keys.createFailed": "Не удалось создать ключ: {reason}",
   "settings.keys.revokeFailed": "Не удалось отозвать ключ: {reason}",
-
   "settings.people.title": "Коллеги",
   "settings.people.lead": "Все остальные, кто пользуется этим компьютером. У каждого своё пространство и свой Cielo, и вашего они не видят.",
   "settings.people.humanOnly": "Добавлять коллег может только человек.",
@@ -479,5 +449,35 @@
   "settings.people.installing": "устанавливаем это окружение…",
   "settings.people.installFailed": "Не удалось начать установку: {reason}",
   "settings.people.createFailed": "Не удалось создать учётную запись: {reason}",
-  "settings.people.tokenNote": "Этот токен показывается один раз. Передайте его — по нему они войдут в первый раз."
+  "settings.people.tokenNote": "Этот токен показывается один раз. Передайте его — по нему они войдут в первый раз.",
+  "portal.title": "Портал CieloOS",
+  "portal.loading": "Проверяем, кто вы…",
+  "portal.error.title": "Не удалось открыть портал",
+  "portal.error.hint": "Среда выполнения не ответила. Проверьте, что CieloOS запущена, и попробуйте ещё раз.",
+  "portal.error.retry": "Повторить",
+  "portal.signin.title": "Войти",
+  "portal.signin.hint": "Войдите с именем и паролем, которые вам выдали.",
+  "portal.signin.desk": "Имя",
+  "portal.signin.password": "Пароль",
+  "portal.signin.submit": "Войти",
+  "portal.signin.tokenFallback": "У меня есть код для входа",
+  "portal.signin.backToPassword": "Войти по имени и паролю",
+  "portal.signin.tokenHint": "Если вместо пароля вам выдали код, введите его здесь. Его может выдать тот, кто настраивал этот компьютер.",
+  "portal.signin.token": "Код для входа",
+  "portal.signin.tokenSubmit": "Разблокировать",
+  "portal.signin.badCredentials": "Имя и пароль не совпадают.",
+  "portal.signin.tokenRejected": "Этот код не принят.",
+  "portal.signin.error": "Cielo не отвечает. Попробуйте ещё раз.",
+  "portal.navigation": "Портал",
+  "portal.nav.chat": "Чат",
+  "portal.nav.files": "Файлы",
+  "portal.nav.messages": "Сообщения",
+  "portal.nav.widgets": "Виджеты",
+  "portal.user": "Вы вошли как {display}",
+  "portal.language": "Язык",
+  "portal.signOut": "Выйти",
+  "portal.view.chat": "Общайтесь с Cielo. Этот раздел появится здесь позже.",
+  "portal.view.files": "Здесь будут ваши файлы и документы.",
+  "portal.view.messages": "Здесь будут сообщения команды.",
+  "portal.view.widgets": "Здесь будут выбранные вами инструменты."
 }

@@ -11,11 +11,9 @@
   "login.tokenSubmit": "Desbloquear",
   "login.badCredentials": "Ese nombre y esa contraseña no coinciden.",
   "login.tokenRejected": "Ese token fue rechazado.",
-
   "errors.runtimeUnreachable": "El runtime no está accesible.",
   "errors.sessionTokenRejected": "El token de sesión fue rechazado.",
   "errors.wordedForTheMachine": "No se pudo hacer, y no llegó ningún motivo que una persona pueda leer.",
-
   "setup.connecting": "Conectando con el runtime…",
   "setup.eyebrow": "Primer arranque",
   "setup.title": "Reclama esta máquina",
@@ -30,21 +28,17 @@
   "setup.errorNotLocal": "La configuración inicial solo puede ejecutarse en la máquina misma. Abre este panel en la máquina, o a través de tu túnel SSH.",
   "setup.errorAlreadyClaimed": "Esta máquina ya tiene dueño. Inicia sesión con un token.",
   "setup.errorCreateFailed": "No se pudo crear la cuenta.",
-
   "topbar.modelStatusTitle": "Modelo de chat — se configura en Modelos",
   "topbar.noModel": "sin modelo — añade uno",
   "topbar.signOut": "cerrar sesión",
-
   "nav.desks": "Puestos",
   "nav.examples": "Ejemplos",
   "nav.models": "Modelos",
-
   "desks.heading": "Tus puestos",
   "desks.hint": "Tú, y los agentes que te pertenecen. Elige uno para ver su home, sus sesiones y su actividad.",
   "desks.loading": "Cargando…",
   "desks.kindSelf": "tú",
   "desks.kindAgent": "agente",
-
   "teammate.toggle": "+ Añadir compañero",
   "teammate.cancel": "− Cancelar",
   "teammate.hint": "Crea otro usuario en esta máquina — obtendrás un token para entregárselo.",
@@ -55,7 +49,6 @@
   "teammate.namePlaceholder": "su nombre",
   "teammate.createButton": "Crear usuario",
   "teammate.created": "Se creó {slug}. Comparte este token con esa persona:",
-
   "approvals.heading": "Aprobaciones — esperan tu consentimiento",
   "approvals.hint": "Acciones que alguno de tus agentes dejó en espera de una decisión. Cada una queda ligada exactamente a la petición que muestra en la vista previa.",
   "approvals.empty": "Nada pendiente.",
@@ -63,7 +56,6 @@
   "approvals.bindsTo": "ligada a {hash}…",
   "approvals.approve": "Aprobar",
   "approvals.reject": "Rechazar",
-
   "desk.tagSelf": "tu puesto",
   "desk.tagAgent": "agente tuyo",
   "desk.homeVolumeHint": "Este puesto tiene su propio espacio, {slug}. Sobrevive a cada pantalla que abras: al cerrarla no se pierde nada.",
@@ -128,7 +120,6 @@
   "desk.setupBuildStarted": "Construyendo «{label}». Va en segundo plano y tarda minutos; puedes seguir con lo tuyo.",
   "desk.setupBuildFailedToStart": "La construcción no empezó: {reason}",
   "desk.setupJob": "«{label}» se está construyendo. Sigue aunque cierres esta ventana.",
-
   "files.homeTitle": "Inicio — {owner}",
   "files.sharedTitle": "Espacio compartido",
   "files.tabHome": "Inicio",
@@ -142,7 +133,6 @@
   "files.errorNoHome": "Todavía no hay espacio para '{owner}'. Abre una pantalla para este puesto y se creará.",
   "files.errorNoShared": "Todavía no hay espacio compartido — abre una sesión (su ~/shared lo aprovisiona).",
   "files.errorDownloadFailed": "No se pudo descargar '{name}'.",
-
   "files.appTitle": "Archivos",
   "files.placeYours": "Tus archivos",
   "files.leadYours": "Tus documentos, y todo lo que Cielo ha hecho para ti.",
@@ -175,7 +165,6 @@
   "files.filmLoading": "Cargando la grabación — una larga tarda un momento.",
   "files.filmFailed": "Este navegador no pudo reproducir {name}. Guárdalo y ábrelo en un reproductor de vídeo.",
   "files.filmFetchFailed": "No se pudo obtener {name} para reproducirlo.",
-
   "sessions.heading": "Sesiones",
   "sessions.hint": "Una consola o un escritorio sobre el home de este puesto. Crear está permitido; destruir pide tu aprobación.",
   "sessions.profileLabel": "perfil",
@@ -186,14 +175,12 @@
   "sessions.watch": "Ver",
   "sessions.destroy": "Destruir",
   "sessions.unavailable": "Ahora mismo esta máquina no puede abrir pantallas: la parte que las ejecuta no responde.",
-
   "chat.heading": "Chat",
   "chat.hint": "El chat completo se ejecuta en CieloOS Chat. Cada mensaje pone a Cielo a trabajar en su propia terminal — usa sus herramientas y maneja esta máquina — con los mismos controles que todo lo demás aquí.",
   "chat.firstAgentCaveat": "Nota: el chat siempre habla con tu primer agente, no con el puesto seleccionado aquí — el enrutado por agente necesita las credenciales por usuario que se siguen en el issue #9.",
   "chat.openLink": "Abrir CieloOS Chat",
   "chat.opensUrl": "Abre {url} en una pestaña nueva.",
   "chat.unconfigured": "En esta máquina no hay ninguna interfaz de chat configurada. CieloOS sirve una API compatible con OpenAI para ello en /v1/agent; apunta un cliente ahí y pon en Chat__Url la dirección de ese cliente para enlazarlo aquí.",
-
   "console.heading": "Consola — dale una tarea al agente",
   "console.hint": "Cielo conduce su propia terminal hacia tu objetivo — cada pulsación se comprueba y queda registrada. Míralo abajo.",
   "console.goalPlaceholder": "p. ej. busca en la web las 10 publicaciones principales sobre El Salvador y guárdalas en un archivo de Excel",
@@ -204,10 +191,8 @@
   "console.runCompleted": "Completada",
   "console.runStopped": "Detenida",
   "console.stepDone": "hecho",
-
   "activity.heading": "Actividad — {desk}",
   "activity.empty": "Todavía no hay actividad registrada para este puesto.",
-
   "activity.title": "Actividad",
   "activity.lead": "Un registro claro de lo que hizo Cielo y de lo que respondiste tú. Cada respuesta se guarda junto con la razón que estaba en pantalla cuando la diste — para que puedas comprobar más tarde si te dijeron la verdad.",
   "activity.filterLabel": "Qué mostrar",
@@ -291,7 +276,6 @@
   "activity.action.shared.download": "Descargó un archivo de la carpeta compartida",
   "activity.action.runtime.seed": "Preparó la máquina por primera vez",
   "activity.action.unknown": "Nuevo tipo de acción — {name}",
-
   "security.heading": "Inicio de sesión y claves",
   "security.hint": "Una contraseña demuestra quién eres; una sesión lleva eso consigo y se puede terminar; una clave de API deja que un programa actúe sin tener tu propia credencial. Los tokens de identidad siguen funcionando para los agentes y la CLI — nunca caducan, y por eso no son un inicio de sesión.",
   "security.currentPasswordLabel": "Contraseña actual",
@@ -312,7 +296,6 @@
   "security.keyUsed": "usada",
   "security.keyUnused": "sin usar",
   "security.revokeKeyLabel": "Revocar {name}",
-
   "usage.heading": "Gasto en modelos — {month}",
   "usage.hint": "Los tokens son lo que factura un proveedor, así que son lo que se cuenta. Los modelos que corren en la máquina también se registran, pero un tope nunca los detiene: cuestan tiempo de máquina, no dinero.",
   "usage.thisDesk": "Este puesto",
@@ -323,7 +306,6 @@
   "usage.limitPlaceholder": "p. ej. 200000",
   "usage.setLimitButton": "Fijar",
   "usage.limitNote": "0 quita el tope. Una ejecución que lo alcanza se detiene con una explicación, no con un error del proveedor.",
-
   "providers.heading": "Proveedores de modelos",
   "providers.hint": "Los cerebros que usan tus agentes. El sistema operativo funciona sin ninguno; añade uno y queda utilizable de inmediato — sin reiniciar. Un predeterminado es lo que usa un agente mientras no tenga una elección propia.",
   "providers.empty": "Todavía no hay proveedores — añade uno a la derecha para darles un cerebro a tus agentes.",
@@ -334,7 +316,6 @@
   "providers.defaultBadge": " · predeterminado",
   "providers.makeDefault": "Hacer predeterminado para {capability}",
   "providers.removeButton": "Eliminar",
-
   "addProvider.heading": "Añadir un proveedor",
   "addProvider.displayNameLabel": "Nombre visible",
   "addProvider.baseUrlLabel": "URL base",
@@ -350,12 +331,10 @@
   "addProvider.errorRequiredFields": "Se requieren nombre, base URL, modelo y al menos una capacidad.",
   "addProvider.providerAdded": "Se añadió {name}. Tu agente ya puede usarlo.",
   "addProvider.providerRemoved": "Se eliminó {id}.",
-
   "presets.deepseek": "DeepSeek",
   "presets.azure": "Azure OpenAI",
   "presets.openai": "Compatible con OpenAI",
   "presets.ollama": "Ollama (local)",
-
   "examples.heading": "Ejemplos",
   "examples.hint": "Cada uno de estos ejecuta comandos reales a través de las mismas comprobaciones que todo lo demás en esta máquina. Aquí no hay ninguna vía de demostración especial — si un ejemplo funciona, la máquina funciona.",
   "examples.sessionLabel": "Ejecutar los ejemplos de escritorio en",
@@ -371,7 +350,6 @@
   "examples.runsAnywhere": " · funciona en cualquier sitio",
   "examples.runButton": "Ejecutar",
   "examples.errorNeedsDesktop": "Este ejemplo se ejecuta en una sesión de escritorio, y no hay ningún escritorio en marcha que usar. Abre uno desde Puestos primero.",
-
   "examples.title": "Prueba un ejemplo",
   "examples.loading": "Buscando los ejemplos de esta máquina…",
   "examples.notInstalledFix": "Vienen dentro de la imagen del escritorio. Instala o actualiza esta máquina desde un paquete que las traiga y aparecerán aquí.",
@@ -400,10 +378,8 @@
   "examples.outcomeRefused": "rechazado",
   "examples.outcomeDeclined": "lo rechazaste",
   "examples.outcomeFailed": "falló",
-
   "settings.title": "Ajustes",
   "settings.lead": "Con qué piensa Cielo, cuánto puede gastar, quién puede iniciar sesión — y en qué idioma ocurre todo.",
-
   "settings.providers.title": "Proveedor de IA",
   "settings.providers.lead": "El servicio con el que piensa Cielo. Añade uno y funciona al momento — no hay nada que reiniciar. Cuando hay más de uno, el predeterminado es al que Cielo recurre.",
   "settings.providers.loading": "Leyendo los proveedores conectados…",
@@ -421,12 +397,10 @@
   "settings.providers.localityCloud": "un servicio en la nube",
   "settings.providers.localityRemote": "un servidor tuyo",
   "settings.providers.localityOnBox": "en este ordenador",
-
   "settings.language.title": "Idioma",
   "settings.language.lead": "El idioma de este panel, y el idioma en el que Cielo te responde.",
   "settings.language.saved": "Idioma cambiado.",
   "settings.language.failed": "No se pudo cambiar el idioma: {reason}",
-
   "settings.spend.title": "Gasto",
   "settings.spend.lead": "Un proveedor en la nube cobra por tokens, así que son los tokens lo que se cuenta. Un modelo que corre en este ordenador también se anota, pero ningún tope lo detiene: cuesta tiempo de máquina, no dinero.",
   "settings.spend.month": "Este mes · {month}",
@@ -439,19 +413,16 @@
   "settings.spend.failed": "No se pudo leer el gasto de este mes: {reason}",
   "settings.spend.empty": "Este mes todavía no se ha contado nada. Las cifras aparecen aquí la primera vez que Cielo usa un proveedor.",
   "settings.spend.recent": "Lo más reciente",
-
   "settings.password.title": "Contraseña",
   "settings.password.lead": "Así demuestras que eres tú.",
   "settings.password.tooShort": "Una contraseña necesita al menos {count} caracteres.",
   "settings.password.failed": "No se pudo establecer la contraseña: {reason}",
-
   "settings.signOut.title": "Cerrar sesión en todas partes",
   "settings.signOut.lead": "Termina todas las sesiones, en cada navegador y en cada máquina — incluida esta. No se toca nada más.",
   "settings.signOut.confirm": "Sí — terminar todas las sesiones",
   "settings.signOut.cancel": "Dejarlas",
   "settings.signOut.done": "Todas las sesiones han terminado. Inicia sesión otra vez para seguir.",
   "settings.signOut.failed": "No se pudo cerrar la sesión en todas partes: {reason}",
-
   "settings.keys.title": "Claves para programas",
   "settings.keys.lead": "Una clave permite que un programa actúe como tú sin tener tu contraseña. Ponle nombre a cada una, para saber qué estás revocando después.",
   "settings.keys.loading": "Leyendo tus claves…",
@@ -467,7 +438,6 @@
   "settings.keys.revoked": "{name} revocada.",
   "settings.keys.createFailed": "No se pudo crear la clave: {reason}",
   "settings.keys.revokeFailed": "No se pudo revocar la clave: {reason}",
-
   "settings.people.title": "Compañeros",
   "settings.people.lead": "Todas las demás personas que usan este ordenador. Cada una tiene su propio espacio y su propio Cielo, y no ve el tuyo.",
   "settings.people.humanOnly": "Solo una persona puede añadir compañeros a este ordenador.",
@@ -479,5 +449,35 @@
   "settings.people.installing": "instalando este entorno…",
   "settings.people.installFailed": "No se pudo empezar la instalación: {reason}",
   "settings.people.createFailed": "No se pudo crear la cuenta: {reason}",
-  "settings.people.tokenNote": "Este token se muestra una sola vez. Entrégaselo — con él entran la primera vez."
+  "settings.people.tokenNote": "Este token se muestra una sola vez. Entrégaselo — con él entran la primera vez.",
+  "portal.title": "Portal CieloOS",
+  "portal.loading": "Comprobando quién eres…",
+  "portal.error.title": "No se pudo abrir el portal",
+  "portal.error.hint": "Cielo no respondió. Comprueba que esté en marcha e inténtalo de nuevo.",
+  "portal.error.retry": "Volver a intentar",
+  "portal.signin.title": "Iniciar sesión",
+  "portal.signin.hint": "Inicia sesión con el nombre y la contraseña que te dieron.",
+  "portal.signin.desk": "Nombre",
+  "portal.signin.password": "Contraseña",
+  "portal.signin.submit": "Entrar",
+  "portal.signin.tokenFallback": "Tengo un código de acceso",
+  "portal.signin.backToPassword": "Usar nombre y contraseña",
+  "portal.signin.tokenHint": "Si te dieron un código en lugar de una contraseña, escríbelo aquí. Quien configuró este equipo puede darte uno.",
+  "portal.signin.token": "Código de acceso",
+  "portal.signin.tokenSubmit": "Desbloquear",
+  "portal.signin.badCredentials": "Ese nombre y esa contraseña no coinciden.",
+  "portal.signin.tokenRejected": "No se aceptó ese código.",
+  "portal.signin.error": "Cielo no respondió. Inténtalo de nuevo.",
+  "portal.navigation": "Portal",
+  "portal.nav.chat": "Chat",
+  "portal.nav.files": "Archivos",
+  "portal.nav.messages": "Mensajes",
+  "portal.nav.widgets": "Widgets",
+  "portal.user": "Has iniciado sesión como {display}",
+  "portal.language": "Idioma",
+  "portal.signOut": "Cerrar sesión",
+  "portal.view.chat": "Habla con Cielo. Esta experiencia llegará próximamente.",
+  "portal.view.files": "Tus archivos y documentos estarán aquí.",
+  "portal.view.messages": "Los mensajes del equipo estarán aquí.",
+  "portal.view.widgets": "Las herramientas que elijas estarán aquí."
 }
