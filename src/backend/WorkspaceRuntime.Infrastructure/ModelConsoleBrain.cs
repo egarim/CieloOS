@@ -50,7 +50,10 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         + "and stop. Say what you already found, ask ONE specific thing, and offer the concrete "
         + "options where there are some. Asking is a legitimate way to finish a run: guessing wrong "
         + "costs the person far more time than asking does. Do not ask when you can reasonably "
-        + "proceed, and never ask twice for the same thing. " +
+        + "proceed, and never ask twice for the same thing. "
+        + "Ask as well when you are BLOCKED: if two or three attempts at the same thing have failed "
+        + "and you have no genuinely different idea, say what you learned and what stopped you rather "
+        + "than trying another variation of what already did not work. " +
         "\"note\" is a one-line explanation of your reasoning EXCEPT when done=true, where \"note\" " +
         "is your COMPLETE reply to the person: written to them, conversational, and as long as it " +
         "needs to be. It may be multi-line and use markdown, including fenced code blocks. Put the " +

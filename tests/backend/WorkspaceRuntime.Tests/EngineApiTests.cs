@@ -93,4 +93,24 @@ public class EngineApiTests
             new EngineInstall("npm", package, digest, configure ?? new[] { "x config set tools.allow '[\"cielo__*\"]'" }),
             new EngineInvoke("x", new[] { "-m", "{goal}" }, null),
             network);
+
+    // Sibling of ShippedToNewInstallationsTests in RecorderSurfaceTests.cs: a fix
+    // that only exists on the machine it was made on is not a fix.
+    //
+    // FileEngineCatalog reads <bundle>/engines. The release script staged surfaces
+    // and not engines, so every installed machine would have shown an empty engine
+    // list and looked broken rather than failing — the #49 shape exactly, where the
+    // code was right and had never once run anywhere real.
+    [Fact]
+    public void Engine_manifests_reach_a_new_installation()
+    {
+        var release = File.ReadAllText(Path.Combine(
+            TestRepository.Root(), "distro", "scripts", "build-release.sh"));
+
+        Assert.Contains("/engines/", release, StringComparison.Ordinal);
+        Assert.Contains("*.engine.json", release, StringComparison.Ordinal);
+
+        // And there is something to ship.
+        Assert.NotEmpty(new FileEngineCatalog(TestRepository.Root()).Engines);
+    }
 }

@@ -172,4 +172,59 @@ public class AskingTests
         public Task<IReadOnlyList<DesktopSession>> ListAsync(CancellationToken cancellationToken) => Task.FromResult(list);
         public Task<bool> ImageExistsAsync(string image, CancellationToken cancellationToken) => Task.FromResult(true);
     }
+
+    [Fact]
+    public async Task A_blocked_run_ends_by_asking_rather_than_with_a_canned_apology()
+    {
+        var world = World();
+        var loop = new ConsoleAgentLoop(world.Runtime, world.Console);
+
+        // Measured, which is why this test exists. After the brain was taught to
+        // ask, T7 was rerun and STILL did not: the model did not think it was
+        // missing a decision, it thought it was blocked by something it could work
+        // around, and it tried seven variations of one search before the repeat
+        // check stopped it. What followed threw away everything it had learned.
+        var result = await loop.RunAsync(
+            "joche-agent-abc", "find VSeed parts for sale", maxSteps: 8, world.Principal, world.OwnerId, world.AgentId,
+            new StuckThenAsksBrain(), CancellationToken.None);
+
+        Assert.True(result.Asked);
+        Assert.Contains("blocked", result.Steps.Last().Note!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task A_provider_that_fails_while_composing_the_question_leaves_the_honest_reason()
+    {
+        var world = World();
+        var loop = new ConsoleAgentLoop(world.Runtime, world.Console);
+
+        // The closing call is an extra model call on a failure path. If it throws,
+        // a stuck run must not become an error — the original stop reason was true
+        // and still is.
+        var result = await loop.RunAsync(
+            "joche-agent-abc", "anything", maxSteps: 8, world.Principal, world.OwnerId, world.AgentId,
+            new StuckThenThrowsBrain(), CancellationToken.None);
+
+        Assert.False(result.Asked);
+        Assert.Contains("repeated a command", result.StopReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // Runs the same command twice (tripping the repeat check), then answers the
+    // loop's closing prompt with a question.
+    private sealed class StuckThenAsksBrain : IConsoleAgentBrain
+    {
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+            Task.FromResult(goal.Contains("Do NOT try another command", StringComparison.Ordinal)
+                ? new ConsoleAgentAction(false, null, false, null,
+                    "I am blocked: the search engine returned a bot challenge three times. Do you have a specific shop in mind?")
+                : new ConsoleAgentAction(false, "curl -s https://example.test", true, "searching"));
+    }
+
+    private sealed class StuckThenThrowsBrain : IConsoleAgentBrain
+    {
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+            goal.Contains("Do NOT try another command", StringComparison.Ordinal)
+                ? throw new HttpRequestException("provider down")
+                : Task.FromResult(new ConsoleAgentAction(false, "curl -s https://example.test", true, "searching"));
+    }
 }

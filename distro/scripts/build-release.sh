@@ -15,7 +15,7 @@ STAGE="$OUT/cielo"
 
 echo "==> CieloOS release bundle ($ARCH)"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/bin" "$STAGE/panel" "$STAGE/surfaces" "$STAGE/config" "$STAGE/systemd"
+mkdir -p "$STAGE/bin" "$STAGE/panel" "$STAGE/surfaces" "$STAGE/engines" "$STAGE/config" "$STAGE/systemd"
 
 echo "==> Publishing runtime (self-contained, $ARCH)"
 dotnet publish "$ROOT/src/backend/WorkspaceRuntime.Api/WorkspaceRuntime.Api.csproj" \
@@ -51,7 +51,7 @@ check_panel_page() {
 check_panel_page index.html
 check_panel_page portal.html
 
-echo "==> Staging surfaces + config"
+echo "==> Staging surfaces + engines + config"
 cp "$ROOT"/surfaces/*.surface.json "$STAGE/surfaces/"
 # The translations travel WITH the manifests they translate. A glob for
 # *.surface.json alone would ship a bundle whose consent prompts are English
@@ -60,6 +60,15 @@ cp "$ROOT"/surfaces/*.surface.json "$STAGE/surfaces/"
 if [[ -d "$ROOT/surfaces/i18n" ]]; then
   mkdir -p "$STAGE/surfaces/i18n"
   cp -a "$ROOT/surfaces/i18n/." "$STAGE/surfaces/i18n/"
+fi
+# Engine manifests travel for the same reason surfaces do: FileEngineCatalog reads
+# <bundle>/engines, so a release without them is a machine where "add an engine"
+# lists nothing and the panel looks broken rather than empty. This is the #49
+# shape — a feature that works in a checkout and has never existed on an installed
+# machine, with nothing failing loudly enough to notice.
+if [[ -d "$ROOT/engines" ]]; then
+  mkdir -p "$STAGE/engines"
+  cp "$ROOT"/engines/*.engine.json "$STAGE/engines/"
 fi
 cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
 # Local inference: the config names a model registry, and the registry names the

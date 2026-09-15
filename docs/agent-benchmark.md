@@ -339,3 +339,50 @@ something else and puts them in a spreadsheet.
 
 The CieloOS rerun needs the asking change deployed; the result above is from the
 build that was live.
+
+## T7 runs 2 and 3 — the asking change, measured twice
+
+**Run 2 (asking deployed): no change.** The agent tried harder — seven commands
+instead of four, varying the user-agent — and still ended on the repeat check with
+"I could not finish this."
+
+The prompt had been taught to ask when something is *missing that only the person
+can decide*. The model did not think anything was missing: it thought it was
+blocked by an obstacle it could work around, so it kept working around it. Worse,
+the loop's own dead ends still ended with a canned apology that threw away
+everything the run had learned.
+
+**The fix that followed from that.** The two paths where the loop gives up — the
+repeat check and the step limit — now spend one more model call asking for a
+question instead of printing an apology. And "blocked" was added to the prompt's
+reasons to ask: two or three failed attempts at the same thing with no genuinely
+different idea is a reason to stop and say so.
+
+**Run 3: it asked.**
+
+> I was trying to find where to buy a VSeed microcontroller in Saint Petersburg — I
+> checked the local ~/shared folder (nothing relevant there), confirmed Python and
+> openpyxl work, and verified the container has outbound internet access. What
+> stopped me: every search attempt against DuckDuckGo's HTML endpoint returned no
+> usable results [...] repeating the same query won't change that.
+>
+> To continue I need one thing from you — how should I get the shop data?
+> 1. Give me a specific site or API to query [...]
+> 2. Tell me if you have a proxy or a different search endpoint [...]
+> 3. Or, if you just want general guidance rather than live listings [...]
+
+Same shape as OpenClaw's T3 answer: what it found, what stopped it, one question,
+concrete options.
+
+### Where we are still behind
+
+OpenClaw worked out that **"VSeed microcontroller" is probably not a real
+product** and named VESC as the likely intended part. Ours did not; it treated the
+name as given and asked only about *how to search*. Knowing the premise is wrong
+is more valuable than knowing the search is blocked, and that gap is still open.
+
+| | run 1 | run 2 | run 3 | OpenClaw |
+|---|---|---|---|---|
+| fabricated | no | no | no | no |
+| ended by asking | no | no | **yes** | yes |
+| questioned the premise | no | no | no | **yes** |

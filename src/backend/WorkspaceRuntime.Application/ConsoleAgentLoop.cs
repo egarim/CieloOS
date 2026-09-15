@@ -200,8 +200,11 @@ public sealed class ConsoleAgentLoop
                 && (recent.Contains(text) || timesRun.GetValueOrDefault(text) >= RepeatCeiling))
             {
                 steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, "Stopped", "Repeated a command already run."));
-                return new ConsoleLoopResult(sessionId, goal, false,
-                    "Stopped: the agent repeated a command it had already run without making progress (its earlier result stands — check the home).", steps);
+                return await EndByAskingAsync(
+                    sessionId, goal, steps, brain, view.Screen, history, step, onStep,
+                    "You have repeated a command you already ran, so trying again will not help.",
+                    "Stopped: the agent repeated a command it had already run without making progress (its earlier result stands — check the home).",
+                    cancellationToken);
             }
 
             var result = await runtime.SubmitAsync(
@@ -233,6 +236,71 @@ public sealed class ConsoleAgentLoop
             }
         }
 
-        return new ConsoleLoopResult(sessionId, goal, false, $"Reached the step limit ({cap}) before finishing.", steps);
+        var lastScreen = steps.LastOrDefault()?.ScreenBefore ?? "";
+        return await EndByAskingAsync(
+            sessionId, goal, steps, brain, lastScreen, history, cap, onStep,
+            $"You have used all {cap} steps you were given.",
+            $"Reached the step limit ({cap}) before finishing.",
+            cancellationToken);
+    }
+
+    // A run that cannot continue still knows something the owner does not, and the
+    // whole point of #40 is that there is now somewhere to put it.
+    //
+    // Measured, which is why this exists: after the brain was taught to ask, T7 was
+    // rerun and still did not. The model did not think it was missing a DECISION —
+    // it thought it was blocked by a technical obstacle it could work around, and it
+    // tried seven variations of the same search before the repeat check stopped it.
+    // The canned "I could not finish this" that followed threw away everything it
+    // had learned on the way.
+    //
+    // So the loop asks for the question itself, on the two paths where it gives up.
+    // One extra model call, only ever on a failure, and if that call cannot produce
+    // a question the original stop reason still stands.
+    private async Task<ConsoleLoopResult> EndByAskingAsync(
+        string sessionId,
+        string goal,
+        List<ConsoleLoopStep> steps,
+        IConsoleAgentBrain brain,
+        string screen,
+        List<string> history,
+        int step,
+        Func<ConsoleLoopStep, Task>? onStep,
+        string why,
+        string fallbackStopReason,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var closing = await brain.DecideAsync(
+                $"{why} Do NOT try another command — none will be run. Write ONE question to your owner in "
+                + "\"question\": say what you were trying to do, what you actually found out on the way, what "
+                + "stopped you, and the single thing you need from them to continue. Offer concrete options if "
+                + "there are any. The original request was: {goal}",
+                screen, history, step, cancellationToken);
+
+            // Question, or a note the brain marked as FINAL. A note on a
+            // non-final action is "one line of reasoning about the next command" —
+            // reading that as a question to the owner would put "checking whether
+            // openpyxl is installed" where the question should be.
+            var question = !string.IsNullOrWhiteSpace(closing.Question) ? closing.Question
+                : closing.Done && !string.IsNullOrWhiteSpace(closing.Note) ? closing.Note
+                : null;
+
+            if (question is not null)
+            {
+                var askStep = new ConsoleLoopStep(step, screen, null, false, true, question, "Asked", AskedStopReason);
+                steps.Add(askStep);
+                if (onStep is not null) await onStep(askStep);
+                return new ConsoleLoopResult(sessionId, goal, false, AskedStopReason, steps, Asked: true);
+            }
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A provider that fails here must not turn a finished-but-stuck run into
+            // an error. The honest stop reason below is still true.
+        }
+
+        return new ConsoleLoopResult(sessionId, goal, false, fallbackStopReason, steps);
     }
 }
