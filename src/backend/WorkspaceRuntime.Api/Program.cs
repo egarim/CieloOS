@@ -190,6 +190,9 @@ builder.Services.AddSingleton<ITokenLedger>(sp => databaseProvider == "memory"
     ? new InMemoryTokenLedger()
     : new EfTokenLedger(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
 builder.Services.AddSingleton<ConsoleAgentLoop>();
+// Engine #1. Registered by interface so a second one is a registration, not a
+// rewrite of every endpoint that drives an agent (docs/agent-engines.md).
+builder.Services.AddSingleton<IAgentEngine, CieloConsoleEngine>();
 
 // Model providers, tagged by capability (chat / vision) and locality, resolved
 // through a layered registry: agent -> user -> OS (see docs/model-config.md).
@@ -1345,7 +1348,7 @@ app.MapGet("/api/sessions/{id}/browser/text", async (string id, HttpContext cont
 // brain (model or recipe) for the next action, and submits each keystroke batch
 // as a policy-checked, audited `console.type`. Gated on the session owner, like
 // observe; the per-keystroke ownership/policy checks still apply inside the loop.
-app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, IModelRegistry models, CancellationToken cancellationToken) =>
+app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest request, HttpContext context, IAgentEngine engine, ISessionBackend sessions, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var target = (await sessions.ListAsync(cancellationToken)).FirstOrDefault(session => session.Id == id);
@@ -1359,9 +1362,10 @@ app.MapPost("/api/sessions/{id}/agent-run", async (string id, AgentRunRequest re
     }
 
     var (userId, agentId) = ActingAgent(caller, request.AgentId, store);
-    var selection = brains.Resolve(store.GetAgent(agentId));
-    var result = await loop.RunAsync(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId, selection.Brain, cancellationToken,
-        model: BilledModel(selection.Provider, models));
+    var result = await engine.RunAsync(
+        new EngineRun(id, request.Goal ?? "", request.MaxSteps ?? 6, caller, userId, agentId),
+        onStep: null,
+        cancellationToken);
     events.Publish(new RuntimeEvent("state-changed", store.GetSpreadsheetRevision(SpreadsheetOwner(caller, store)), DateTimeOffset.UtcNow));
     return Results.Ok(result);
 });
@@ -1767,14 +1771,11 @@ app.MapGet("/v1/agent/models", () => Results.Ok(new
     data = new[] { new { id = "lunos-agent", @object = "model", created = 0, owned_by = "lunos" } }
 }));
 
-app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, ConsoleAgentLoop loop, IConsoleBrainRegistry brains, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, IModelRegistry models, CancellationToken cancellationToken) =>
+app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpContext context, IAgentEngine engine, ISessionBackend sessions, IHomeBrowser home, IRuntimeStore store, CancellationToken cancellationToken) =>
 {
     var caller = Caller(context);
     var (userId, agentId) = ActingAgent(caller, null, store);
     var agent = store.GetAgent(agentId);
-    var selection = brains.Resolve(agent);
-    var brain = selection.Brain;
-    var billed = BilledModel(selection.Provider, models);
     var messages = request.Messages ?? new List<AgentChatMessage>();
     var userMessage = messages.LastOrDefault(message => message.Role == "user")?.Content ?? "";
 
@@ -2002,7 +2003,8 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
             // Emit each command as the agent runs it, so a long turn shows progress
             // instead of a silent wait, then the answer itself.
             var typed = 0;
-            var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken,
+            var run = await engine.RunAsync(
+                new EngineRun(session.Id, goal, 8, caller, userId, agentId),
                 onStep: async step =>
                 {
                     if (step.Done || string.IsNullOrWhiteSpace(step.Text)) return;
@@ -2016,7 +2018,7 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
                     // to put here rather than in a shape of our own.
                     await SendAsync(Chunk(new { cielo_step = true, content = $"› `{step.Text}`\n" }, null));
                 },
-                model: billed);
+                cancellationToken);
 
             var reply = await ReplyOfAsync(run);
             RecordInThread(ThreadMessageRole.Agent, reply);
@@ -2036,7 +2038,7 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     }
     else
     {
-        var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken, model: billed);
+        var run = await engine.RunAsync(new EngineRun(session.Id, goal, 8, caller, userId, agentId), onStep: null, cancellationToken);
         var reply = await ReplyOfAsync(run);
 
         RecordInThread(ThreadMessageRole.Agent, reply);
@@ -2175,16 +2177,6 @@ static CookieOptions SessionCookieOptions(HttpContext context, DateTimeOffset ex
     Path = "/",
     Expires = expires
 };
-
-// What a run is about to be billed for. Null when the provider is not one the
-// registry knows (the recipe fallback, for instance), which is exactly when
-// there is nothing to bill.
-static ModelIdentity? BilledModel(string providerId, IModelRegistry models)
-{
-    var provider = models.Providers.FirstOrDefault(candidate =>
-        string.Equals(candidate.Id, providerId, StringComparison.OrdinalIgnoreCase));
-    return provider is null ? null : new ModelIdentity(provider.Id, provider.Model, provider.Locality);
-}
 
 // The image a profile really uses: profiles with their own toolchain keep their
 // own tags, while the default/office desk follows Sessions:Image (and the shared
