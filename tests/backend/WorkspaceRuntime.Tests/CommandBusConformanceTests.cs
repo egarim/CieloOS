@@ -29,6 +29,21 @@ public class CommandBusConformanceTests
                                        // machine is an ordinary policy-checked console.type, so the bus sees
                                        // all of it; this endpoint only decides what to ask the agent for.
         "/api/users",                  // add a teammate: control-plane identity creation, and now OWNER-only
+        "/api/projects",               // start a project, and the four below: records ABOUT work, written
+        "/api/projects/*/members",     // and read by people. Nothing in any workspace changes — a project
+        "/api/projects/*/tasks",       // holds no file, no volume and no path — and an agent cannot reach
+        "/api/projects/tasks/*/report",// any of these at all: the whole /api/projects prefix is human-only
+                                       // except one read, /api/projects/mine, which returns the agent's own
+                                       // owner's rows.
+                                       //
+                                       // The report route is the interesting one and it is deliberately NOT
+                                       // on the bus: only the ASSIGNEE may write it, not even the lead, so
+                                       // an agent writing it would be an agent speaking as its owner about
+                                       // work it may not have done. The day that should be possible it
+                                       // becomes a surface with a RequireApproval policy and an author
+                                       // derived from the caller — so the lead can see "reported by maria's
+                                       // agent" and never mistake it for Maria's word. That is a feature,
+                                       // not a wider allowlist.
         "/api/organizations",          // create an organization: control-plane, owner-only, and it touches
                                        // no workspace at all — an organization owns no files, no volume and
                                        // no session, it is a name and a membership key. Not on the bus

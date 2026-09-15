@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Bot, Folder, LayoutGrid, LogOut, Mail } from "lucide-react";
+import { Bot, ClipboardList, Folder, LogOut, Mail } from "lucide-react";
 import type { Whoami } from "../shared/api";
 import { LANGUAGES, useT, type Language } from "../shared/i18n";
 import { Button } from "./ui/button";
@@ -7,9 +7,9 @@ import { NavItem } from "./ui/nav-item";
 import { Chat } from "./views/Chat";
 import { Files } from "./views/Files";
 import { Messages } from "./views/Messages";
-import { Widgets } from "./views/Widgets";
+import { Projects } from "./views/Projects";
 
-type PortalPlace = "chat" | "files" | "messages" | "widgets";
+type PortalPlace = "chat" | "files" | "messages" | "projects";
 
 const PLACES: {
   id: PortalPlace;
@@ -20,7 +20,14 @@ const PLACES: {
   { id: "chat", labelKey: "portal.nav.chat", icon: Bot, View: Chat },
   { id: "files", labelKey: "portal.nav.files", icon: Folder, View: Files },
   { id: "messages", labelKey: "portal.nav.messages", icon: Mail, View: Messages },
-  { id: "widgets", labelKey: "portal.nav.widgets", icon: LayoutGrid, View: Widgets },
+  // Projects takes the fourth slot and Widgets moves INTO Chat, rendered above
+  // the composer. By its own file's account a widget is "a job you ask for
+  // often, kept as a button" — it is a chat shortcut, it lives in this
+  // browser's localStorage with no server-side home, and it belongs where the
+  // asking happens. Chat / Files / Messages / Projects is the better four for a
+  // machine where a team works. Nothing was deleted: Widgets.tsx keeps its
+  // logic and its test.
+  { id: "projects", labelKey: "portal.nav.projects", icon: ClipboardList, View: Projects },
 ];
 
 export function Shell({
@@ -114,10 +121,23 @@ export function Shell({
 
           env(safe-area-inset-bottom) keeps it clear of the iOS home indicator;
           without it the last row of targets sits under the gesture bar. */}
+      {/* A distinct accessible name from the sidebar nav above. Both were
+          labelled "Portal", so a screen reader announced two navigation landmarks
+          with the same name and no way to tell them apart — while only one of them
+          is ever on screen. */}
       <nav
-        aria-label={t("portal.navigation")}
-        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+        aria-label={t("portal.navigationBar")}
+        className="fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-200 bg-white/95 backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95"
+        // The column count is derived, not written as grid-cols-4. With the count
+        // hard-coded, a fifth place wrapped onto a second row sitting OVER the
+        // content — silently, on phones only. And it cannot be an interpolated
+        // `grid-cols-${n}` class either: Tailwind scans source text for class
+        // names, finds nothing for a computed one, and emits no rule at all, so
+        // the bar would collapse to a single column.
+        style={{
+          gridTemplateColumns: `repeat(${PLACES.length}, minmax(0, 1fr))`,
+          paddingBottom: "env(safe-area-inset-bottom)",
+        }}
       >
         {PLACES.map((place) => {
           const Icon = place.icon;

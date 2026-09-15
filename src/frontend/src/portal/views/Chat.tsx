@@ -13,6 +13,7 @@ import {
 } from "../../shared/api";
 import { useT } from "../../shared/i18n";
 import { Button } from "../ui/button";
+import { Widgets } from "./Widgets";
 
 // A conversation that survives the page.
 //
@@ -295,6 +296,12 @@ export function Chat({ whoami }: { whoami: Whoami }) {
             {error}
           </p>
         ) : null}
+
+        {/* Widgets live here now rather than in the nav. A widget is a job you
+            ask for often, kept as a button — a chat shortcut, stored in this
+            browser and nowhere else — so it belongs immediately above the place
+            where the asking happens. The fourth nav slot went to Projects. */}
+        <Widgets whoami={whoami} />
 
         <form onSubmit={send} className="mt-4 flex flex-wrap items-end gap-2">
           <label className="min-w-0 flex-1">

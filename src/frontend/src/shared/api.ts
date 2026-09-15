@@ -459,3 +459,76 @@ export const sendMessage = (slug: string, text: string) =>
     method: "POST",
     body: JSON.stringify({ text }),
   });
+
+// ---------------------------------------------------------------------------
+// Projects: work somebody handed you, and what you said about it.
+//
+// The server sends only what the caller may see, so the view decides its own
+// shape from the rows it got — you are the manager of a project when its lead is
+// you — and never from a role flag. A flag would be a second place the question
+// "what may this person do" is answered, and the two would eventually disagree.
+// ---------------------------------------------------------------------------
+
+export type TaskState = "Todo" | "Doing" | "Blocked" | "Done";
+
+export type ProjectTask = {
+  id: string;
+  title: string;
+  assignee: string;
+  state: TaskState;
+  note: string;
+  updatedAt: string;
+};
+
+export type Project = {
+  id: string;
+  name: string;
+  lead: string;
+  org: string;
+  createdAt: string;
+  members: string[];
+  tasks: ProjectTask[];
+};
+
+export type ProjectReport = {
+  id: string;
+  taskId: string;
+  author: string;
+  state: TaskState;
+  text: string;
+  createdAt: string;
+};
+
+export const listProjects = () => api<Project[]>("/api/projects");
+
+export const readProject = (id: string) => api<Project>(`/api/projects/${encodeURIComponent(id)}`);
+
+export const readProjectReports = (id: string) =>
+  api<ProjectReport[]>(`/api/projects/${encodeURIComponent(id)}/reports`);
+
+export const createProject = (name: string) =>
+  api<{ id: string; name: string }>("/api/projects", { method: "POST", body: JSON.stringify({ name }) });
+
+export const addProjectMember = (id: string, slug: string) =>
+  api(`/api/projects/${encodeURIComponent(id)}/members`, { method: "POST", body: JSON.stringify({ slug }) });
+
+export const removeProjectMember = (id: string, slug: string) =>
+  api(`/api/projects/${encodeURIComponent(id)}/members/${encodeURIComponent(slug)}`, { method: "DELETE" });
+
+export const assignTask = (id: string, title: string, assignee: string) =>
+  api<ProjectTask>(`/api/projects/${encodeURIComponent(id)}/tasks`, {
+    method: "POST",
+    body: JSON.stringify({ title, assignee }),
+  });
+
+// Only the assignee may call this — the server refuses anyone else, including the
+// lead. Progress is what the person doing the work says it is.
+export const reportTask = (taskId: string, state: TaskState, text: string) =>
+  api(`/api/projects/tasks/${encodeURIComponent(taskId)}/report`, {
+    method: "POST",
+    body: JSON.stringify({ state, text }),
+  });
+
+// Who the caller may see, which the server scopes to their own organization.
+export const listPeople = () =>
+  api<{ slug: string; displayName: string }[]>("/api/users");
