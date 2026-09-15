@@ -83,6 +83,14 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // What engines exist and whether they may be installed is an owner question.
+        // Unlike the model providers below, the READ is human-only too: the list is
+        // a menu of other agent harnesses, and an agent has no use for one.
+        if (path == "/api/engines")
+        {
+            return AccessLevel.HumanOnly;
+        }
+
         // Owner (human) actions: inviting a teammate, and changing model providers
         // or defaults. Reads (GET) of these stay AnyPrincipal.
         var isPost = string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase);

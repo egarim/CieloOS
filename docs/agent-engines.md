@@ -190,44 +190,56 @@ here should be planned as though it were.
 
 ## Order of work
 
-Step 1 of the first draft is done; it is the section above.
-
 1. ~~Spike.~~ **Done, affirmative.**
-2. ~~**`IAgentEngine` seam.**~~ **Done.** `IAgentEngine` + `EngineRun` in
-   Application, `CieloConsoleEngine` in Infrastructure, all three console call
-   sites converted; 352 backend tests pass. `DesktopAgentLoop` is deliberately not
-   converted - a desktop run resolves a second, vision brain under separate
-   consent, so it is its own conversion. The guard test says so out loud rather
-   than tolerating the one remaining direct call quietly.
-3. **MCP server over `ISurfaceRegistry`.** `tools/list` is nearly mechanical;
-   `tools/call` reuses the existing submit path. Key the audit on what we
-   dispatched, not on the name the engine used.
-4. **Return policy decisions immediately, and resume on the answer.** Refusal
-   carries the reason and the approval id; the owner answers in the portal; the
-   host starts the next turn. Closes #40 for every engine.
-5. **`ForeignProcessEngine`** plus an `openclaw` engine manifest: what to
-   install, how to invoke, which environment carries the two URLs.
-6. **The wizard, last.** See below.
-7. **Re-run the benchmark as a conformance suite over engines** rather than as a
-   rivalry, with bus coverage as a reported column.
+2. ~~`IAgentEngine` seam.~~ **Done.** `DesktopAgentLoop` deliberately not converted
+   (it resolves a second, vision brain under separate consent); the guard test says
+   so rather than tolerating the one remaining direct call quietly.
+3. ~~MCP server over `ISurfaceRegistry`.~~ **Done.** `/mcp`, streamable-http,
+   audit keyed on what we dispatched rather than the caller's spelling.
+4. ~~Asking.~~ **Done, and smaller than planned.** A run can end with a question,
+   and circling is noticed as circling. The planned `cielo.ask` surface was
+   dropped: a tool call must return immediately, so an ask-tool could only return
+   "asked, now stop" — identical to ending the turn with a question, which every
+   engine can already do.
+5. ~~`ForeignProcessEngine` + engine manifests + the host-pinned model endpoint.~~
+   **Done in code.** `SessionOrchestrator` does not yet create engine containers
+   with `--network=none` plus the mounted socket and forwarder, so the containment
+   is measured but not yet applied by the runtime. Nothing should be called sealed
+   until it is.
+6. **The wizard.** Backing data done (`GET /api/engines`, human-only, with
+   confinement and blockers); no UI yet. The shipped openclaw engine is
+   deliberately **not installable**, because nobody has recorded what 2026.9.4
+   should hash to.
+7. **Re-run the benchmark as a conformance suite over engines.** T7 has a
+   before (`agent-benchmark.md`); the after needs the asking change deployed.
 
-Steps 2-4 are worth doing on their own merits even if no foreign engine is ever
-installed: they are how our own agent learns to ask.
+## Bus coverage: withdrawn
 
-## Why the wizard comes last
+This document proposed reporting **bus coverage** — the share of an engine's
+actions that were policy-checked — and put it in the wizard and the benchmark.
 
-An "add an agent" wizard in the admin area is the right destination and the wrong
-starting point, for one reason: **a wizard that installs an engine we cannot
-govern ships something worse than no wizard**, because it looks supervised. The
-person who used it would reasonably assume the approvals and the audit trail
-cover the thing it just installed. Until step 4 exists, they would not.
+It cannot be computed, and proposing it was wrong. Everything an engine does
+through MCP is audited. Anything it does with the shell it still has inside its
+own container is not, and that invisible part is exactly the denominator. A
+percentage built on a denominator we do not have would be a confident number
+meaning nothing, which is worse than no number at all.
 
-When it is built, three things about it are not cosmetic:
+What the wizard says instead is true: the audit is complete for everything that
+came through the bus, and the container bounds what anything else could reach —
+it does not record it.
 
-- **It installs into the owner's session container, never the host.** Adding an
-  engine must not be a way to run `npm install` as `cielo` on the machine.
-- **Pinned versions and a recorded digest.** "Install the latest OpenClaw" from a
-  panel is a supply-chain decision made by whoever happens to click it.
-- **It shows bus coverage after the first run**, so the person can see how much of
-  what the engine did was actually policy-checked. An engine that keeps its own
-  shell is a legitimate choice; not knowing is not.
+## Why the wizard still comes last
+
+An "add an engine" wizard is the right destination and the wrong starting point:
+**a wizard that installs an engine we cannot govern ships something worse than no
+wizard**, because it looks supervised. Whoever used it would reasonably assume the
+approvals and the audit trail cover what it just installed.
+
+Three things about it are not cosmetic, and all three are enforced by
+`/api/engines` refusing to mark an engine installable without them:
+
+- **It installs into the owner's session container, never the host.**
+- **Pinned version with a recorded digest.** "Install the latest OpenClaw" from a
+  panel is a supply-chain decision made by whoever happened to click it.
+- **Its own tools are disabled**, or it acts outside the bus and the oversight
+  sentence above would be a lie.

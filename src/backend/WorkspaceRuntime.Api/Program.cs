@@ -193,6 +193,7 @@ builder.Services.AddSingleton<ConsoleAgentLoop>();
 // Engine #1. Registered by interface so a second one is a registration, not a
 // rewrite of every endpoint that drives an agent (docs/agent-engines.md).
 builder.Services.AddSingleton<IAgentEngine, CieloConsoleEngine>();
+builder.Services.AddSingleton<IEngineCatalog>(_ => new FileEngineCatalog(repositoryRoot));
 
 // Model providers, tagged by capability (chat / vision) and locality, resolved
 // through a layered registry: agent -> user -> OS (see docs/model-config.md).
@@ -1120,6 +1121,8 @@ MessageApi.Map(app);
 McpApi.Map(app);
 // ...and a model ONLY here: no key of its own, and the host picks the model.
 EngineModelApi.Map(app);
+// What the admin area needs to offer "add an engine".
+EngineApi.Map(app);
 
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {
