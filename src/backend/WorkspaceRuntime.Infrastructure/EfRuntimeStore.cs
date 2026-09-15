@@ -489,6 +489,120 @@ public sealed class EfRuntimeStore : IRuntimeStore
         context.SaveChanges();
     }
 
+    // Direct messages. Every one of these takes the CALLER's slug and filters on
+    // it. A conversation has exactly two readers, and passing the pair in from the
+    // endpoint would make "whose messages are these" a question the store answers
+    // by trusting its caller — which is how the audit log came to be readable by
+    // every agent token (#30).
+
+    public IReadOnlyList<Conversation> ListConversations(string mySlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var mine = context.DirectMessages
+            .AsNoTracking()
+            .Where(row => row.FromSlug == mySlug || row.ToSlug == mySlug)
+            .OrderByDescending(row => row.CreatedAtTicks)
+            .ToList();
+
+        var displayBySlug = context.Users.AsNoTracking()
+            .ToDictionary(user => user.Slug, user => user.DisplayName, StringComparer.Ordinal);
+
+        return mine
+            .GroupBy(row => row.FromSlug == mySlug ? row.ToSlug : row.FromSlug, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var newest = group.First();
+                return new Conversation(
+                    group.Key,
+                    displayBySlug.TryGetValue(group.Key, out var display) ? display : group.Key,
+                    newest.Text,
+                    newest.FromSlug,
+                    newest.CreatedAt,
+                    group.Count(row => row.ToSlug == mySlug && row.ReadAt is null));
+            })
+            .OrderByDescending(conversation => conversation.LastAt)
+            .ToList();
+    }
+
+    public IReadOnlyList<DirectMessage> ReadConversation(string mySlug, string withSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var key = ConversationKey.For(mySlug, withSlug);
+        return context.DirectMessages
+            .AsNoTracking()
+            // The key alone is not the check. It is derived from the two slugs, so
+            // it would match for anybody who could guess the pair; the caller must
+            // also actually be one of the two ends.
+            .Where(row => row.ConversationKey == key && (row.FromSlug == mySlug || row.ToSlug == mySlug))
+            .OrderBy(row => row.Sequence)
+            .Select(row => new DirectMessage(row.Id, row.FromSlug, row.ToSlug, row.Text, row.CreatedAt, row.ReadAt))
+            .ToList();
+    }
+
+    private static readonly object directMessageGate = new();
+
+    public DirectMessage SendDirectMessage(string fromSlug, string toSlug, string text)
+    {
+        // Same retry-and-lock shape as the thread messages: reading the count and
+        // appending must be one step, or two concurrent sends both become position
+        // N and the order they were sent in is gone.
+        const int attempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return SendDirectMessageOnce(fromSlug, toSlug, text);
+            }
+            catch (DbUpdateException) when (attempt < attempts)
+            {
+            }
+        }
+    }
+
+    private DirectMessage SendDirectMessageOnce(string fromSlug, string toSlug, string text)
+    {
+        lock (directMessageGate)
+        {
+            using var context = contextFactory.CreateDbContext();
+            var key = ConversationKey.For(fromSlug, toSlug);
+            var now = DateTimeOffset.UtcNow;
+            var sequence = context.DirectMessages.Count(row => row.ConversationKey == key) + 1L;
+            var row = new DirectMessageRow
+            {
+                Id = Guid.NewGuid(),
+                ConversationKey = key,
+                FromSlug = fromSlug,
+                ToSlug = toSlug,
+                Text = text,
+                CreatedAt = now,
+                CreatedAtTicks = now.UtcTicks,
+                Sequence = sequence,
+                ReadAt = null
+            };
+            context.DirectMessages.Add(row);
+            context.SaveChanges();
+            return new DirectMessage(row.Id, row.FromSlug, row.ToSlug, row.Text, row.CreatedAt, row.ReadAt);
+        }
+    }
+
+    public int MarkConversationRead(string mySlug, string withSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var key = ConversationKey.For(mySlug, withSlug);
+        // Only what was sent TO the caller. Marking your own outgoing messages read
+        // would make the other person's unread count depend on you opening the tab.
+        var unread = context.DirectMessages
+            .Where(row => row.ConversationKey == key && row.ToSlug == mySlug && row.ReadAt == null)
+            .ToList();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in unread)
+        {
+            row.ReadAt = now;
+        }
+        context.SaveChanges();
+        return unread.Count;
+    }
+
     public bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent)
     {
         using var context = contextFactory.CreateDbContext();

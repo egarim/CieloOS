@@ -130,6 +130,17 @@ public static class AccessPolicy
         {
             return AccessLevel.AnyPrincipal;
         }
+
+        // Messages are between PEOPLE. Every verb is HumanOnly, reads included:
+        // the directory names everyone on the machine, and a conversation is two
+        // people's private exchange. An agent token has no business in either, and
+        // there is no feature today that wants one there — when an agent should be
+        // able to send on its owner's behalf, that is a surface with an approval,
+        // not a widening of this.
+        if (path == "/api/messages" || path.StartsWith("/api/messages/", StringComparison.OrdinalIgnoreCase))
+        {
+            return AccessLevel.HumanOnly;
+        }
         return AccessLevel.AnyPrincipal;
     }
 }

@@ -103,6 +103,25 @@ public sealed class ThreadMessageRow
     public long Sequence { get; set; }
 }
 
+public sealed class DirectMessageRow
+{
+    public Guid Id { get; set; }
+    // Both slugs, ordered, so the two directions are one conversation.
+    public string ConversationKey { get; set; } = "";
+    public string FromSlug { get; set; } = "";
+    public string ToSlug { get; set; } = "";
+    public string Text { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    // Ticks alongside the timestamp: SQLite cannot order a DateTimeOffset in a
+    // query, the same lesson the usage ledger and the thread messages both learned.
+    public long CreatedAtTicks { get; set; }
+    // Position within the conversation. Timestamps are not enough — two messages
+    // in the same tick have no recoverable order, which is exactly the bug the
+    // thread messages had to be migrated to fix.
+    public long Sequence { get; set; }
+    public DateTimeOffset? ReadAt { get; set; }
+}
+
 public sealed class RuntimeDbContext : DbContext
 {
     public RuntimeDbContext(DbContextOptions<RuntimeDbContext> options) : base(options)
@@ -122,6 +141,7 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<ApiKeyRow> ApiKeys => Set<ApiKeyRow>();
     public DbSet<ThreadRow> Threads => Set<ThreadRow>();
     public DbSet<ThreadMessageRow> ThreadMessages => Set<ThreadMessageRow>();
+    public DbSet<DirectMessageRow> DirectMessages => Set<DirectMessageRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -153,6 +173,17 @@ public sealed class RuntimeDbContext : DbContext
         // order they arrived in is lost for good.
         modelBuilder.Entity<ThreadMessageRow>()
             .HasIndex(row => new { row.ThreadId, row.Sequence }).IsUnique();
+
+        modelBuilder.Entity<DirectMessageRow>().ToTable("runtime_direct_messages")
+            .HasIndex(row => row.ConversationKey);
+        // A position in a conversation belongs to exactly one message, for the same
+        // reason it does in a thread: two concurrent sends that read the same
+        // MAX(Sequence) would both persist and the order would be lost for good.
+        modelBuilder.Entity<DirectMessageRow>()
+            .HasIndex(row => new { row.ConversationKey, row.Sequence }).IsUnique();
+        // Unread counts are read on every page load, per recipient.
+        modelBuilder.Entity<DirectMessageRow>()
+            .HasIndex(row => new { row.ToSlug, row.ReadAt });
     }
 }
 

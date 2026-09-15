@@ -534,5 +534,14 @@
   "portal.chat.newThread": "New conversation",
   "portal.chat.threads": "Your conversations",
   "portal.chat.threadsError": "Could not load your conversations.",
-  "portal.chat.doing": "What Cielo is doing"
+  "portal.chat.doing": "What Cielo is doing",
+  "portal.messages.lead": "Pick someone to talk to. These messages are between you and them — Cielo cannot read them or send them.",
+  "portal.messages.everyoneElse": "Everyone else",
+  "portal.messages.nobody": "There is nobody else on this machine yet.",
+  "portal.messages.send": "Send",
+  "portal.messages.inputLabel": "Write a message",
+  "portal.messages.placeholder": "Write a message",
+  "portal.messages.youPrefix": "You: ",
+  "portal.messages.error": "Could not load your messages.",
+  "portal.messages.sendError": "That message was not sent. Try again."
 }

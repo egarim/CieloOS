@@ -148,3 +148,35 @@ public sealed record ThreadMessage(
 public sealed record ThreadWithMessages(
     Thread Thread,
     IReadOnlyList<ThreadMessage> Messages);
+
+// A message from one person on this machine to another.
+//
+// Deliberately NOT a Thread. A thread is delegated work — one owner and their
+// agents, scoped by Ownership.CanAccessHome. A direct message crosses exactly the
+// boundary that scoping exists to enforce, so it is a different thing with a
+// different rule: both ends are people, and only those two may read it.
+public sealed record DirectMessage(
+    Guid Id,
+    string FromSlug,
+    string ToSlug,
+    string Text,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ReadAt);
+
+// One row per person you have talked to, for the list beside the conversation.
+public sealed record Conversation(
+    string WithSlug,
+    string WithDisplay,
+    string LastText,
+    string LastFromSlug,
+    DateTimeOffset LastAt,
+    int Unread);
+
+// The pair key. Ordered so (alice, bob) and (bob, alice) are the SAME
+// conversation — without that, replying would start a second one and each person
+// would see half the exchange.
+public static class ConversationKey
+{
+    public static string For(string a, string b) =>
+        string.CompareOrdinal(a, b) <= 0 ? $"{a}|{b}" : $"{b}|{a}";
+}

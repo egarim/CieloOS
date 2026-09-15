@@ -534,5 +534,14 @@
   "portal.chat.newThread": "Nueva conversación",
   "portal.chat.threads": "Tus conversaciones",
   "portal.chat.threadsError": "No se pudieron cargar tus conversaciones.",
-  "portal.chat.doing": "Qué está haciendo Cielo"
+  "portal.chat.doing": "Qué está haciendo Cielo",
+  "portal.messages.lead": "Elige con quién hablar. Estos mensajes son entre esa persona y tú: Cielo no puede leerlos ni enviarlos.",
+  "portal.messages.everyoneElse": "Todos los demás",
+  "portal.messages.nobody": "Todavía no hay nadie más en este equipo.",
+  "portal.messages.send": "Enviar",
+  "portal.messages.inputLabel": "Escribe un mensaje",
+  "portal.messages.placeholder": "Escribe un mensaje",
+  "portal.messages.youPrefix": "Tú: ",
+  "portal.messages.error": "No se pudieron cargar tus mensajes.",
+  "portal.messages.sendError": "Ese mensaje no se envió. Inténtalo de nuevo."
 }

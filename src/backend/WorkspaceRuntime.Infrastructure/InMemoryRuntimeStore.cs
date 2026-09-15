@@ -15,6 +15,7 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly Dictionary<string, long> spreadsheetRevisions = new(StringComparer.Ordinal);
     private readonly List<WorkspaceRuntime.Domain.Thread> threads = new();
     private readonly List<(ThreadMessage Message, long Sequence)> threadMessages = new();
+    private readonly List<DirectMessage> directMessages = new();
 
     // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
     // unit-test fixtures) populated with the joche/yulia demo identities. A real,
@@ -169,6 +170,65 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
         }
 
         threads[index] = threads[index] with { State = state, LastActivityAt = DateTimeOffset.UtcNow };
+    }
+
+    public IReadOnlyList<Conversation> ListConversations(string mySlug)
+    {
+        var displayBySlug = users.ToDictionary(user => user.Slug, user => user.DisplayName, StringComparer.Ordinal);
+        return directMessages
+            .Where(message => message.FromSlug == mySlug || message.ToSlug == mySlug)
+            .GroupBy(message => message.FromSlug == mySlug ? message.ToSlug : message.FromSlug, StringComparer.Ordinal)
+            .Select(group =>
+            {
+                var newest = group.OrderByDescending(message => message.CreatedAt).First();
+                return new Conversation(
+                    group.Key,
+                    displayBySlug.TryGetValue(group.Key, out var display) ? display : group.Key,
+                    newest.Text,
+                    newest.FromSlug,
+                    newest.CreatedAt,
+                    group.Count(message => message.ToSlug == mySlug && message.ReadAt is null));
+            })
+            .OrderByDescending(conversation => conversation.LastAt)
+            .ToList();
+    }
+
+    public IReadOnlyList<DirectMessage> ReadConversation(string mySlug, string withSlug)
+    {
+        var key = ConversationKey.For(mySlug, withSlug);
+        return directMessages
+            .Where(message => ConversationKey.For(message.FromSlug, message.ToSlug) == key
+                && (message.FromSlug == mySlug || message.ToSlug == mySlug))
+            .ToList();
+    }
+
+    public DirectMessage SendDirectMessage(string fromSlug, string toSlug, string text)
+    {
+        lock (directMessages)
+        {
+            var message = new DirectMessage(Guid.NewGuid(), fromSlug, toSlug, text, DateTimeOffset.UtcNow, null);
+            directMessages.Add(message);
+            return message;
+        }
+    }
+
+    public int MarkConversationRead(string mySlug, string withSlug)
+    {
+        var key = ConversationKey.For(mySlug, withSlug);
+        var changed = 0;
+        for (var index = 0; index < directMessages.Count; index++)
+        {
+            var message = directMessages[index];
+            if (ConversationKey.For(message.FromSlug, message.ToSlug) == key
+                && message.ToSlug == mySlug
+                && message.ReadAt is null)
+            {
+                directMessages[index] = message with { ReadAt = DateTimeOffset.UtcNow };
+                changed++;
+            }
+        }
+
+        return changed;
     }
 
     public bool CreateOwner(PlatformUser user, Workspace workspace, AgentProfile agent)

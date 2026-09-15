@@ -534,5 +534,14 @@
   "portal.chat.newThread": "Новый разговор",
   "portal.chat.threads": "Ваши разговоры",
   "portal.chat.threadsError": "Не удалось загрузить ваши разговоры.",
-  "portal.chat.doing": "Что делает Cielo"
+  "portal.chat.doing": "Что делает Cielo",
+  "portal.messages.lead": "Выберите, с кем поговорить. Эти сообщения — только между вами двумя: Cielo не может ни прочитать, ни отправить их.",
+  "portal.messages.everyoneElse": "Остальные",
+  "portal.messages.nobody": "На этом компьютере пока больше никого нет.",
+  "portal.messages.send": "Отправить",
+  "portal.messages.inputLabel": "Написать сообщение",
+  "portal.messages.placeholder": "Написать сообщение",
+  "portal.messages.youPrefix": "Вы: ",
+  "portal.messages.error": "Не удалось загрузить сообщения.",
+  "portal.messages.sendError": "Сообщение не отправлено. Попробуйте ещё раз."
 }

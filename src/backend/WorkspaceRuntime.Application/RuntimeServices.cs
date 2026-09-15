@@ -60,6 +60,14 @@ public interface IRuntimeStore
     ThreadWithMessages? GetThread(Guid id);
     void SetThreadState(Guid id, ThreadStatus state);
 
+    // Direct messages between two people. Every read takes the caller's slug
+    // rather than trusting a parameter: a conversation has exactly two readers and
+    // the store is the last place that can still enforce it.
+    IReadOnlyList<Conversation> ListConversations(string mySlug);
+    IReadOnlyList<DirectMessage> ReadConversation(string mySlug, string withSlug);
+    DirectMessage SendDirectMessage(string fromSlug, string toSlug, string text);
+    int MarkConversationRead(string mySlug, string withSlug);
+
     // First-run ownership: create the first owner (+ their workspace and agent)
     // in one transaction. Returns false if an owner already exists — the
     // at-most-one-owner guard that makes a re-issued claim a no-op rather than a

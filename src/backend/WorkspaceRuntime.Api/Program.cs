@@ -1104,6 +1104,7 @@ app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, ID
 });
 
 ThreadApi.Map(app);
+MessageApi.Map(app);
 
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {

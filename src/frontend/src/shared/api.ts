@@ -414,3 +414,44 @@ export async function askAgentStreaming(
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// Messages: people talking to each other on this machine.
+//
+// Separate from threads on purpose. A thread is you and YOUR agent; these cross
+// between two people, which is the boundary thread scoping exists to enforce.
+
+export type Conversation = {
+  withSlug: string;
+  withDisplay: string;
+  lastText: string;
+  lastFromSlug: string;
+  lastAt: string;
+  unread: number;
+};
+
+export type Person = { slug: string; displayName: string };
+
+export type DirectMessage = {
+  id: string;
+  fromSlug: string;
+  toSlug: string;
+  text: string;
+  createdAt: string;
+  readAt: string | null;
+};
+
+export const listMessages = () =>
+  api<{ conversations: Conversation[]; people: Person[] }>("/api/messages");
+
+// Reading is what marks a conversation read, server-side. That is deliberate: a
+// separate "mark read" call is one the client can forget, and a client that
+// forgets leaves the other person looking permanently unread.
+export const readConversation = (slug: string) =>
+  api<{ withSlug: string; messages: DirectMessage[] }>(`/api/messages/${encodeURIComponent(slug)}`);
+
+export const sendMessage = (slug: string, text: string) =>
+  api<DirectMessage>(`/api/messages/${encodeURIComponent(slug)}`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
