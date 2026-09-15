@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Bot, ClipboardList, Folder, LogOut, Mail } from "lucide-react";
+import { Bot, ClipboardList, Folder, HomeIcon, LogOut, Mail } from "lucide-react";
 import type { Whoami } from "../shared/api";
 import { LANGUAGES, useT, type Language } from "../shared/i18n";
 import { Button } from "./ui/button";
@@ -8,15 +8,17 @@ import { Chat } from "./views/Chat";
 import { Files } from "./views/Files";
 import { Messages } from "./views/Messages";
 import { Projects } from "./views/Projects";
+import { Home } from "./views/Home";
 
-type PortalPlace = "chat" | "files" | "messages" | "projects";
+type PortalPlace = "home" | "chat" | "files" | "messages" | "projects";
 
 const PLACES: {
   id: PortalPlace;
   labelKey: string;
   icon: React.ComponentType<{ className?: string }>;
-  View: React.ComponentType<{ whoami: Whoami }>;
+  View: React.ComponentType<{ whoami: Whoami; onNavigate?: (place: PortalPlace) => void }>;
 }[] = [
+  { id: "home", labelKey: "portal.nav.home", icon: HomeIcon, View: Home },
   { id: "chat", labelKey: "portal.nav.chat", icon: Bot, View: Chat },
   { id: "files", labelKey: "portal.nav.files", icon: Folder, View: Files },
   { id: "messages", labelKey: "portal.nav.messages", icon: Mail, View: Messages },
@@ -42,7 +44,7 @@ export function Shell({
   onSignOut: () => void;
 }) {
   const t = useT();
-  const [active, setActive] = React.useState<PortalPlace>("chat");
+  const [active, setActive] = React.useState<PortalPlace>("home");
   const activePlace = PLACES.find((place) => place.id === active) ?? PLACES[0];
   const ActiveView = activePlace.View;
 
@@ -111,7 +113,7 @@ export function Shell({
         </nav>
 
         <main className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-4 md:p-6 dark:border-slate-800 dark:bg-slate-900">
-          <ActiveView whoami={whoami} />
+          <ActiveView whoami={whoami} onNavigate={setActive} />
         </main>
       </div>
 
