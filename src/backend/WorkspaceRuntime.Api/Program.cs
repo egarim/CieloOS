@@ -1963,6 +1963,16 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
 
     async Task<string> ReplyOfAsync(ConsoleLoopResult run)
     {
+        // A question IS the reply, and it goes back untouched. It is not checked
+        // for claimed files because it claims nothing — and a correction printed
+        // under a sensible question ("you mentioned report.xlsx, which is not
+        // there") is exactly the false correction #50's fix was tightened to stop.
+        if (run.Asked)
+        {
+            return run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note))?.Note?.Trim()
+                ?? "I need something from you before I can carry on, but I could not say what. Please ask me again.";
+        }
+
         var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
         if (finished?.Note is { } note && !string.IsNullOrWhiteSpace(note))
         {

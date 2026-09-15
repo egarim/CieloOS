@@ -2,10 +2,15 @@ using WorkspaceRuntime.Domain;
 
 namespace WorkspaceRuntime.Application;
 
-// The next thing the agent wants to do at the console: either it's done, or it
-// types some text (optionally pressing Enter). A brain decides this from the
+// The next thing the agent wants to do at the console: it's done, it types some
+// text (optionally pressing Enter), or it ASKS. A brain decides this from the
 // goal and the current screen.
-public sealed record ConsoleAgentAction(bool Done, string? Text, bool Submit, string? Note);
+//
+// Question is the third ending, and it is the one the OpenClaw benchmark said we
+// were missing: given something underspecified, our agent spent its whole step
+// budget guessing while OpenClaw stopped and asked. A run that ends in a question
+// is not a failed run — see docs/agent-benchmark.md, T3 and T5.
+public sealed record ConsoleAgentAction(bool Done, string? Text, bool Submit, string? Note, string? Question = null);
 
 // One recorded turn of the loop: what the screen showed, what the brain chose,
 // and how the policy bus decided on the resulting keystrokes.
@@ -24,7 +29,12 @@ public sealed record ConsoleLoopResult(
     string Goal,
     bool Completed,
     string StopReason,
-    IReadOnlyList<ConsoleLoopStep> Steps);
+    IReadOnlyList<ConsoleLoopStep> Steps,
+    // Ended by asking the owner something. Not Completed, but not a failure
+    // either, and the caller must not dress it up as one: the reply IS the
+    // question, and "I could not finish this" printed on top of a sensible
+    // question is how asking stops being worth doing.
+    bool Asked = false);
 
 // The pluggable brain. A deterministic recipe stands in for it today; a
 // model-backed brain (cloud or local) drops in behind the same seam without the
@@ -85,6 +95,16 @@ public sealed class ConsoleAgentLoop
 {
     private const int MaxStepCeiling = 20;
 
+    // How often the same command may run in ONE run before it counts as circling.
+    //
+    // This backs up `recent`, it does not replace it: recent still stops a
+    // near-immediate repeat (it holds the last two commands), and this catches the
+    // longer cycle recent cannot see. A three-command loop is therefore stopped on
+    // its second lap rather than running until the step budget is gone.
+    private const int RepeatCeiling = 2;
+
+    public const string AskedStopReason = "Asked the owner a question.";
+
     private readonly AgentRuntime runtime;
     private readonly IConsoleBackend console;
 
@@ -119,6 +139,11 @@ public sealed class ConsoleAgentLoop
         var steps = new List<ConsoleLoopStep>();
         var history = new List<string>();
         var recent = new List<string>();
+        // Every command this run has typed, and how often. `recent` only ever held
+        // the last two, so an immediate repeat was caught and a CYCLE was not: T5
+        // ran three distinct commands eight times and hit the step limit, which
+        // reads as "ran out of room" rather than "was going in circles".
+        var timesRun = new Dictionary<string, int>(StringComparer.Ordinal);
         var cap = Math.Clamp(maxSteps, 1, MaxStepCeiling);
 
         // The whole run bills to one acting pair, so the scope opens once and
@@ -146,6 +171,18 @@ public sealed class ConsoleAgentLoop
             }
 
             var action = await brain.DecideAsync(goal, view.Screen, history, step, cancellationToken);
+
+            // Asking is checked before Done, because a model that sets both means
+            // the more specific one. The step is marked Done so the reply path
+            // picks the question up as the reply — which it is.
+            if (!string.IsNullOrWhiteSpace(action.Question))
+            {
+                var askStep = new ConsoleLoopStep(step, view.Screen, null, false, true, action.Question, "Asked", AskedStopReason);
+                steps.Add(askStep);
+                if (onStep is not null) await onStep(askStep);
+                return new ConsoleLoopResult(sessionId, goal, false, AskedStopReason, steps, Asked: true);
+            }
+
             if (action.Done)
             {
                 var doneStep = new ConsoleLoopStep(step, view.Screen, null, false, true, action.Note, "Done", "Agent reported the goal complete.");
@@ -159,7 +196,8 @@ public sealed class ConsoleAgentLoop
             // Anti-loop: if the model repeats a command it already ran, it isn't
             // making progress — stop instead of burning the whole step budget
             // (and looking like a crash). The result of the earlier run stands.
-            if (!string.IsNullOrWhiteSpace(text) && recent.Contains(text))
+            if (!string.IsNullOrWhiteSpace(text)
+                && (recent.Contains(text) || timesRun.GetValueOrDefault(text) >= RepeatCeiling))
             {
                 steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, "Stopped", "Repeated a command already run."));
                 return new ConsoleLoopResult(sessionId, goal, false,
@@ -180,6 +218,7 @@ public sealed class ConsoleAgentLoop
             steps.Add(typedStep);
             if (onStep is not null) await onStep(typedStep);
             history.Add($"typed: {text}");
+            timesRun[text] = timesRun.GetValueOrDefault(text) + 1;
             recent.Add(text);
             if (recent.Count > 2)
             {

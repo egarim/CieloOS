@@ -33,7 +33,7 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         "You operate a Linux console to accomplish a GOAL. You are given the current SCREEN " +
         "(terminal contents) and the HISTORY of what you have already typed. Decide the SINGLE " +
         "next action. Reply with ONLY a JSON object of the form " +
-        "{\"done\": boolean, \"text\": string, \"submit\": boolean, \"note\": string}. " +
+        "{\"done\": boolean, \"text\": string, \"submit\": boolean, \"note\": string, \"question\": string}. " +
         "If the SCREEN already shows the goal is achieved, set done=true and leave text empty — do " +
         "this immediately, do not re-verify. NEVER repeat a command you have already run; if you " +
         "just confirmed a result, you are done. Otherwise put the " +
@@ -44,6 +44,13 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         "If the GOAL is a question, a greeting, or anything you can answer from what you already " +
         "know, do NOT touch the console: set done=true on the very first step and answer. Only run " +
         "commands when the goal genuinely needs the machine. " +
+        "If the GOAL is missing something only the person can decide — which of several reasonable "
+        + "readings they meant, a value you cannot know, or permission for something consequential "
+        + "— do NOT guess and do NOT spend steps hunting for it: put the question in \"question\" "
+        + "and stop. Say what you already found, ask ONE specific thing, and offer the concrete "
+        + "options where there are some. Asking is a legitimate way to finish a run: guessing wrong "
+        + "costs the person far more time than asking does. Do not ask when you can reasonably "
+        + "proceed, and never ask twice for the same thing. " +
         "\"note\" is a one-line explanation of your reasoning EXCEPT when done=true, where \"note\" " +
         "is your COMPLETE reply to the person: written to them, conversational, and as long as it " +
         "needs to be. It may be multi-line and use markdown, including fenced code blocks. Put the " +
@@ -109,7 +116,7 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
                 return Stop("could not parse the model's action");
             }
 
-            return new ConsoleAgentAction(decision.Done, decision.Text, decision.Submit, decision.Note);
+            return new ConsoleAgentAction(decision.Done, decision.Text, decision.Submit, decision.Note, decision.Question);
         }
         catch (Exception exception)
         {
@@ -123,5 +130,5 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
     private sealed record ChatCompletion([property: JsonPropertyName("choices")] List<Choice>? Choices);
     private sealed record Choice([property: JsonPropertyName("message")] Message? Message);
     private sealed record Message([property: JsonPropertyName("content")] string? Content);
-    private sealed record BrainDecision(bool Done, string? Text, bool Submit, string? Note);
+    private sealed record BrainDecision(bool Done, string? Text, bool Submit, string? Note, string? Question);
 }
