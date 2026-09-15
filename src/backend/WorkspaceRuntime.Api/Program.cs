@@ -933,14 +933,31 @@ app.MapGet("/api/users", (HttpContext context, IRuntimeStore store) =>
 
 // The organizations on this machine. Human-only to read (a menu of who else exists
 // is not something an agent needs), owner-only to add.
-app.MapGet("/api/organizations", (IRuntimeStore store) => Results.Ok(store.Organizations.Select(organization => new
+app.MapGet("/api/organizations", (HttpContext context, IRuntimeStore store) =>
 {
-    organization.Id,
-    organization.Slug,
-    organization.DisplayName,
-    organization.CreatedAt,
-    people = store.Users.Count(user => string.Equals(user.OrgSlug, organization.Slug, StringComparison.Ordinal))
-})));
+    // Scoped to the caller, not just gated by principal kind.
+    //
+    // This returned EVERY organization to any signed-in human, which tells a person
+    // in one organization that the others exist and how many people are in them.
+    // The store-wide-read guard did not catch it because its collection list is
+    // hard-coded and had no entry for Organizations — so the check that exists for
+    // exactly this ran, passed, and looked at nothing.
+    var caller = Caller(context);
+    var self = store.Users.FirstOrDefault(user => string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal));
+    var visible = self is null
+        ? Enumerable.Empty<Organization>()
+        : store.Organizations.Where(organization =>
+            self.IsMachineOwner || string.Equals(organization.Slug, self.OrgSlug, StringComparison.Ordinal));
+
+    return Results.Ok(visible.Select(organization => new
+    {
+        organization.Id,
+        organization.Slug,
+        organization.DisplayName,
+        organization.CreatedAt,
+        people = store.Users.Count(user => string.Equals(user.OrgSlug, organization.Slug, StringComparison.Ordinal))
+    }));
+});
 
 app.MapPost("/api/organizations", (CreateOrganizationRequest? request, HttpContext context, IRuntimeStore store) =>
 {
@@ -1232,6 +1249,8 @@ McpApi.Map(app);
 EngineModelApi.Map(app);
 // What the admin area needs to offer "add an engine".
 EngineApi.Map(app);
+// Work people hand to each other. Records, never files.
+ProjectApi.Map(app);
 
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {

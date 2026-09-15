@@ -28,7 +28,19 @@ public class CommandBusConformanceTests
                                        // chat message instead of a goal field. Every action it takes on the
                                        // machine is an ordinary policy-checked console.type, so the bus sees
                                        // all of it; this endpoint only decides what to ask the agent for.
-        "/api/users",                  // add a teammate: control-plane identity creation, human-only
+        "/api/users",                  // add a teammate: control-plane identity creation, and now OWNER-only
+        "/api/organizations",          // create an organization: control-plane, owner-only, and it touches
+                                       // no workspace at all — an organization owns no files, no volume and
+                                       // no session, it is a name and a membership key. Not on the bus
+                                       // because it is not an agent's to do in any form: an agent that could
+                                       // create an organization could create a place to put people.
+        "/api/users/*/organization",   // move a person between organizations: owner-only, and it changes
+                                       // exactly one column. Their slug, home volume, token file, audit
+                                       // history and spreadsheet are all keyed on the slug and none of them
+                                       // move — which is why this is a control-plane edit and not a
+                                       // workspace mutation. It is audited (user.organization) because it
+                                       // changes who can see them and the slug it is keyed on does not
+                                       // change, so nothing else would record that anything happened.
         "/api/messages/*",             // message another person: human-to-human, HumanOnly on every verb
                                        // including reads, and nothing in a workspace changes. It is not on
                                        // the bus because nothing here is an agent's to do — the agent

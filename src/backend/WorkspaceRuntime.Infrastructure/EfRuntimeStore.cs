@@ -732,6 +732,270 @@ public sealed class EfRuntimeStore : IRuntimeStore
         return true;
     }
 
+    // ---- projects ----------------------------------------------------------
+    //
+    // Reads take the caller's slug FIRST and filter on it inside the same query.
+    // The route has already asked ProjectRules; this is the second, structural
+    // check that does not depend on the route having remembered to. "The key alone
+    // is not the check" — the comment on ReadConversation, and the same reasoning:
+    // a project id is guessable, and membership is the secret.
+
+    // Serialises Sequence allocation, the same way direct messages do. Reading
+    // MAX(Sequence) and appending is not one step, and the unique index turns the
+    // race into a crash rather than into lost ordering.
+    private static readonly object projectGate = new();
+
+    public IReadOnlyList<ProjectDetail> ListProjectsFor(string mySlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var mine = context.ProjectMembers.AsNoTracking()
+            .Where(row => row.MemberSlug == mySlug)
+            .Select(row => row.ProjectId)
+            .ToHashSet();
+
+        var projects = context.Projects.AsNoTracking()
+            .Where(row => row.LeadSlug == mySlug || mine.Contains(row.Id))
+            .OrderByDescending(row => row.CreatedAtTicks)
+            .ToList();
+
+        return projects.Select(row => Detail(context, row)).ToList();
+    }
+
+    public ProjectDetail? ReadProject(string mySlug, Guid projectId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Projects.AsNoTracking().SingleOrDefault(project => project.Id == projectId);
+        if (row is null)
+        {
+            return null;
+        }
+
+        var isMember = row.LeadSlug == mySlug
+            || context.ProjectMembers.AsNoTracking().Any(member => member.ProjectId == projectId && member.MemberSlug == mySlug);
+        return isMember ? Detail(context, row) : null;
+    }
+
+    public IReadOnlyList<ProjectReport> ReadReports(string mySlug, Guid projectId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var isMember = context.Projects.AsNoTracking().Any(project => project.Id == projectId && project.LeadSlug == mySlug)
+            || context.ProjectMembers.AsNoTracking().Any(member => member.ProjectId == projectId && member.MemberSlug == mySlug);
+        if (!isMember)
+        {
+            return Array.Empty<ProjectReport>();
+        }
+
+        var taskIds = context.ProjectTasks.AsNoTracking()
+            .Where(task => task.ProjectId == projectId)
+            .Select(task => task.Id)
+            .ToHashSet();
+
+        return context.ProjectReports.AsNoTracking()
+            .Where(report => taskIds.Contains(report.TaskId))
+            .OrderBy(report => report.CreatedAtTicks)
+            .Select(report => ToReport(report))
+            .ToList();
+    }
+
+    public Project CreateProject(string leadSlug, string orgSlug, string name)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var now = DateTimeOffset.UtcNow;
+        var row = new ProjectRow
+        {
+            Id = Guid.NewGuid(),
+            OrgSlug = orgSlug,
+            LeadSlug = leadSlug,
+            Name = name,
+            CreatedAt = now,
+            CreatedAtTicks = now.UtcTicks,
+        };
+        context.Projects.Add(row);
+        // The lead is a member of their own project, so every read is one rule
+        // rather than "member, or lead, or..." repeated at each call site.
+        context.ProjectMembers.Add(new ProjectMemberRow
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = row.Id,
+            MemberSlug = leadSlug,
+            AddedAt = now,
+            AddedAtTicks = now.UtcTicks,
+        });
+        context.SaveChanges();
+        return ToProject(row);
+    }
+
+    public bool AddProjectMember(Guid projectId, string memberSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        if (context.ProjectMembers.Any(member => member.ProjectId == projectId && member.MemberSlug == memberSlug))
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        context.ProjectMembers.Add(new ProjectMemberRow
+        {
+            Id = Guid.NewGuid(),
+            ProjectId = projectId,
+            MemberSlug = memberSlug,
+            AddedAt = now,
+            AddedAtTicks = now.UtcTicks,
+        });
+        context.SaveChanges();
+        return true;
+    }
+
+    public bool RemoveProjectMember(Guid projectId, string memberSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.ProjectMembers
+            .SingleOrDefault(member => member.ProjectId == projectId && member.MemberSlug == memberSlug);
+        if (row is null)
+        {
+            return false;
+        }
+
+        // Their tasks stay, and so does the trail of what they reported. Removing
+        // somebody removes their ACCESS, not the record of the work — a project
+        // whose history disappears when a person leaves is not a record.
+        context.ProjectMembers.Remove(row);
+        context.SaveChanges();
+        return true;
+    }
+
+    public ProjectTask? AddTask(Guid projectId, string assigneeSlug, string title)
+    {
+        lock (projectGate)
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                using var context = contextFactory.CreateDbContext();
+                if (!context.Projects.Any(project => project.Id == projectId))
+                {
+                    return null;
+                }
+
+                var next = context.ProjectTasks.Where(task => task.ProjectId == projectId)
+                    .Select(task => (long?)task.Sequence).Max() ?? 0;
+                var now = DateTimeOffset.UtcNow;
+                var row = new ProjectTaskRow
+                {
+                    Id = Guid.NewGuid(),
+                    ProjectId = projectId,
+                    AssigneeSlug = assigneeSlug,
+                    Title = title,
+                    State = nameof(TaskState.Todo),
+                    Note = "",
+                    UpdatedAt = now,
+                    UpdatedAtTicks = now.UtcTicks,
+                    Sequence = next + 1,
+                };
+                context.ProjectTasks.Add(row);
+                try
+                {
+                    context.SaveChanges();
+                    return ToTask(row);
+                }
+                catch (DbUpdateException)
+                {
+                    // The unique (ProjectId, Sequence) index fired: another append
+                    // took this position between the read and the write. Read again.
+                }
+            }
+
+            return null;
+        }
+    }
+
+    public ProjectTask? FindTask(Guid taskId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.ProjectTasks.AsNoTracking().SingleOrDefault(task => task.Id == taskId);
+        return row is null ? null : ToTask(row);
+    }
+
+    public ProjectReport? Report(string assigneeSlug, Guid taskId, TaskState state, string text)
+    {
+        lock (projectGate)
+        {
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                using var context = contextFactory.CreateDbContext();
+                var task = context.ProjectTasks.SingleOrDefault(candidate => candidate.Id == taskId);
+                // Re-filtered on the author here as well as checked by the route:
+                // this is the write that decides whose word the trail records.
+                if (task is null || task.AssigneeSlug != assigneeSlug)
+                {
+                    return null;
+                }
+
+                var next = context.ProjectReports.Where(report => report.TaskId == taskId)
+                    .Select(report => (long?)report.Sequence).Max() ?? 0;
+                var now = DateTimeOffset.UtcNow;
+                var row = new ProjectReportRow
+                {
+                    Id = Guid.NewGuid(),
+                    TaskId = taskId,
+                    AuthorSlug = assigneeSlug,
+                    State = state.ToString(),
+                    Text = text,
+                    CreatedAt = now,
+                    CreatedAtTicks = now.UtcTicks,
+                    Sequence = next + 1,
+                };
+                context.ProjectReports.Add(row);
+
+                task.State = state.ToString();
+                task.Note = text;
+                task.UpdatedAt = now;
+                task.UpdatedAtTicks = now.UtcTicks;
+
+                try
+                {
+                    context.SaveChanges();
+                    return ToReport(row);
+                }
+                catch (DbUpdateException)
+                {
+                }
+            }
+
+            return null;
+        }
+    }
+
+    private static ProjectDetail Detail(RuntimeDbContext context, ProjectRow row)
+    {
+        var members = context.ProjectMembers.AsNoTracking()
+            .Where(member => member.ProjectId == row.Id)
+            .OrderBy(member => member.AddedAtTicks)
+            .Select(member => new ProjectMember(member.Id, member.ProjectId, member.MemberSlug, member.AddedAt))
+            .ToList();
+        var tasks = context.ProjectTasks.AsNoTracking()
+            .Where(task => task.ProjectId == row.Id)
+            .OrderBy(task => task.Sequence)
+            .ToList()
+            .Select(ToTask)
+            .ToList();
+        return new ProjectDetail(ToProject(row), members, tasks);
+    }
+
+    private static Project ToProject(ProjectRow row) =>
+        new(row.Id, row.OrgSlug, row.LeadSlug, row.Name, row.CreatedAt);
+
+    private static ProjectTask ToTask(ProjectTaskRow row) =>
+        new(row.Id, row.ProjectId, row.AssigneeSlug, row.Title, ParseState(row.State), row.Note, row.UpdatedAt, row.Sequence);
+
+    private static ProjectReport ToReport(ProjectReportRow row) =>
+        new(row.Id, row.TaskId, row.AuthorSlug, ParseState(row.State), row.Text, row.CreatedAt, row.Sequence);
+
+    // Stored as a string so a fifth state costs a label and no migration. An
+    // unrecognised one reads as Todo rather than throwing: a row written by a newer
+    // build must not make an older one unable to show the board at all.
+    private static TaskState ParseState(string value) =>
+        Enum.TryParse<TaskState>(value, ignoreCase: true, out var parsed) ? parsed : TaskState.Todo;
+
     private static SpreadsheetRow EnsureSpreadsheetForOwner(RuntimeDbContext context, string ownerSlug, out bool created)
     {
         var existing = context.Spreadsheets.SingleOrDefault(sheet => sheet.OwnerSlug == ownerSlug);

@@ -17,6 +17,11 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly List<(ThreadMessage Message, long Sequence)> threadMessages = new();
     private readonly List<DirectMessage> directMessages = new();
     private readonly List<Organization> organizations = new();
+    private readonly List<Project> projects = new();
+    private readonly List<ProjectMember> projectMembers = new();
+    private readonly List<ProjectTask> projectTasks = new();
+    private readonly List<ProjectReport> projectReports = new();
+    private readonly object projectGate = new();
 
     // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
     // unit-test fixtures) populated with the joche/yulia demo identities. A real,
@@ -63,6 +68,162 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
         organizations.Add(organization);
         return true;
     }
+
+    // ---- projects ----------------------------------------------------------
+    //
+    // The same shape as EfRuntimeStore, method for method, because this store is a
+    // SHIPPING configuration (Database:Provider=memory) and not a test fixture. A
+    // filter written carefully in one store and loosely in the other is a real hole
+    // in a real mode — and the one that drifts is always the one nobody demos.
+    //
+    // Reads take the caller's slug FIRST and filter on it here as well as at the
+    // route: a project id is guessable, and membership is the secret.
+
+    public IReadOnlyList<ProjectDetail> ListProjectsFor(string mySlug)
+    {
+        lock (projectGate)
+        {
+            return projects
+                .Where(project => Ordinal(project.LeadSlug, mySlug)
+                    || projectMembers.Any(member => member.ProjectId == project.Id && Ordinal(member.MemberSlug, mySlug)))
+                .OrderByDescending(project => project.CreatedAt)
+                .Select(Detail)
+                .ToList();
+        }
+    }
+
+    public ProjectDetail? ReadProject(string mySlug, Guid projectId)
+    {
+        lock (projectGate)
+        {
+            var project = projects.FirstOrDefault(candidate => candidate.Id == projectId);
+            if (project is null)
+            {
+                return null;
+            }
+
+            var isMember = Ordinal(project.LeadSlug, mySlug)
+                || projectMembers.Any(member => member.ProjectId == projectId && Ordinal(member.MemberSlug, mySlug));
+            return isMember ? Detail(project) : null;
+        }
+    }
+
+    public IReadOnlyList<ProjectReport> ReadReports(string mySlug, Guid projectId)
+    {
+        lock (projectGate)
+        {
+            if (ReadProject(mySlug, projectId) is null)
+            {
+                return Array.Empty<ProjectReport>();
+            }
+
+            var taskIds = projectTasks.Where(task => task.ProjectId == projectId).Select(task => task.Id).ToHashSet();
+            return projectReports
+                .Where(report => taskIds.Contains(report.TaskId))
+                .OrderBy(report => report.CreatedAt)
+                .ThenBy(report => report.Sequence)
+                .ToList();
+        }
+    }
+
+    public Project CreateProject(string leadSlug, string orgSlug, string name)
+    {
+        lock (projectGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            var project = new Project(Guid.NewGuid(), orgSlug, leadSlug, name, now);
+            projects.Add(project);
+            // The lead is a member of their own project, so every read is one rule.
+            projectMembers.Add(new ProjectMember(Guid.NewGuid(), project.Id, leadSlug, now));
+            return project;
+        }
+    }
+
+    public bool AddProjectMember(Guid projectId, string memberSlug)
+    {
+        lock (projectGate)
+        {
+            if (projectMembers.Any(member => member.ProjectId == projectId && Ordinal(member.MemberSlug, memberSlug)))
+            {
+                return false;
+            }
+
+            projectMembers.Add(new ProjectMember(Guid.NewGuid(), projectId, memberSlug, DateTimeOffset.UtcNow));
+            return true;
+        }
+    }
+
+    public bool RemoveProjectMember(Guid projectId, string memberSlug)
+    {
+        lock (projectGate)
+        {
+            // RemoveAll, not Remove: if a duplicate ever existed, removing one row
+            // and leaving another would leave the person the access they were just
+            // removed from. The unique index makes that impossible in EF; this makes
+            // it impossible here.
+            return projectMembers.RemoveAll(member =>
+                member.ProjectId == projectId && Ordinal(member.MemberSlug, memberSlug)) > 0;
+        }
+    }
+
+    public ProjectTask? AddTask(Guid projectId, string assigneeSlug, string title)
+    {
+        lock (projectGate)
+        {
+            if (!projects.Any(project => project.Id == projectId))
+            {
+                return null;
+            }
+
+            var next = projectTasks.Where(task => task.ProjectId == projectId)
+                .Select(task => task.Sequence)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            var task = new ProjectTask(
+                Guid.NewGuid(), projectId, assigneeSlug, title, TaskState.Todo, "", DateTimeOffset.UtcNow, next);
+            projectTasks.Add(task);
+            return task;
+        }
+    }
+
+    public ProjectTask? FindTask(Guid taskId)
+    {
+        lock (projectGate)
+        {
+            return projectTasks.FirstOrDefault(task => task.Id == taskId);
+        }
+    }
+
+    public ProjectReport? Report(string assigneeSlug, Guid taskId, TaskState state, string text)
+    {
+        lock (projectGate)
+        {
+            var index = projectTasks.FindIndex(task => task.Id == taskId);
+            // Re-filtered on the author here as well as at the route: this is the
+            // write that decides whose word the trail records.
+            if (index < 0 || !Ordinal(projectTasks[index].AssigneeSlug, assigneeSlug))
+            {
+                return null;
+            }
+
+            var next = projectReports.Where(report => report.TaskId == taskId)
+                .Select(report => report.Sequence)
+                .DefaultIfEmpty(0)
+                .Max() + 1;
+            var now = DateTimeOffset.UtcNow;
+            var report = new ProjectReport(Guid.NewGuid(), taskId, assigneeSlug, state, text, now, next);
+            projectReports.Add(report);
+            projectTasks[index] = projectTasks[index] with { State = state, Note = text, UpdatedAt = now };
+            return report;
+        }
+    }
+
+    private ProjectDetail Detail(Project project) => new(
+        project,
+        projectMembers.Where(member => member.ProjectId == project.Id).OrderBy(member => member.AddedAt).ToList(),
+        projectTasks.Where(task => task.ProjectId == project.Id).OrderBy(task => task.Sequence).ToList());
+
+    private static bool Ordinal(string one, string other) => string.Equals(one, other, StringComparison.Ordinal);
 
     public Organization? FindOrganization(string slug) =>
         organizations.FirstOrDefault(organization => string.Equals(organization.Slug, slug, StringComparison.Ordinal));

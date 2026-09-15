@@ -89,6 +89,28 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // What an AGENT may know about its owner's project work: this one exact
+        // path, and nothing else under the prefix. Listed FIRST so the prefix rule
+        // below cannot accidentally swallow it, and kept to an exact match so
+        // /api/projects/mine/anything is not also open.
+        //
+        // Delete these four lines and an agent has no project access at all.
+        if (path == "/api/projects/mine")
+        {
+            return AccessLevel.AnyPrincipal;
+        }
+
+        // Everything else about projects, on EVERY verb including reads. A rule for
+        // the whole prefix rather than a list of routes, because the fall-through at
+        // the end of this function is AnyPrincipal: a project route added in six
+        // months would otherwise be agent-writable by omission, and nothing would
+        // fail to say so.
+        if (path == "/api/projects"
+            || path.StartsWith("/api/projects/", StringComparison.Ordinal))
+        {
+            return AccessLevel.HumanOnly;
+        }
+
         // Creating people and organizations is the machine owner's alone.
         //
         // This was HumanOnly, which meant any signed-in person could invite another

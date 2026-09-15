@@ -102,6 +102,27 @@ public interface IRuntimeStore
     // where they were minted. Anything that read the organization back out of the
     // prefix would be wrong here — which is the point of never doing that.
     bool SetUserOrganization(string userSlug, string orgSlug);
+
+    // Projects.
+    //
+    // Every READ takes the caller's slug FIRST and re-filters on it inside the same
+    // query — copying ReadConversation, whose comment is "the key alone is not the
+    // check". A project id is guessable and membership is the secret, so an id
+    // alone must never be enough, exactly as a conversation key alone was not.
+    //
+    // The store re-filters; it does NOT re-implement the policy. ProjectRules is
+    // the policy and the route calls it. A check written in both places is a check
+    // that will one day disagree with itself, and the in-memory store is a shipping
+    // configuration, so "disagree" means a real hole in a real mode.
+    IReadOnlyList<ProjectDetail> ListProjectsFor(string mySlug);
+    ProjectDetail? ReadProject(string mySlug, Guid projectId);
+    IReadOnlyList<ProjectReport> ReadReports(string mySlug, Guid projectId);
+    Project CreateProject(string leadSlug, string orgSlug, string name);
+    bool AddProjectMember(Guid projectId, string memberSlug);
+    bool RemoveProjectMember(Guid projectId, string memberSlug);
+    ProjectTask? AddTask(Guid projectId, string assigneeSlug, string title);
+    ProjectTask? FindTask(Guid taskId);
+    ProjectReport? Report(string assigneeSlug, Guid taskId, TaskState state, string text);
 }
 
 public sealed record SubmitToolRequestDto(Guid UserId, Guid AgentId, string ToolName, string Operation, Dictionary<string, string> Arguments);

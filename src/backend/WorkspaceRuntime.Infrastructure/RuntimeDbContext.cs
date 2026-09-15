@@ -157,6 +157,58 @@ public sealed class DirectMessageRow
     public DateTimeOffset? ReadAt { get; set; }
 }
 
+public sealed class ProjectRow
+{
+    public Guid Id { get; set; }
+    // `required` for the same reason UserRow.OrgSlug is, and it matters more here:
+    // this is the FIRST clause of the read predicate, so a project that silently
+    // defaulted to "" would belong to whichever organization "" happens to be.
+    public required string OrgSlug { get; set; }
+    public string LeadSlug { get; set; } = "";
+    public string Name { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+}
+
+public sealed class ProjectMemberRow
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    // A USER slug, never an agent's. An agent slug here would be a second identity
+    // for one person, and would assign work to something that by design cannot
+    // report on it.
+    public string MemberSlug { get; set; } = "";
+    public DateTimeOffset AddedAt { get; set; }
+    public long AddedAtTicks { get; set; }
+}
+
+public sealed class ProjectTaskRow
+{
+    public Guid Id { get; set; }
+    public Guid ProjectId { get; set; }
+    public string AssigneeSlug { get; set; } = "";
+    public string Title { get; set; } = "";
+    // The newest report's state and text, denormalised so a board is one query.
+    // The trail in runtime_project_reports is the record; this is the summary.
+    public string State { get; set; } = "Todo";
+    public string Note { get; set; } = "";
+    public DateTimeOffset UpdatedAt { get; set; }
+    public long UpdatedAtTicks { get; set; }
+    public long Sequence { get; set; }
+}
+
+public sealed class ProjectReportRow
+{
+    public Guid Id { get; set; }
+    public Guid TaskId { get; set; }
+    public string AuthorSlug { get; set; } = "";
+    public string State { get; set; } = "";
+    public string Text { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+    public long Sequence { get; set; }
+}
+
 public sealed class RuntimeDbContext : DbContext
 {
     public RuntimeDbContext(DbContextOptions<RuntimeDbContext> options) : base(options)
@@ -178,6 +230,10 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<ThreadRow> Threads => Set<ThreadRow>();
     public DbSet<ThreadMessageRow> ThreadMessages => Set<ThreadMessageRow>();
     public DbSet<DirectMessageRow> DirectMessages => Set<DirectMessageRow>();
+    public DbSet<ProjectRow> Projects => Set<ProjectRow>();
+    public DbSet<ProjectMemberRow> ProjectMembers => Set<ProjectMemberRow>();
+    public DbSet<ProjectTaskRow> ProjectTasks => Set<ProjectTaskRow>();
+    public DbSet<ProjectReportRow> ProjectReports => Set<ProjectReportRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -191,6 +247,36 @@ public sealed class RuntimeDbContext : DbContext
         modelBuilder.Entity<UserRow>().ToTable("runtime_users");
         // Every "who else is in my organization" read filters on this.
         modelBuilder.Entity<UserRow>().HasIndex(row => row.OrgSlug);
+
+        modelBuilder.Entity<ProjectRow>().ToTable("runtime_projects");
+        modelBuilder.Entity<ProjectRow>().HasIndex(row => row.OrgSlug);
+        modelBuilder.Entity<ProjectRow>().HasIndex(row => row.LeadSlug);
+
+        modelBuilder.Entity<ProjectMemberRow>().ToTable("runtime_project_members");
+        // "Which projects am I in" — the hot lookup behind /api/projects.
+        modelBuilder.Entity<ProjectMemberRow>().HasIndex(row => row.MemberSlug);
+        // One membership per person per project. A duplicate would mean somebody is
+        // in a project twice: they appear twice in the member list, and REMOVING
+        // them deletes one row and leaves the other standing, so the person keeps
+        // the access they were just removed from. This is the index that makes
+        // revocation actually revoke.
+        modelBuilder.Entity<ProjectMemberRow>()
+            .HasIndex(row => new { row.ProjectId, row.MemberSlug }).IsUnique();
+
+        modelBuilder.Entity<ProjectTaskRow>().ToTable("runtime_project_tasks");
+        modelBuilder.Entity<ProjectTaskRow>().HasIndex(row => row.ProjectId);
+        modelBuilder.Entity<ProjectTaskRow>().HasIndex(row => row.AssigneeSlug);
+        // A position in a project belongs to exactly one task. Without this, two
+        // concurrent appends read the same MAX(Sequence) and both persist, and the
+        // order they happened in is gone — the same bug the thread messages had to
+        // be migrated to fix.
+        modelBuilder.Entity<ProjectTaskRow>()
+            .HasIndex(row => new { row.ProjectId, row.Sequence }).IsUnique();
+
+        modelBuilder.Entity<ProjectReportRow>().ToTable("runtime_project_reports");
+        modelBuilder.Entity<ProjectReportRow>().HasIndex(row => row.TaskId);
+        modelBuilder.Entity<ProjectReportRow>()
+            .HasIndex(row => new { row.TaskId, row.Sequence }).IsUnique();
         modelBuilder.Entity<WorkspaceRow>().ToTable("runtime_workspaces");
         modelBuilder.Entity<AgentRow>().ToTable("runtime_agents");
         modelBuilder.Entity<ApprovalRow>().ToTable("runtime_approvals");

@@ -62,6 +62,43 @@ public sealed record PlatformUser(
     string DeskProfile = "office",
     string Language = "en");
 
+// A project: records about work, never a place where work is stored.
+//
+// No path, no volume, no file. A deliverable is named inside a report's text and
+// lives in whoever made it's own shared folder — which is what keeps "Yulia can
+// see the project" from ever becoming "Yulia can see her teammate's home".
+public sealed record Project(Guid Id, string OrgSlug, string LeadSlug, string Name, DateTimeOffset CreatedAt);
+
+public sealed record ProjectMember(Guid Id, Guid ProjectId, string MemberSlug, DateTimeOffset AddedAt);
+
+public enum TaskState
+{
+    Todo,
+    Doing,
+    Blocked,
+    Done
+}
+
+// State and Note denormalise the newest report so a list view is one query.
+public sealed record ProjectTask(
+    Guid Id, Guid ProjectId, string AssigneeSlug, string Title,
+    TaskState State, string Note, DateTimeOffset UpdatedAt, long Sequence);
+
+// The trail, append-only.
+//
+// It exists because progress here is what the member REPORTS. If a report
+// overwrote the last one, the lead would have a state and no history, and the only
+// other place that history could live is the audit trail — which is a record of
+// what someone's agent did inside their own home, and is deliberately not widened
+// for this. An append-only table gives a real record of what was SAID without one
+// row of audit visibility changing.
+public sealed record ProjectReport(
+    Guid Id, Guid TaskId, string AuthorSlug, TaskState State, string Text,
+    DateTimeOffset CreatedAt, long Sequence);
+
+public sealed record ProjectDetail(
+    Project Project, IReadOnlyList<ProjectMember> Members, IReadOnlyList<ProjectTask> Tasks);
+
 // An organization on this machine. A name and a slug, and nothing else — it owns
 // no files, no volume and no session. Membership lives on PlatformUser.OrgSlug.
 public sealed record Organization(Guid Id, string Slug, string DisplayName, DateTimeOffset CreatedAt);
