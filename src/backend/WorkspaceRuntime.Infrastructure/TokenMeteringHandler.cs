@@ -1,4 +1,3 @@
-using System.Text;
 using System.Text.Json;
 using WorkspaceRuntime.Application;
 
@@ -36,18 +35,21 @@ public sealed class TokenMeteringHandler : DelegatingHandler
 
         try
         {
-            // The body has to be read here and put back, because the caller has
-            // not read it yet. Buffering a chat completion is cheap; getting the
-            // accounting wrong is not.
+            // Buffer FIRST, then read. Buffered content can be read again, so the
+            // caller still gets its body and nothing has to be rebuilt.
+            //
+            // This used to read the stream and substitute a fresh StringContent.
+            // That works when the read succeeds and is a trap when it does not: a
+            // slow provider whose read is cancelled leaves the stream consumed and
+            // the replacement never assigned, and the catch below swallows it. The
+            // caller then reads a corpse and the agent reports
+            //
+            //     model error: The stream was already consumed. It cannot be read again.
+            //
+            // which is a failure the ACCOUNTING caused, in the handler whose comment
+            // promises it will never break the call it is measuring.
+            await response.Content.LoadIntoBufferAsync(cancellationToken);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            var headers = response.Content.Headers;
-            var replacement = new StringContent(body, Encoding.UTF8);
-            foreach (var header in headers)
-            {
-                replacement.Headers.Remove(header.Key);
-                replacement.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-            response.Content = replacement;
 
             if (TryReadUsage(body, out var prompt, out var completion))
             {
@@ -66,8 +68,11 @@ public sealed class TokenMeteringHandler : DelegatingHandler
         }
         catch
         {
-            // Accounting must never break the call it is measuring: a provider
-            // that answers in an unexpected shape costs us a record, not a reply.
+            // Accounting must never break the call it is measuring: a provider that
+            // answers in an unexpected shape costs us a record, not a reply. That is
+            // only true because the body is buffered before it is read — swallowing
+            // an exception here after consuming the stream would hand the caller a
+            // response it cannot read, which is breaking the call, quietly.
         }
 
         return response;

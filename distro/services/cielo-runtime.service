@@ -15,6 +15,23 @@ RestartSec=3
 # Sessions are rootless podman containers the runtime shells out to; that needs
 # the service user's runtime dir. install.sh enables linger for `cielo` (so
 # /run/user/<uid> exists) and writes XDG_RUNTIME_DIR into the EnvironmentFile.
+#
+# KillMode=process, and this line is load-bearing (#52).
+#
+# The default is control-group: on stop, systemd SIGTERMs EVERY process in the
+# service's cgroup. The containers podman starts live in that cgroup, so stopping
+# the runtime killed every session on the machine — and did it silently, because
+# each container exits 0 like any clean shutdown. --restart=unless-stopped does
+# not save them either: podman sees an ordinary stop, not a failure.
+#
+# Every upgrade therefore destroyed every live session. A person whose agent was
+# mid-task lost it, and the next request failed with "can only create exec
+# sessions on running containers", which reads like a podman fault rather than
+# the restart that actually caused it.
+#
+# With process, systemd signals only the runtime. Sessions outlive it, which is
+# the point of a session.
+KillMode=process
 
 [Install]
 WantedBy=multi-user.target

@@ -284,10 +284,50 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
             }
         }
 
+        // "podman run" returning 0 means the container was CREATED, not that anything
+        // inside it is ready. A console is usable only once an exec can attach, and
+        // the caller's very next act is an exec — so reporting success before then is
+        // reporting something we have not checked (#52).
+        //
+        // It failed in exactly that gap: create said "Started agent-console", the
+        // portal saw a running session, sent the person's message, and the runtime
+        // answered "can only create exec sessions on running containers". From the
+        // person's side the agent simply failed, for no stated reason.
+        if (isConsole && !await ConsoleIsReadyAsync(name, cancellationToken))
+        {
+            return new ToolExecutionResult(false,
+                $"The console session '{id}' started but did not become usable. Try again; if it keeps happening, "
+                + $"'podman logs {name}' will say why.", null);
+        }
+
         var port = await ReadViewportPortAsync(name, containerPort, cancellationToken);
         var portText = port is null ? "pending" : port.Value.ToString();
         var kind = isConsole ? "console" : "desktop";
         return new ToolExecutionResult(true, $"Started {profile} {kind} '{id}' (viewport 127.0.0.1:{portText}).", null);
+    }
+
+    // Ready means an exec actually works, which is the thing the caller is about to
+    // do. Not "is the container running" — it was running in the failing case, and
+    // the exec still could not attach.
+    //
+    // Bounded and short: this sits in the path of a person waiting for their agent,
+    // so a session that will not come up must fail quickly rather than hang.
+    private async Task<bool> ConsoleIsReadyAsync(string name, CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            var probe = await RunPodmanAsync(
+                new[] { "exec", name, "tmux", "has-session", "-t", options.ConsoleTmuxSession },
+                cancellationToken);
+            if (probe.ExitCode == 0)
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(400), cancellationToken);
+        }
+
+        return false;
     }
 
     // Inhabiting does not change the container; it is the governed, audited act
