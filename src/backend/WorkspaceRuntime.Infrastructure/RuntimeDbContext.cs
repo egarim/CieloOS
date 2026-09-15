@@ -2,6 +2,20 @@ using Microsoft.EntityFrameworkCore;
 
 namespace WorkspaceRuntime.Infrastructure;
 
+public sealed class OrganizationRow
+{
+    public Guid Id { get; set; }
+    // The minting prefix and the membership key. Lowercase, short: a user slug is
+    // composed as "<org>-<person>" and the whole thing has to stay inside the
+    // 40-character budget a podman object name and a session id share.
+    public string Slug { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public DateTimeOffset CreatedAt { get; set; }
+    // SQLite cannot order by a DateTimeOffset, so anything ordered by time carries
+    // its own ticks. Same pattern as every other timestamped row here.
+    public long CreatedTicks { get; set; }
+}
+
 public sealed class UserRow
 {
     public Guid Id { get; set; }
@@ -15,6 +29,27 @@ public sealed class UserRow
     // BCP-47. Defaulted so every user created before languages existed reads as
     // English rather than as unset.
     public string Language { get; set; } = "en";
+
+    // Which organization this person is in. `required` and NOT defaulted, unlike
+    // every other column here, because the two sites that write this row —
+    // EfRuntimeStore.AddUser and CreateOwner — build it field by field with an
+    // object initializer. A new column with a default is a column that silently
+    // goes missing at a site somebody forgot to update, and a missing OrgSlug does
+    // not leave the user in no organization: it puts them in whichever one ""
+    // happens to be, which is the founder's. `required` makes the omission a
+    // compile error instead.
+    //
+    // The SQL column still carries NOT NULL DEFAULT '' so the ALTER works on a
+    // database that already has rows in it; that default is for the migration, and
+    // the migration backfills it with a real organization slug.
+    public required string OrgSlug { get; set; }
+
+    // The one person who may create organizations and users. A real column because
+    // the old answer was SetupService.OwnerSlug(), which returns null the moment a
+    // machine has more than one user — so on any machine with a teammate on it,
+    // "who owns this box" had no answer at all.
+    public required bool IsMachineOwner { get; set; }
+
     // Empty until a password is set. Existing installs upgrade with no password:
     // they can still sign in with their identity token, and are asked to set one.
     public string PasswordHash { get; set; } = "";
@@ -128,6 +163,7 @@ public sealed class RuntimeDbContext : DbContext
     {
     }
 
+    public DbSet<OrganizationRow> Organizations => Set<OrganizationRow>();
     public DbSet<UserRow> Users => Set<UserRow>();
     public DbSet<WorkspaceRow> Workspaces => Set<WorkspaceRow>();
     public DbSet<AgentRow> Agents => Set<AgentRow>();
@@ -145,7 +181,16 @@ public sealed class RuntimeDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // One row per organization slug. A duplicate would mean two organizations
+        // minting users into the same prefix — so acme-maria in one and acme-maria
+        // in the other would be the SAME person, one home, one token, and the
+        // second creation would fail on the user slug with a message about a name
+        // being taken rather than about the organization.
+        modelBuilder.Entity<OrganizationRow>().ToTable("runtime_organizations")
+            .HasIndex(row => row.Slug).IsUnique();
         modelBuilder.Entity<UserRow>().ToTable("runtime_users");
+        // Every "who else is in my organization" read filters on this.
+        modelBuilder.Entity<UserRow>().HasIndex(row => row.OrgSlug);
         modelBuilder.Entity<WorkspaceRow>().ToTable("runtime_workspaces");
         modelBuilder.Entity<AgentRow>().ToTable("runtime_agents");
         modelBuilder.Entity<ApprovalRow>().ToTable("runtime_approvals");

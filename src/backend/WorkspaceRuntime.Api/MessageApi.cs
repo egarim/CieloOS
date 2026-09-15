@@ -37,14 +37,20 @@ public static class MessageApi
 
     public static void Map(WebApplication app)
     {
-        // Who you have talked to, plus who you could: every other person on the
-        // machine, and your own agent. The agent belongs in this list because it
-        // starts conversations with you — when a job you were not watching finishes,
-        // this is where you find out — and a reply has to go somewhere.
+        // Who you have talked to, plus who you could: every other person IN YOUR
+        // ORGANIZATION, and your own agent. The agent belongs in this list because
+        // it starts conversations with you — when a job you were not watching
+        // finishes, this is where you find out — and a reply has to go somewhere.
+        //
+        // The organization filter has to match MayConverseWith exactly. A directory
+        // that lists someone you cannot then message is a worse bug than either
+        // half alone: it tells you the person exists and then refuses, which is the
+        // enumeration the constant-404 refusal exists to prevent.
         app.MapGet("/api/messages", (HttpContext context, IRuntimeStore store) =>
         {
             var caller = Caller(context);
-            var people = store.Users
+            var self = store.Users.FirstOrDefault(user => string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal));
+            var people = (self is null ? Enumerable.Empty<PlatformUser>() : OrganizationRules.Visible(self, store.Users))
                 .Where(user => !string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal))
                 .Select(user => new { Slug = user.Slug, DisplayName = user.DisplayName, IsAgent = false })
                 .Concat(store.Agents

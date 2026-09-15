@@ -79,6 +79,29 @@ public interface IRuntimeStore
     // stable identity keys — a collision would break token auth and home volumes).
     // Callers serialize concurrent adds (see ISetupService).
     bool AddUser(PlatformUser user, Workspace workspace, AgentProfile agent);
+
+    // Organizations. Deliberately thin: an organization owns no files, no volume
+    // and no session — it is a name, a slug, and the thing PlatformUser.OrgSlug
+    // points at. All the isolation it buys comes from the slug prefix it mints and
+    // from one column, not from anything stored here.
+    IReadOnlyList<Organization> Organizations { get; }
+
+    // False if the slug is already taken. Two organizations sharing a slug would
+    // mint users into the same prefix, so acme-maria in one and acme-maria in the
+    // other would be the SAME person: one home, one token.
+    bool AddOrganization(Organization organization);
+
+    Organization? FindOrganization(string slug);
+
+    // Move a person to another organization. Possible precisely BECAUSE the prefix
+    // is only a minting rule: their slug, home volume, token file, audit history and
+    // spreadsheet are all keyed on the slug and none of them move. What changes is
+    // one column, and therefore who they can see and be seen by.
+    //
+    // Their slug keeps the old prefix, which is cosmetic and is the honest record of
+    // where they were minted. Anything that read the organization back out of the
+    // prefix would be wrong here — which is the point of never doing that.
+    bool SetUserOrganization(string userSlug, string orgSlug);
 }
 
 public sealed record SubmitToolRequestDto(Guid UserId, Guid AgentId, string ToolName, string Operation, Dictionary<string, string> Arguments);

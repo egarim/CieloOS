@@ -70,7 +70,11 @@ public sealed class DirectMessageTests : IDisposable
         var b = store.Users[1].Slug;
         var outsider = "outsider";
         store.AddUser(
-            new PlatformUser(Guid.NewGuid(), "Outsider", "outsider@example.com", outsider, "office", "en"),
+            // In the SAME organization as the other two, deliberately: this test is about
+            // a third party being unable to read someone else's conversation, and an
+            // outsider in another organization would pass for the wrong reason.
+            new PlatformUser(Guid.NewGuid(), "Outsider", "outsider@example.com", outsider,
+                Organizations.FoundingSlug, IsMachineOwner: false, "office", "en"),
             new Workspace(Guid.NewGuid(), Guid.NewGuid(), "Outsider"),
             new AgentProfile(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Outsider agent", "", new HashSet<string>(), $"{outsider}-agent"));
 

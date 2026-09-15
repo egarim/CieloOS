@@ -9,9 +9,16 @@ namespace WorkspaceRuntime.Application;
 public static class MessageRules
 {
     /// <summary>
-    ///   a person  may talk to any other PERSON on the machine, and to agents they own
+    ///   a person  may talk to any other person IN THEIR OWN ORGANIZATION, and to agents they own
     ///   an agent  may talk to the human that owns it, and to nobody else at all
     /// </summary>
+    /// <remarks>
+    ///   The organization clause is new, and until it existed this said "any other
+    ///   PERSON on the machine" — which was right on a machine that held one team
+    ///   and is a cross-organization leak on a machine that holds two. It is the
+    ///   kind of rule that does not break when the world changes underneath it; it
+    ///   just quietly starts meaning something else.
+    /// </remarks>
     /// <remarks>
     ///   Every refusal is the same refusal. The caller answers 404 with one constant
     ///   body for all of them, so a slug cannot be used to discover who exists.
@@ -36,9 +43,15 @@ public static class MessageRules
                 && string.Equals(owner, slug, StringComparison.Ordinal);
         }
 
-        if (store.Users.Any(user => string.Equals(user.Slug, slug, StringComparison.Ordinal)))
+        var self = store.Users.FirstOrDefault(user => string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal));
+        var them = store.Users.FirstOrDefault(user => string.Equals(user.Slug, slug, StringComparison.Ordinal));
+        if (self is not null && them is not null)
         {
-            return true;
+            // The same predicate the people directory uses, so the two cannot
+            // disagree. By the column — never by the slug prefix: someone moved
+            // between organizations keeps the prefix they were minted with, and the
+            // people who predate organizations have no prefix at all.
+            return OrganizationRules.MaySee(self, them);
         }
 
         // Your own agent, so what it tells you is a conversation you can answer

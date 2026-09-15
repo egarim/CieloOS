@@ -29,7 +29,11 @@ public class EngineApiTests
         // target for anything" — which was true through one door and false
         // through another.
         Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/api/users", "GET"));
-        Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/api/users", "POST"));
+
+        // Creating a person is stronger than human-only: it puts somebody on the
+        // MACHINE, with a home volume and a token, and with organizations it also
+        // decides which organization they can see.
+        Assert.Equal(AccessLevel.OwnerOnly, AccessPolicy.Required("/api/users", "POST"));
     }
 
     [Fact]

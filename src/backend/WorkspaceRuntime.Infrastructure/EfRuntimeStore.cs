@@ -98,12 +98,24 @@ public sealed class EfRuntimeStore : IRuntimeStore
         PlatformUser? seededFirstUser = null;
         if (seedDemo && !context.Users.Any())
         {
+            // The demo population needs an organization for the same reason real
+            // users do: OrgSlug is not optional, and a seed that left it dangling
+            // would be a seed whose users are in an organization that does not
+            // exist.
+            context.Organizations.Add(new OrganizationRow
+            {
+                Id = Guid.Parse("44444444-4444-4444-4444-444444444441"),
+                Slug = Application.Organizations.FoundingSlug,
+                DisplayName = "Main",
+                CreatedAt = DateTimeOffset.UtcNow,
+                CreatedTicks = DateTimeOffset.UtcNow.UtcTicks,
+            });
             AgentProfile? firstAgent = null;
             foreach (var (user, workspace, agent) in RuntimeSeed.People())
             {
                 seededFirstUser ??= user;
                 firstAgent ??= agent;
-                context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile, Language = user.Language });
+                context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, OrgSlug = user.OrgSlug, IsMachineOwner = user.IsMachineOwner, DeskProfile = user.DeskProfile, Language = user.Language });
                 context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
                 context.Agents.Add(ToAgentRow(agent));
             }
@@ -164,7 +176,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         get
         {
             using var context = contextFactory.CreateDbContext();
-            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.DeskProfile, row.Language)).ToList();
+            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language)).ToList();
         }
     }
 
@@ -247,7 +259,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
     {
         using var context = contextFactory.CreateDbContext();
         var row = context.Users.AsNoTracking().Single(user => user.Id == id);
-        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.DeskProfile, row.Language);
+        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language);
     }
 
     public AgentProfile GetAgent(Guid id)
@@ -626,7 +638,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return false;
         }
 
-        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile, Language = user.Language });
+        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, OrgSlug = user.OrgSlug, IsMachineOwner = user.IsMachineOwner, DeskProfile = user.DeskProfile, Language = user.Language });
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "owner.claim", AuditOutcome.Success, $"Claimed owner '{user.Slug}'.")));
@@ -643,11 +655,79 @@ public sealed class EfRuntimeStore : IRuntimeStore
             return false;
         }
 
-        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, DeskProfile = user.DeskProfile, Language = user.Language });
+        context.Users.Add(new UserRow { Id = user.Id, DisplayName = user.DisplayName, Email = user.Email, Slug = user.Slug, OrgSlug = user.OrgSlug, IsMachineOwner = user.IsMachineOwner, DeskProfile = user.DeskProfile, Language = user.Language });
         context.Workspaces.Add(new WorkspaceRow { Id = workspace.Id, OwnerUserId = workspace.OwnerUserId, Name = workspace.Name });
         context.Agents.Add(ToAgentRow(agent));
         context.AuditEvents.Add(ToRow(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, agent.Id, "user.add", AuditOutcome.Success, $"Added user '{user.Slug}'.")));
         EnsureSpreadsheetForOwner(context, user.Slug, out _);
+        context.SaveChanges();
+        return true;
+    }
+
+    public IReadOnlyList<Organization> Organizations
+    {
+        get
+        {
+            using var context = contextFactory.CreateDbContext();
+            return context.Organizations.AsNoTracking()
+                .OrderBy(row => row.CreatedTicks)
+                .Select(row => new Organization(row.Id, row.Slug, row.DisplayName, row.CreatedAt))
+                .ToList();
+        }
+    }
+
+    public bool AddOrganization(Organization organization)
+    {
+        using var context = contextFactory.CreateDbContext();
+        // Re-checked inside the inserting context rather than trusted from the
+        // caller, the same way CreateOwner re-checks at-most-one-owner. A duplicate
+        // slug would mint two organizations' users into one prefix.
+        if (context.Organizations.Any(row => row.Slug == organization.Slug))
+        {
+            return false;
+        }
+
+        context.Organizations.Add(new OrganizationRow
+        {
+            Id = organization.Id,
+            Slug = organization.Slug,
+            DisplayName = organization.DisplayName,
+            CreatedAt = organization.CreatedAt,
+            CreatedTicks = organization.CreatedAt.UtcTicks,
+        });
+        context.SaveChanges();
+        return true;
+    }
+
+    public Organization? FindOrganization(string slug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Organizations.AsNoTracking().SingleOrDefault(candidate => candidate.Slug == slug);
+        return row is null ? null : new Organization(row.Id, row.Slug, row.DisplayName, row.CreatedAt);
+    }
+
+    public bool SetUserOrganization(string userSlug, string orgSlug)
+    {
+        using var context = contextFactory.CreateDbContext();
+        if (!context.Organizations.Any(row => row.Slug == orgSlug))
+        {
+            return false;
+        }
+
+        var user = context.Users.SingleOrDefault(row => row.Slug == userSlug);
+        if (user is null)
+        {
+            return false;
+        }
+
+        // Audited, because it changes who can see this person and who they can see,
+        // and the slug — which is what every other trail is keyed on — does not
+        // change, so nothing else would record that anything happened.
+        var from = user.OrgSlug;
+        user.OrgSlug = orgSlug;
+        context.AuditEvents.Add(ToRow(new AuditEvent(
+            Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, null, "user.organization",
+            AuditOutcome.Success, $"Moved '{userSlug}' from '{from}' to '{orgSlug}'.")));
         context.SaveChanges();
         return true;
     }

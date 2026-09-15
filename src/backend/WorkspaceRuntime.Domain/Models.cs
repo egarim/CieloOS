@@ -32,7 +32,39 @@ public enum AuditOutcome
 // the agent's prompt so it answers in their language. A browser setting reaches
 // only the first of those. BCP-47, defaulted so every user created before this
 // existed reads as English rather than as unset.
-public sealed record PlatformUser(Guid Id, string DisplayName, string Email, string Slug, string DeskProfile = "office", string Language = "en");
+// OrgSlug is the organization this person belongs to, and it is the ONLY authority
+// on that. New users are minted with it as a prefix — acme-maria, nova-maria — so
+// two organizations can each have a Maria without one byte of the slug machinery
+// changing: `acme-maria != nova-maria` is a string comparison Ownership already
+// makes, so every home, session, screenshot and audit route gets organization
+// isolation with no edit.
+//
+// But the prefix is a MINTING RULE, NOT A STRUCTURE. Nothing parses it, ever.
+// `slug.Split('-')[0]` is a bug in the same family as handing a membership slug to
+// CanAccessHome: it looks like it works, and it silently puts someone in the wrong
+// organization the first time a person's name begins with another org's slug. It
+// is also why the two users who predate organizations keep their bare slugs and
+// simply carry the OrgSlug of the organization they are in — a person's prefix
+// records how they were minted, not where they belong.
+//
+// Neither OrgSlug nor IsMachineOwner has a default, deliberately. A defaulted
+// OrgSlug means a construction site that forgets to stamp one does not leave the
+// user in no organization — it enrols them in whichever organization "" happens to
+// be, which is the founder's. Every construction site is a compile error until it
+// decides.
+public sealed record PlatformUser(
+    Guid Id,
+    string DisplayName,
+    string Email,
+    string Slug,
+    string OrgSlug,
+    bool IsMachineOwner,
+    string DeskProfile = "office",
+    string Language = "en");
+
+// An organization on this machine. A name and a slug, and nothing else — it owns
+// no files, no volume and no session. Membership lives on PlatformUser.OrgSlug.
+public sealed record Organization(Guid Id, string Slug, string DisplayName, DateTimeOffset CreatedAt);
 
 public sealed record Workspace(Guid Id, Guid OwnerUserId, string Name);
 

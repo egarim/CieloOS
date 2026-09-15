@@ -6,6 +6,24 @@ namespace WorkspaceRuntime.Application;
 // Shared defaults for a newly-created owner, so the first-run claim grants its
 // agent exactly the surfaces a demo owner's agent has. Lives in Application as
 // the single source of truth (RuntimeSeed in Infrastructure references it too).
+// The organization a machine gets when its owner claims it without naming one.
+//
+// A real slug, not an empty string. OrgSlug is the only authority on which
+// organization a person is in, and "" as a sentinel for "the founding one" is a
+// special case every later reader has to learn — including the one who writes the
+// next isolation predicate and reads "" as "unset".
+public static class Organizations
+{
+    public const string FoundingSlug = "main";
+
+    // A composed slug has to leave room for "-agent" inside the 40 characters a
+    // podman object name and a session id share.
+    public const int MaxUserSlug = 31;
+
+    // The organization half of that, leaving room for a person's name after it.
+    public const int MaxOrgSlug = 12;
+}
+
 public static class OwnerDefaults
 {
     public static HashSet<string> AgentTools => new()
@@ -74,11 +92,14 @@ public interface ISetupService
     // (the chat UI) need it to find whose token to act as; it is never returned
     // to a remote caller.
     string? OwnerSlug();
-    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null);
+    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
     // the identity + agent + token. Single-owner today; this is the multi-user seam.
-    AddUserResult AddUser(string? name, string? deskProfile = null);
+    // orgSlug names an EXISTING organization, and has no default: a user with no
+    // organization is not a user in none of them, it is a user in whichever one
+    // the empty string happens to be.
+    AddUserResult AddUser(string? name, string? deskProfile, string orgSlug);
 }
 
 public sealed class SetupService : ISetupService
@@ -107,7 +128,7 @@ public sealed class SetupService : ISetupService
     // belongs with the login work in #9.
     public string? OwnerSlug() => store.Users.Count == 1 ? store.Users[0].Slug : null;
 
-    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null)
+    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null)
     {
         if (!fromLoopback)
         {
@@ -134,7 +155,26 @@ public sealed class SetupService : ISetupService
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
             }
 
-            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile);
+            // The founding organization, created with the owner because every user
+            // needs one and the owner is the first. Its display name is renameable;
+            // its slug is not, so it stays short and neutral when unnamed.
+            var orgName = (organizationName ?? "").Trim();
+            var orgSlug = orgName.Length > 0 ? Slug.Of(orgName) : Organizations.FoundingSlug;
+            if (orgSlug.Length == 0)
+            {
+                orgSlug = Organizations.FoundingSlug;
+                orgName = "";
+            }
+
+            store.AddOrganization(new Organization(
+                Guid.NewGuid(), orgSlug, orgName.Length > 0 ? orgName : "Main", DateTimeOffset.UtcNow));
+
+            // The founder keeps a BARE slug, with no organization prefix. A prefix
+            // records how a user was minted, not where they belong — OrgSlug is the
+            // only authority on the second question — so the owner reads as "joche"
+            // rather than "main-joche" forever, and can still be moved to another
+            // organization later by changing one column.
+            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile, orgSlug, isMachineOwner: true);
             if (!store.CreateOwner(user, workspace, agent))
             {
                 return new ClaimResult(ClaimOutcome.AlreadyClaimed, Error: "This machine already has an owner.");
@@ -146,7 +186,7 @@ public sealed class SetupService : ISetupService
         }
     }
 
-    public AddUserResult AddUser(string? name, string? deskProfile = null)
+    public AddUserResult AddUser(string? name, string? deskProfile, string orgSlug)
     {
         var displayName = (name ?? "").Trim();
         if (displayName.Length == 0)
@@ -154,20 +194,40 @@ public sealed class SetupService : ISetupService
             return new AddUserResult(AddUserOutcome.Invalid, Error: "A non-empty name is required.");
         }
 
-        var slug = Slug.Of(displayName);
-        if (slug.Length == 0)
+        var personSlug = Slug.Of(displayName);
+        if (personSlug.Length == 0)
         {
             return new AddUserResult(AddUserOutcome.Invalid, Error: "The name must contain at least one letter or digit.");
         }
 
+        if (store.FindOrganization(orgSlug) is null)
+        {
+            return new AddUserResult(AddUserOutcome.Invalid, Error: "That organization does not exist on this machine.");
+        }
+
+        // The minting rule. Composed with '-' and not '_' because Slug.Of collapses
+        // every non-alphanumeric run to '-', so '-' is the only separator that
+        // survives a round trip through the codebase's own slug function:
+        // Slug.Of("acme_maria") is "acme-maria", and a composed slug that CHANGES
+        // when it passes through Slug.Of is a slug that can quietly become another
+        // organization's.
+        var slug = $"{orgSlug}-{personSlug}";
+        if (slug.Length > Organizations.MaxUserSlug)
+        {
+            return new AddUserResult(AddUserOutcome.Invalid,
+                Error: $"'{displayName}' in '{orgSlug}' makes a {slug.Length}-character name and the limit is "
+                     + $"{Organizations.MaxUserSlug}. Use a shorter name or a shorter organization slug. It is not "
+                     + "truncated on purpose: a truncated slug is a permanently wrong home volume.");
+        }
+
         lock (gate)
         {
-            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile);
+            var (user, workspace, agent) = BuildIdentity(displayName, slug, deskProfile, orgSlug, isMachineOwner: false);
             // store.AddUser rejects a duplicate user/agent slug inside the same
             // transaction; the lock serializes all identity creation.
             if (!store.AddUser(user, workspace, agent))
             {
-                return new AddUserResult(AddUserOutcome.Conflict, Error: $"The name '{displayName}' is already taken (slug '{slug}').");
+                return new AddUserResult(AddUserOutcome.Conflict, Error: $"The name '{displayName}' is already taken in '{orgSlug}' (slug '{slug}').");
             }
 
             var token = authenticator.IssueToken(slug);
@@ -178,13 +238,15 @@ public sealed class SetupService : ISetupService
 
     // One user + their workspace + their agent, with the agent granted the full
     // owner tool set and no provider override (resolves via the registry cascade).
-    private static (PlatformUser user, Workspace workspace, AgentProfile agent) BuildIdentity(string displayName, string slug, string? deskProfile)
+    private static (PlatformUser user, Workspace workspace, AgentProfile agent) BuildIdentity(
+        string displayName, string slug, string? deskProfile, string orgSlug, bool isMachineOwner)
     {
         // An unknown id resolves to the default rather than failing: a desk is
         // more useful than an error, and the profile only decides what is
         // installed, never who the person is.
         var profile = DeskProfiles.Resolve(deskProfile);
-        var user = new PlatformUser(Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug, profile.Id);
+        var user = new PlatformUser(
+            Guid.NewGuid(), displayName, $"{slug}@lunos.local", slug, orgSlug, isMachineOwner, profile.Id);
         var workspace = new Workspace(Guid.NewGuid(), user.Id, $"{displayName}'s workspace");
         var agent = new AgentProfile(
             Guid.NewGuid(), user.Id, workspace.Id, $"{displayName}'s Agent",

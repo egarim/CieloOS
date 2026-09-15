@@ -15,7 +15,13 @@ public enum AccessLevel
 {
     Public,
     AnyPrincipal,
-    HumanOnly
+    HumanOnly,
+
+    // The machine owner alone. A level rather than a check inside each handler, so
+    // it is enforced in the middleware beside the others — a handler-side check has
+    // to be remembered by the next person who adds a route, and the fall-through
+    // here is AnyPrincipal, which fails open.
+    OwnerOnly
 }
 
 // The single map from route to required principal. Reads are policed too:
@@ -83,6 +89,25 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // Creating people and organizations is the machine owner's alone.
+        //
+        // This was HumanOnly, which meant any signed-in person could invite another
+        // user onto the box — not into a project, onto the MACHINE, with a home
+        // volume and a token. With organizations that is also the power to put
+        // somebody inside an organization they were not meant to see.
+        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
+            && (path == "/api/users" || path == "/api/organizations"))
+        {
+            return AccessLevel.OwnerOnly;
+        }
+
+        // Moving a person between organizations changes who can see them.
+        if (path.StartsWith("/api/users/", StringComparison.Ordinal)
+            && path.EndsWith("/organization", StringComparison.Ordinal))
+        {
+            return AccessLevel.OwnerOnly;
+        }
+
         // Who else lives on this machine is not something an agent needs.
         //
         // This read was AnyPrincipal, and GET /api/users takes no HttpContext and
@@ -95,7 +120,7 @@ public static class AccessPolicy
         // Found while mapping organizations: org membership hung off PlatformUser
         // would have been readable by every agent token on the machine the day it
         // shipped.
-        if (path == "/api/users")
+        if (path == "/api/users" || path == "/api/organizations")
         {
             return AccessLevel.HumanOnly;
         }

@@ -417,7 +417,21 @@ app.Use(async (context, next) =>
             return;
         }
 
-        if (level == AccessLevel.HumanOnly && principal.Kind != PrincipalKind.Human)
+        // OwnerOnly implies HumanOnly: an agent or an API key is refused by the
+        // clause below before this one is reached.
+        if (level == AccessLevel.OwnerOnly
+            && !store.Users.Any(user => user.IsMachineOwner
+                && string.Equals(user.Slug, principal.Slug, StringComparison.Ordinal)))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                error = "Only the owner of this machine can do that."
+            });
+            return;
+        }
+
+        if ((level == AccessLevel.HumanOnly || level == AccessLevel.OwnerOnly) && principal.Kind != PrincipalKind.Human)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new { error = "This operation requires a human principal." });
@@ -430,7 +444,7 @@ app.Use(async (context, next) =>
         // integration key must not be able to make them. Otherwise the key that
         // exists so the chat need not hold the owner's credential would be able
         // to do everything that credential could.
-        if (level == AccessLevel.HumanOnly && context.Items.ContainsKey("apiKey"))
+        if ((level == AccessLevel.HumanOnly || level == AccessLevel.OwnerOnly) && context.Items.ContainsKey("apiKey"))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new
@@ -890,14 +904,109 @@ app.MapDelete("/api/keys/{id}", (Guid id, HttpContext context, IApiKeyStore keys
     return Results.Ok(new { revoked = id });
 });
 
-app.MapGet("/api/users", (IRuntimeStore store) => store.Users);
+// Who else is on this machine, as far as the caller is concerned.
+//
+// This used to be `store.Users` — every PlatformUser row, email included, to any
+// caller. Two things are wrong with that once there is more than one organization:
+// a person in one organization could enumerate another's people, and an email
+// address is not part of "who else works here".
+app.MapGet("/api/users", (HttpContext context, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var self = store.Users.FirstOrDefault(user => string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal));
+    if (self is null)
+    {
+        return Results.Ok(Array.Empty<object>());
+    }
+
+    return Results.Ok(OrganizationRules.Visible(self, store.Users).Select(user => new
+    {
+        user.Id,
+        user.DisplayName,
+        user.Slug,
+        user.OrgSlug,
+        user.DeskProfile,
+        user.Language,
+        user.IsMachineOwner
+    }));
+});
+
+// The organizations on this machine. Human-only to read (a menu of who else exists
+// is not something an agent needs), owner-only to add.
+app.MapGet("/api/organizations", (IRuntimeStore store) => Results.Ok(store.Organizations.Select(organization => new
+{
+    organization.Id,
+    organization.Slug,
+    organization.DisplayName,
+    organization.CreatedAt,
+    people = store.Users.Count(user => string.Equals(user.OrgSlug, organization.Slug, StringComparison.Ordinal))
+})));
+
+app.MapPost("/api/organizations", (CreateOrganizationRequest? request, HttpContext context, IRuntimeStore store) =>
+{
+    var displayName = (request?.Name ?? "").Trim();
+    if (displayName.Length == 0)
+    {
+        return Results.BadRequest(new { error = "An organization needs a name." });
+    }
+
+    var slug = Slug.Of(displayName);
+    if (slug.Length == 0)
+    {
+        return Results.BadRequest(new { error = "The name must contain at least one letter or digit." });
+    }
+
+    // Short, because it is a PREFIX: every user minted here becomes
+    // "<org>-<person>", and the whole thing has to leave room for "-agent" inside
+    // the character budget a podman object name and a session id share. Refused
+    // rather than truncated — a truncated slug is a permanently wrong volume name.
+    if (slug.Length > Organizations.MaxOrgSlug)
+    {
+        return Results.BadRequest(new
+        {
+            error = $"'{displayName}' makes a {slug.Length}-character short name and the limit is {Organizations.MaxOrgSlug}. "
+                  + "It becomes the prefix of every person created here, so it has to stay short."
+        });
+    }
+
+    if (!store.AddOrganization(new Organization(Guid.NewGuid(), slug, displayName, DateTimeOffset.UtcNow)))
+    {
+        return Results.Conflict(new { error = $"There is already an organization using the short name '{slug}'." });
+    }
+
+    var caller = Caller(context);
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "organization.add", AuditOutcome.Success, $"'{caller.Slug}' created organization '{slug}'."));
+    return Results.Ok(new { slug, displayName });
+});
+
+// Move a person to another organization.
+//
+// Possible only because a slug prefix is a minting rule and not a structure: their
+// slug, home volume, token file, audit history and spreadsheet are all keyed on the
+// slug and none of them move. One column changes, and with it who they can see.
+app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? request, HttpContext context, IRuntimeStore store) =>
+{
+    var target = (request?.OrgSlug ?? "").Trim();
+    if (store.FindOrganization(target) is null)
+    {
+        return Results.BadRequest(new { error = "That organization does not exist on this machine." });
+    }
+
+    if (!store.SetUserOrganization(slug, target))
+    {
+        return Results.NotFound(new { error = "No such person on this machine." });
+    }
+
+    return Results.Ok(new { slug, orgSlug = target });
+});
 
 // Add a teammate (an existing owner invites another user). Human-only (enforced
 // in AccessPolicy). Returns the new user's slug + bearer token for the owner to
 // hand over; the token file is also written 0600 on the box.
 app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions) =>
 {
-    var result = setup.AddUser(request?.Name, request?.DeskProfile);
+    var result = setup.AddUser(request?.Name, request?.DeskProfile, request?.OrgSlug ?? Organizations.FoundingSlug);
     if (result.Outcome == AddUserOutcome.Ok)
     {
         // Same as the claim: a desk created is a desk that should become usable
@@ -1454,11 +1563,18 @@ app.MapGet("/api/whoami", (HttpContext context, ISetupService setup) =>
     // the same "founding owner" the owner-keyed-spreadsheet migration uses
     // (ORDER BY rowid LIMIT 1). Extensible: a grantable-admin role later only has
     // to OR an extra slug into this predicate.
-    var founderSlug = caller.Kind == PrincipalKind.Human
-        ? setup.OwnerSlug() ?? runtimeStore.Users.FirstOrDefault()?.Slug
+    // Now a column, not a guess.
+    //
+    // This used to be SetupService.OwnerSlug() — which returns null the moment a
+    // machine has more than one human — falling back to Users.FirstOrDefault(),
+    // an unordered LIMIT 1. On any machine with a teammate on it, "who owns this
+    // box" was decided by whatever order the database felt like returning rows in.
+    var self = caller.Kind == PrincipalKind.Human
+        ? runtimeStore.Users.FirstOrDefault(user => string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal))
         : null;
-    var isOwner = founderSlug is not null
-        && string.Equals(caller.Slug, founderSlug, StringComparison.Ordinal);
+    var isOwner = self?.IsMachineOwner ?? false;
+    var organization = runtimeStore.Users
+        .FirstOrDefault(user => string.Equals(user.Slug, rootSlug, StringComparison.Ordinal))?.OrgSlug ?? "";
 
     return Results.Ok(new
     {
@@ -1469,7 +1585,11 @@ app.MapGet("/api/whoami", (HttpContext context, ISetupService setup) =>
         deskProfile = deskProfile.Id,
         deskProfileLabel = deskProfile.Label,
         language = language.Code,
-        isOwner
+        isOwner,
+        // An agent reports its OWNER's organization, because it works for them.
+        organization,
+        organizationName = runtimeStore.Organizations
+            .FirstOrDefault(candidate => string.Equals(candidate.Slug, organization, StringComparison.Ordinal))?.DisplayName
     });
 });
 
@@ -2338,7 +2458,17 @@ public sealed record ClaimRequest(
 
 public sealed record AddUserRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
-    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null);
+    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null,
+    // Which organization to mint them into. Defaulted at the call site rather than
+    // here, so that an older admin panel that does not send it still creates a
+    // usable user rather than one in an organization that does not exist.
+    [property: System.Text.Json.Serialization.JsonPropertyName("orgSlug")] string? OrgSlug = null);
+
+public sealed record CreateOrganizationRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
+
+public sealed record MoveUserRequest(
+    [property: System.Text.Json.Serialization.JsonPropertyName("orgSlug")] string? OrgSlug);
 
 public sealed record AddProviderRequest(
     string? DisplayName,

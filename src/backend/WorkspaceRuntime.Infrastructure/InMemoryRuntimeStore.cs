@@ -16,6 +16,7 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     private readonly List<WorkspaceRuntime.Domain.Thread> threads = new();
     private readonly List<(ThreadMessage Message, long Sequence)> threadMessages = new();
     private readonly List<DirectMessage> directMessages = new();
+    private readonly List<Organization> organizations = new();
 
     // Default seedDemo:true keeps every direct `new InMemoryRuntimeStore()` (the
     // unit-test fixtures) populated with the joche/yulia demo identities. A real,
@@ -46,6 +47,46 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
     }
 
     public IReadOnlyList<PlatformUser> Users => users;
+    public IReadOnlyList<Organization> Organizations => organizations;
+
+    // The same four methods as EfRuntimeStore, and they are here for the same
+    // reason every other pair is: this store is a SHIPPING configuration
+    // (Database:Provider=memory), not a test fixture. An isolation rule enforced
+    // carefully in one store and loosely in the other is a real hole in a real mode.
+    public bool AddOrganization(Organization organization)
+    {
+        if (organizations.Any(existing => string.Equals(existing.Slug, organization.Slug, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        organizations.Add(organization);
+        return true;
+    }
+
+    public Organization? FindOrganization(string slug) =>
+        organizations.FirstOrDefault(organization => string.Equals(organization.Slug, slug, StringComparison.Ordinal));
+
+    public bool SetUserOrganization(string userSlug, string orgSlug)
+    {
+        if (FindOrganization(orgSlug) is null)
+        {
+            return false;
+        }
+
+        var index = users.FindIndex(user => string.Equals(user.Slug, userSlug, StringComparison.Ordinal));
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var from = users[index].OrgSlug;
+        users[index] = users[index] with { OrgSlug = orgSlug };
+        auditEvents.Add(new AuditEvent(
+            Guid.NewGuid(), DateTimeOffset.UtcNow, users[index].Id, null, "user.organization",
+            AuditOutcome.Success, $"Moved '{userSlug}' from '{from}' to '{orgSlug}'."));
+        return true;
+    }
     public IReadOnlyList<Workspace> Workspaces => workspaces;
     public IReadOnlyList<AgentProfile> Agents => agents;
     public IReadOnlyList<ApprovalRecord> Approvals => approvals.OrderByDescending(approval => approval.CreatedAt).ToList();

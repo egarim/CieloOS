@@ -173,13 +173,17 @@ public sealed class FirstRunSetupTests
             var setup = new SetupService(store, auth);
             setup.Claim("Owner One", fromLoopback: true);
 
-            var result = setup.AddUser("Grace Hopper");
+            var result = setup.AddUser("Grace Hopper", null, Organizations.FoundingSlug);
 
             Assert.Equal(AddUserOutcome.Ok, result.Outcome);
-            Assert.Equal("grace-hopper", result.Slug);
+            // Composed from the organization and the person, which is what lets
+            // two organizations each have a Grace Hopper on one machine.
+            Assert.Equal("main-grace-hopper", result.Slug);
             Assert.Equal(2, store.Users.Count);
-            Assert.Contains(store.Agents, agent => agent.Slug == "grace-hopper-agent");
-            Assert.Equal("grace-hopper", auth.Authenticate(result.Token!)!.Slug);
+            // The agent slug follows the user slug, prefix and all — it has its own
+            // home volume and its own token file, both named after it.
+            Assert.Contains(store.Agents, agent => agent.Slug == "main-grace-hopper-agent");
+            Assert.Equal("main-grace-hopper", auth.Authenticate(result.Token!)!.Slug);
         });
     }
 
@@ -191,9 +195,18 @@ public sealed class FirstRunSetupTests
             var setup = new SetupService(store, auth);
             setup.Claim("Grace Hopper", fromLoopback: true);
 
-            var duplicate = setup.AddUser("Grace Hopper"); // same slug as the owner
+            // The owner claimed as "Grace Hopper" and kept the BARE slug
+            // "grace-hopper", so a teammate of the same name mints as
+            // "main-grace-hopper" and no longer collides with them. Which is a
+            // behaviour change worth having a test say out loud.
+            var namesake = setup.AddUser("Grace Hopper", null, Organizations.FoundingSlug);
+            Assert.Equal(AddUserOutcome.Ok, namesake.Outcome);
+            Assert.Equal("main-grace-hopper", namesake.Slug);
+
+            // A second one in the SAME organization is still a conflict.
+            var duplicate = setup.AddUser("Grace Hopper", null, Organizations.FoundingSlug);
             Assert.Equal(AddUserOutcome.Conflict, duplicate.Outcome);
-            Assert.Single(store.Users);
+            Assert.Equal(2, store.Users.Count);
         });
     }
 
@@ -204,7 +217,7 @@ public sealed class FirstRunSetupTests
         {
             var setup = new SetupService(store, auth);
             setup.Claim("Owner", fromLoopback: true);
-            Assert.Equal(AddUserOutcome.Invalid, setup.AddUser("   ").Outcome);
+            Assert.Equal(AddUserOutcome.Invalid, setup.AddUser("   ", null, Organizations.FoundingSlug).Outcome);
         });
     }
 

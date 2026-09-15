@@ -61,8 +61,11 @@ public class DeskProfileTests
 
         // And a teammate created without one gets the office desk, not an empty
         // string that only happens to resolve correctly.
-        Assert.Equal(AddUserOutcome.Ok, setup.AddUser("Yulia").Outcome);
-        Assert.Equal("office", store.Users.Single(user => user.Slug == "yulia").DeskProfile);
+        Assert.Equal(AddUserOutcome.Ok, setup.AddUser("Yulia", null, Organizations.FoundingSlug).Outcome);
+        // Minted INTO an organization, so the slug carries its prefix. The owner
+        // above kept a bare slug because they predate any organization; everyone
+        // created afterwards is prefixed.
+        Assert.Equal("office", store.Users.Single(user => user.Slug == "main-yulia").DeskProfile);
     }
 
     private sealed class StubAuthenticator : ITokenAuthenticator
