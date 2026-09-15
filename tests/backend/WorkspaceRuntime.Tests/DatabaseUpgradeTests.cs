@@ -60,6 +60,30 @@ public class DatabaseUpgradeTests : IDisposable
         }
     }
 
+    // The guard for the NEXT #49 rather than the last one.
+    //
+    // Every EF store test constructs with ensureCreated: true, which builds the
+    // schema from today's model and never calls Migrate(). So a new entity added to
+    // RuntimeDbContext with no migration behind it leaves the whole suite green:
+    // the tests build their schema from the model, and the model is right. The
+    // first real query on a machine that already had a database is where it shows,
+    // which is a customer's box and not this one.
+    //
+    // This asks EF the only question that catches it: does the model still match
+    // the migrations? Adding a row class and forgetting to generate the migration
+    // fails here, in the second it takes to run, instead of on an upgrade.
+    [Fact]
+    public void The_model_and_the_migrations_have_not_drifted_apart()
+    {
+        using var context = Context();
+        Assert.False(
+            context.Database.HasPendingModelChanges(),
+            "RuntimeDbContext has changes with no migration behind them. Run: "
+            + "dotnet ef migrations add <Name> --project src/backend/WorkspaceRuntime.Infrastructure. "
+            + "Without it the suite stays green (every store test uses EnsureCreated) and every "
+            + "machine that already has a database breaks on its first query after the upgrade.");
+    }
+
     [Fact]
     public void The_column_that_crashed_the_upgrade_is_actually_queryable_afterwards()
     {

@@ -29,7 +29,14 @@ public class AccessPolicyTests
     [InlineData("/api/keys", "GET", AccessLevel.HumanOnly)]
     [InlineData("/api/keys", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/keys/00000000-0000-0000-0000-000000000001", "DELETE", AccessLevel.HumanOnly)]
-    [InlineData("/api/users", "GET", AccessLevel.AnyPrincipal)]
+    // Was AnyPrincipal, which this table declared as intended and therefore
+    // protected. GET /api/users takes no HttpContext and projects nothing, so any
+    // agent token could enumerate every person on the machine with their email —
+    // while Security.cs argued three comments away that the message directory is
+    // human-only precisely so "an agent that cannot enumerate people cannot pick a
+    // new target for anything". The rule was true through one door and false
+    // through another, and this row is why nobody noticed.
+    [InlineData("/api/users", "GET", AccessLevel.HumanOnly)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/commands/set-cell", "POST", AccessLevel.AnyPrincipal)]

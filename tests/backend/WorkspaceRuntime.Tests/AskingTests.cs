@@ -193,6 +193,27 @@ public class AskingTests
     }
 
     [Fact]
+    public async Task The_closing_question_is_asked_with_the_original_request_in_hand()
+    {
+        var world = World();
+        var loop = new ConsoleAgentLoop(world.Runtime, world.Console);
+        var seen = new SeenGoalBrain();
+
+        await loop.RunAsync(
+            "joche-agent-abc", "find VSeed parts for sale in Saint Petersburg", maxSteps: 8,
+            world.Principal, world.OwnerId, world.AgentId, seen, CancellationToken.None);
+
+        // The closing prompt was built as a plain literal ending "{goal}", so the
+        // model received the six characters {goal} and was asked to write a
+        // question about a request it had never been shown. It produced good
+        // questions anyway, by inferring the goal from the commands in its own
+        // history — which is luck, and would have stopped working the first time a
+        // run failed before it had run anything.
+        Assert.Contains("VSeed parts for sale", seen.ClosingGoal);
+        Assert.DoesNotContain("{goal}", seen.ClosingGoal);
+    }
+
+    [Fact]
     public async Task A_provider_that_fails_while_composing_the_question_leaves_the_honest_reason()
     {
         var world = World();
@@ -218,6 +239,21 @@ public class AskingTests
                 ? new ConsoleAgentAction(false, null, false, null,
                     "I am blocked: the search engine returned a bot challenge three times. Do you have a specific shop in mind?")
                 : new ConsoleAgentAction(false, "curl -s https://example.test", true, "searching"));
+    }
+
+    private sealed class SeenGoalBrain : IConsoleAgentBrain
+    {
+        public string ClosingGoal { get; private set; } = "";
+
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+        {
+            if (goal.Contains("Do NOT try another command", StringComparison.Ordinal))
+            {
+                ClosingGoal = goal;
+                return Task.FromResult(new ConsoleAgentAction(false, null, false, null, "What now?"));
+            }
+            return Task.FromResult(new ConsoleAgentAction(false, "curl -s https://example.test", true, "searching"));
+        }
     }
 
     private sealed class StuckThenThrowsBrain : IConsoleAgentBrain

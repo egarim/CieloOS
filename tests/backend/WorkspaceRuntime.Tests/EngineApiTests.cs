@@ -17,6 +17,21 @@ public class EngineApiTests
         Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/API/Engines/", "GET"));
     }
 
+    // Not about engines, but found while mapping the ground for organizations and
+    // it belongs next to the other AccessPolicy assertions.
+    [Fact]
+    public void An_agent_cannot_enumerate_the_people_on_this_machine()
+    {
+        // GET /api/users was AnyPrincipal, takes no HttpContext and projects
+        // nothing, so any agent token could list every person here with their
+        // email. Security.cs already claims the opposite rule for the message
+        // directory — "an agent that cannot enumerate people cannot pick a new
+        // target for anything" — which was true through one door and false
+        // through another.
+        Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/api/users", "GET"));
+        Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required("/api/users", "POST"));
+    }
+
     [Fact]
     public void An_unpinned_or_unverifiable_engine_cannot_be_installed()
     {

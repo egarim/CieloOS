@@ -276,7 +276,7 @@ public sealed class ConsoleAgentLoop
                 $"{why} Do NOT try another command — none will be run. Write ONE question to your owner in "
                 + "\"question\": say what you were trying to do, what you actually found out on the way, what "
                 + "stopped you, and the single thing you need from them to continue. Offer concrete options if "
-                + "there are any. The original request was: {goal}",
+                + $"there are any. The original request was: {goal}",
                 screen, history, step, cancellationToken);
 
             // Question, or a note the brain marked as FINAL. A note on a

@@ -83,6 +83,23 @@ public static class AccessPolicy
             return AccessLevel.HumanOnly;
         }
 
+        // Who else lives on this machine is not something an agent needs.
+        //
+        // This read was AnyPrincipal, and GET /api/users takes no HttpContext and
+        // applies no projection — so any agent token could enumerate every person
+        // here with their email. That flatly contradicted the rule three lines of
+        // comment below it already claim to hold for the message directory: "an
+        // agent that cannot enumerate people cannot pick a new target for
+        // anything." It could not, through one door, and could through another.
+        //
+        // Found while mapping organizations: org membership hung off PlatformUser
+        // would have been readable by every agent token on the machine the day it
+        // shipped.
+        if (path == "/api/users")
+        {
+            return AccessLevel.HumanOnly;
+        }
+
         // What engines exist and whether they may be installed is an owner question.
         // Unlike the model providers below, the READ is human-only too: the list is
         // a menu of other agent harnesses, and an agent has no use for one.
