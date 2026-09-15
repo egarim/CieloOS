@@ -469,7 +469,7 @@
   "portal.signin.tokenRejected": "That code was not accepted.",
   "portal.signin.error": "Cielo did not respond. Try again.",
   "portal.navigation": "Portal",
-  "portal.nav.chat": "Chat",
+  "portal.nav.chat": "Agent",
   "portal.nav.files": "Files",
   "portal.nav.messages": "Messages",
   "portal.nav.widgets": "Widgets",
@@ -505,7 +505,7 @@
   "portal.permission.changed": "This request changed while you were deciding. Here is the latest one.",
   "portal.permission.notYours": "This request is no longer yours to decide.",
   "portal.permission.failed": "Cielo could not record your answer. Try again.",
-  "portal.chat.lead": "Ask Cielo to do something. It works on a real computer of its own, so it can look things up, write documents and spreadsheets, and put them in your files.",
+  "portal.chat.lead": "Ask Cielo to do something. It works on a real computer of its own, so it can look things up, write documents and spreadsheets, and put them in your files. When it finishes something you were not watching, it will tell you in Messages.",
   "portal.chat.placeholder": "Make me a top 10 of the tallest mountains as a spreadsheet",
   "portal.chat.inputLabel": "What would you like Cielo to do?",
   "portal.chat.send": "Send",
@@ -535,7 +535,7 @@
   "portal.chat.threads": "Your conversations",
   "portal.chat.threadsError": "Could not load your conversations.",
   "portal.chat.doing": "What Cielo is doing",
-  "portal.messages.lead": "Pick someone to talk to. These messages are between you and them — Cielo cannot read them or send them.",
+  "portal.messages.lead": "Pick someone to talk to. Messages come from the other people on this machine and from your own agent — nobody else can read them.",
   "portal.messages.everyoneElse": "Everyone else",
   "portal.messages.nobody": "There is nobody else on this machine yet.",
   "portal.messages.send": "Send",
@@ -543,5 +543,6 @@
   "portal.messages.placeholder": "Write a message",
   "portal.messages.youPrefix": "You: ",
   "portal.messages.error": "Could not load your messages.",
-  "portal.messages.sendError": "That message was not sent. Try again."
+  "portal.messages.sendError": "That message was not sent. Try again.",
+  "portal.messages.yourAgent": "Your agent"
 }

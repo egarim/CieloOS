@@ -140,6 +140,47 @@ public sealed class DirectMessageTests : IDisposable
         Assert.Equal(a, conversation[0].FromSlug);
     }
 
+    [Fact]
+    public void An_agent_may_message_its_owner_and_nobody_else()
+    {
+        var store = CreateStore();
+        var owner = store.Users[0];
+        var otherPerson = store.Users[1];
+        var myAgent = store.Agents.First(agent => agent.OwnerUserId == owner.Id);
+        var otherAgent = store.Agents.First(agent => agent.OwnerUserId == otherPerson.Id);
+
+        var agentPrincipal = new RuntimePrincipal(PrincipalKind.Agent, myAgent.Id, myAgent.Slug, myAgent.Name);
+        var ownerPrincipal = new RuntimePrincipal(PrincipalKind.Human, owner.Id, owner.Slug, owner.DisplayName);
+
+        Assert.True(MessageRules.MayConverseWith(owner.Slug, agentPrincipal, store));
+
+        // Everything else an agent might reach for. A third party is the one that
+        // would be a consent moment; the rest are simply not its business.
+        Assert.False(MessageRules.MayConverseWith(otherPerson.Slug, agentPrincipal, store));
+        Assert.False(MessageRules.MayConverseWith(otherAgent.Slug, agentPrincipal, store));
+        Assert.False(MessageRules.MayConverseWith(myAgent.Slug, agentPrincipal, store));
+
+        // And the person can answer their own agent, so its message is a
+        // conversation rather than a notification they can only stare at.
+        Assert.True(MessageRules.MayConverseWith(myAgent.Slug, ownerPrincipal, store));
+        Assert.False(MessageRules.MayConverseWith(otherAgent.Slug, ownerPrincipal, store));
+    }
+
+    [Fact]
+    public void A_conversation_with_your_agent_shows_its_name_not_its_slug()
+    {
+        var store = CreateStore();
+        var owner = store.Users[0];
+        var myAgent = store.Agents.First(agent => agent.OwnerUserId == owner.Id);
+
+        store.SendDirectMessage(myAgent.Slug, owner.Slug, "The spreadsheet is ready.");
+
+        var summary = store.ListConversations(owner.Slug).Single();
+        Assert.Equal(myAgent.Slug, summary.WithSlug);
+        Assert.Equal(myAgent.Name, summary.WithDisplay);
+        Assert.Equal(1, summary.Unread);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
@@ -157,25 +198,28 @@ public sealed class DirectMessageTests : IDisposable
 // rather than trusting that someone remembered.
 public class MessageAccessPolicyTests
 {
+    // The DIRECTORY is human-only: an agent that cannot enumerate people cannot
+    // pick a new target for anything.
     [Theory]
     [InlineData("/api/messages", "GET")]
-    [InlineData("/api/messages", "POST")]
-    [InlineData("/api/messages/yulia", "GET")]
-    [InlineData("/api/messages/yulia", "POST")]
-    public void Every_message_route_is_human_only(string path, string method)
+    [InlineData("/API/MESSAGES", "GET")]
+    public void The_directory_is_human_only(string path, string method)
     {
+        // #43 was exactly the case-sensitivity half of this: the lookup compared
+        // against lowercase literals without normalising, so /API/BRANDING missed
+        // every entry and fell through to AnyPrincipal.
         Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required(path, method));
     }
 
+    // A single conversation lets an agent through the door, because an agent
+    // messaging its OWNER is how a person finds out a job finished. Which one
+    // counterpart it may reach is the handler's job, tested above.
     [Theory]
-    [InlineData("/API/MESSAGES", "GET")]
+    [InlineData("/api/messages/yulia", "GET")]
+    [InlineData("/api/messages/yulia", "POST")]
     [InlineData("/api/Messages/Yulia", "POST")]
-    [InlineData("/api/messages/", "GET")]
-    public void Case_and_a_trailing_slash_do_not_get_you_past_it(string path, string method)
+    public void A_conversation_admits_an_agent_token(string path, string method)
     {
-        // #43 was exactly this: the lookup compared against lowercase literals
-        // without normalising, so /API/BRANDING missed every entry and fell through
-        // to AnyPrincipal. A new route family gets the same test on day one.
-        Assert.Equal(AccessLevel.HumanOnly, AccessPolicy.Required(path, method));
+        Assert.Equal(AccessLevel.AnyPrincipal, AccessPolicy.Required(path, method));
     }
 }

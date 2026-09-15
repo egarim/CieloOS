@@ -469,7 +469,7 @@
   "portal.signin.tokenRejected": "No se aceptó ese código.",
   "portal.signin.error": "Cielo no respondió. Inténtalo de nuevo.",
   "portal.navigation": "Portal",
-  "portal.nav.chat": "Chat",
+  "portal.nav.chat": "Agente",
   "portal.nav.files": "Archivos",
   "portal.nav.messages": "Mensajes",
   "portal.nav.widgets": "Widgets",
@@ -505,7 +505,7 @@
   "portal.permission.changed": "Esta solicitud cambió mientras decidías. Aquí está la más reciente.",
   "portal.permission.notYours": "Esta solicitud ya no te corresponde decidirla.",
   "portal.permission.failed": "Cielo no pudo guardar tu respuesta. Inténtalo de nuevo.",
-  "portal.chat.lead": "Pídele algo a Cielo. Trabaja en un ordenador propio, así que puede buscar información, escribir documentos y hojas de cálculo, y dejártelos en tus archivos.",
+  "portal.chat.lead": "Pídele algo a Cielo. Trabaja en un ordenador propio, así que puede buscar información, escribir documentos y hojas de cálculo, y dejártelos en tus archivos. Cuando termine algo que no estabas mirando, te avisará en Mensajes.",
   "portal.chat.placeholder": "Hazme un top 10 de las montañas más altas en una hoja de cálculo",
   "portal.chat.inputLabel": "¿Qué quieres que haga Cielo?",
   "portal.chat.send": "Enviar",
@@ -535,7 +535,7 @@
   "portal.chat.threads": "Tus conversaciones",
   "portal.chat.threadsError": "No se pudieron cargar tus conversaciones.",
   "portal.chat.doing": "Qué está haciendo Cielo",
-  "portal.messages.lead": "Elige con quién hablar. Estos mensajes son entre esa persona y tú: Cielo no puede leerlos ni enviarlos.",
+  "portal.messages.lead": "Elige con quién hablar. Los mensajes vienen de las otras personas de este equipo y de tu propio agente; nadie más puede leerlos.",
   "portal.messages.everyoneElse": "Todos los demás",
   "portal.messages.nobody": "Todavía no hay nadie más en este equipo.",
   "portal.messages.send": "Enviar",
@@ -543,5 +543,6 @@
   "portal.messages.placeholder": "Escribe un mensaje",
   "portal.messages.youPrefix": "Tú: ",
   "portal.messages.error": "No se pudieron cargar tus mensajes.",
-  "portal.messages.sendError": "Ese mensaje no se envió. Inténtalo de nuevo."
+  "portal.messages.sendError": "Ese mensaje no se envió. Inténtalo de nuevo.",
+  "portal.messages.yourAgent": "Tu agente"
 }

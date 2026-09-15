@@ -504,8 +504,18 @@ public sealed class EfRuntimeStore : IRuntimeStore
             .OrderByDescending(row => row.CreatedAtTicks)
             .ToList();
 
-        var displayBySlug = context.Users.AsNoTracking()
-            .ToDictionary(user => user.Slug, user => user.DisplayName, StringComparer.Ordinal);
+        // Agents as well as people: a conversation with your own agent must show
+        // its name, not "joche-agent". Agents are added first so a user slug always
+        // wins if the two ever collide.
+        var displayBySlug = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var agent in context.Agents.AsNoTracking())
+        {
+            displayBySlug[agent.Slug] = agent.Name;
+        }
+        foreach (var user in context.Users.AsNoTracking())
+        {
+            displayBySlug[user.Slug] = user.DisplayName;
+        }
 
         return mine
             .GroupBy(row => row.FromSlug == mySlug ? row.ToSlug : row.FromSlug, StringComparer.Ordinal)

@@ -430,7 +430,11 @@ export type Conversation = {
   unread: number;
 };
 
-export type Person = { slug: string; displayName: string };
+// isAgent marks your own agent in the directory. It is a different kind of
+// correspondent — it works for you rather than beside you — and a list that mixed
+// the two without saying so would be the first place somebody assumed the agent
+// was a colleague who could be asked to keep a secret.
+export type Person = { slug: string; displayName: string; isAgent: boolean };
 
 export type DirectMessage = {
   id: string;

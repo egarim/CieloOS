@@ -174,7 +174,15 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public IReadOnlyList<Conversation> ListConversations(string mySlug)
     {
-        var displayBySlug = users.ToDictionary(user => user.Slug, user => user.DisplayName, StringComparer.Ordinal);
+        var displayBySlug = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var agent in agents)
+        {
+            displayBySlug[agent.Slug] = agent.Name;
+        }
+        foreach (var user in users)
+        {
+            displayBySlug[user.Slug] = user.DisplayName;
+        }
         return directMessages
             .Where(message => message.FromSlug == mySlug || message.ToSlug == mySlug)
             .GroupBy(message => message.FromSlug == mySlug ? message.ToSlug : message.FromSlug, StringComparer.Ordinal)

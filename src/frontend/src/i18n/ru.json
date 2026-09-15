@@ -469,7 +469,7 @@
   "portal.signin.tokenRejected": "Этот код не принят.",
   "portal.signin.error": "Cielo не отвечает. Попробуйте ещё раз.",
   "portal.navigation": "Портал",
-  "portal.nav.chat": "Чат",
+  "portal.nav.chat": "Агент",
   "portal.nav.files": "Файлы",
   "portal.nav.messages": "Сообщения",
   "portal.nav.widgets": "Виджеты",
@@ -505,7 +505,7 @@
   "portal.permission.changed": "Запрос изменился, пока вы решали. Вот актуальный.",
   "portal.permission.notYours": "Этот запрос больше не вам решать.",
   "portal.permission.failed": "Cielo не смог сохранить ваш ответ. Попробуйте ещё раз.",
-  "portal.chat.lead": "Попросите Cielo что-нибудь сделать. У него есть собственный компьютер: он может найти информацию, составить документ или таблицу и положить их в ваши файлы.",
+  "portal.chat.lead": "Попросите Cielo что-нибудь сделать. У него есть собственный компьютер: он может найти информацию, составить документ или таблицу и положить их в ваши файлы. Когда он закончит то, за чем вы не следили, он напишет вам в Сообщениях.",
   "portal.chat.placeholder": "Сделай таблицу с десятью самыми высокими горами",
   "portal.chat.inputLabel": "Что должен сделать Cielo?",
   "portal.chat.send": "Отправить",
@@ -535,7 +535,7 @@
   "portal.chat.threads": "Ваши разговоры",
   "portal.chat.threadsError": "Не удалось загрузить ваши разговоры.",
   "portal.chat.doing": "Что делает Cielo",
-  "portal.messages.lead": "Выберите, с кем поговорить. Эти сообщения — только между вами двумя: Cielo не может ни прочитать, ни отправить их.",
+  "portal.messages.lead": "Выберите, с кем поговорить. Сообщения приходят от других людей на этом компьютере и от вашего агента — больше никто их не прочитает.",
   "portal.messages.everyoneElse": "Остальные",
   "portal.messages.nobody": "На этом компьютере пока больше никого нет.",
   "portal.messages.send": "Отправить",
@@ -543,5 +543,6 @@
   "portal.messages.placeholder": "Написать сообщение",
   "portal.messages.youPrefix": "Вы: ",
   "portal.messages.error": "Не удалось загрузить сообщения.",
-  "portal.messages.sendError": "Сообщение не отправлено. Попробуйте ещё раз."
+  "portal.messages.sendError": "Сообщение не отправлено. Попробуйте ещё раз.",
+  "portal.messages.yourAgent": "Ваш агент"
 }

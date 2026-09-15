@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Folder, LayoutGrid, LogOut, Mail, MessageCircle } from "lucide-react";
+import { Bot, Folder, LayoutGrid, LogOut, Mail } from "lucide-react";
 import type { Whoami } from "../shared/api";
 import { LANGUAGES, useT, type Language } from "../shared/i18n";
 import { Button } from "./ui/button";
@@ -17,7 +17,7 @@ const PLACES: {
   icon: React.ComponentType<{ className?: string }>;
   View: React.ComponentType<{ whoami: Whoami }>;
 }[] = [
-  { id: "chat", labelKey: "portal.nav.chat", icon: MessageCircle, View: Chat },
+  { id: "chat", labelKey: "portal.nav.chat", icon: Bot, View: Chat },
   { id: "files", labelKey: "portal.nav.files", icon: Folder, View: Files },
   { id: "messages", labelKey: "portal.nav.messages", icon: Mail, View: Messages },
   { id: "widgets", labelKey: "portal.nav.widgets", icon: LayoutGrid, View: Widgets },

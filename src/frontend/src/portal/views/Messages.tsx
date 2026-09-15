@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, Send } from "lucide-react";
+import { Bot, Loader2, Send } from "lucide-react";
 import {
   listMessages,
   readConversation,
@@ -13,13 +13,17 @@ import {
 import { useT } from "../../shared/i18n";
 import { Button } from "../ui/button";
 
-// Talking to the other people on this machine.
+// The inbox: the one place you find out that something was said to you.
 //
-// The agent is not here and cannot be. Messages are human-only end to end, reads
-// included — an agent token has no business in someone's private exchange, and
-// there is no feature that wants one there. When an agent should be able to send
-// on its owner's behalf, that is a surface with an approval attached, which is a
-// different thing from widening this.
+// Two kinds of correspondent arrive here. Other PEOPLE on this machine, and YOUR
+// OWN AGENT — which is how you learn that a job you were not watching has
+// finished, without having to sit and watch it.
+//
+// An agent may message exactly one person: the human that owns it. It cannot read
+// your conversations with anyone else, cannot see the directory, and cannot reach
+// another person or another owner's agent. That single rule is why none of this
+// needs an approval prompt: an agent reporting to its own owner is it doing its
+// job, not a consent moment.
 
 function initials(name: string): string {
   return name
@@ -127,8 +131,8 @@ export function Messages({ whoami }: { whoami: Whoami }) {
   }
 
   // Everyone you could talk to: the people you already have a conversation with,
-  // then everyone else on the machine. One list, so starting a new conversation is
-  // not a different gesture from continuing an old one.
+  // then everyone else on the machine, then your own agent. One list, so starting
+  // a new conversation is not a different gesture from continuing an old one.
   const talked = new Set(conversations.map((conversation) => conversation.withSlug));
   const others = people.filter((person) => !talked.has(person.slug));
 
@@ -193,9 +197,12 @@ export function Messages({ whoami }: { whoami: Whoami }) {
                     aria-hidden="true"
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
                   >
-                    {initials(person.displayName)}
+                    {person.isAgent ? <Bot className="h-4 w-4" /> : initials(person.displayName)}
                   </span>
-                  <span className="min-w-0 break-words">{person.displayName}</span>
+                  <span className="min-w-0 flex-1 break-words">{person.displayName}</span>
+                  {person.isAgent ? (
+                    <span className="shrink-0 text-xs opacity-70">{t("portal.messages.yourAgent")}</span>
+                  ) : null}
                 </button>
               ))}
             </>

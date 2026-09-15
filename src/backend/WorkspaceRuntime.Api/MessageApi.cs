@@ -10,15 +10,24 @@ using WorkspaceRuntime.Domain;
 // scoping exists to enforce, so it needs its own rule — both ends are people, and
 // only those two may read it.
 //
-// Not a surface because nothing here is an agent's to do. The only communication
-// the product needs is a person with their own agent (that is the chat, and it is
-// a thread) and a person with another person (this). The moment an agent should be
-// able to send a message on its owner's behalf, this becomes a surface with a
-// RequireApproval policy — "may I send this?" is one of the three consent moments
-// the design brief names — and that will also need the policy engine to be able to
-// say "ask when the agent does it, not when the person does". It cannot today:
-// ManifestPolicyEngine.Evaluate never sees the acting principal, so one decision
-// covers both, and a person would be made to approve their own messages.
+// Two kinds of sender arrive here, and that is the point: another PERSON on this
+// machine, or YOUR OWN AGENT. This is the inbox — the one place you find out that
+// something was said to you, whether a colleague said it or the agent did when it
+// finished a job you were not watching.
+//
+// An agent may message exactly one person: the human that owns it. Not other
+// people, not other agents, not another owner's agent. That single rule is why
+// none of this needs an approval prompt — an agent reporting to its own owner is
+// not a consent moment, it is the agent doing its job. An agent messaging a THIRD
+// party would be ("may I send this?"), and that is the day this becomes a surface
+// with a RequireApproval policy. It would also need the policy engine to
+// distinguish who is acting, which it cannot today: ManifestPolicyEngine.Evaluate
+// never sees the principal, so one decision would cover the person too and they
+// would be made to approve their own messages.
+//
+// The directory stays human-only. Who else exists on this machine is not something
+// an agent needs, and an agent that cannot enumerate people cannot pick a new
+// target for anything.
 public static class MessageApi
 {
     // One body for "no such person" and "not someone you can message", for the
@@ -28,26 +37,34 @@ public static class MessageApi
 
     public static void Map(WebApplication app)
     {
-        // Who you have talked to, plus who you could. A messenger needs a
-        // directory, and this one is every other PERSON on the machine — never an
-        // agent, which is not something you message, and never yourself.
+        // Who you have talked to, plus who you could: every other person on the
+        // machine, and your own agent. The agent belongs in this list because it
+        // starts conversations with you — when a job you were not watching finishes,
+        // this is where you find out — and a reply has to go somewhere.
         app.MapGet("/api/messages", (HttpContext context, IRuntimeStore store) =>
         {
             var caller = Caller(context);
+            var people = store.Users
+                .Where(user => !string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal))
+                .Select(user => new { Slug = user.Slug, DisplayName = user.DisplayName, IsAgent = false })
+                .Concat(store.Agents
+                    .Where(agent => Ownership.CanAccessHome(caller, agent.Slug, store))
+                    .Select(agent => new { Slug = agent.Slug, DisplayName = agent.Name, IsAgent = true }))
+                .OrderBy(person => person.IsAgent)
+                .ThenBy(person => person.DisplayName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+
             return Results.Ok(new
             {
                 Conversations = store.ListConversations(caller.Slug),
-                People = store.Users
-                    .Where(user => !string.Equals(user.Slug, caller.Slug, StringComparison.Ordinal))
-                    .OrderBy(user => user.DisplayName, StringComparer.CurrentCultureIgnoreCase)
-                    .Select(user => new { user.Slug, user.DisplayName })
+                People = people
             });
         });
 
         app.MapGet("/api/messages/{slug}", (string slug, HttpContext context, IRuntimeStore store) =>
         {
             var caller = Caller(context);
-            if (!IsMessageablePerson(slug, caller, store))
+            if (!MessageRules.MayConverseWith(slug, caller, store))
             {
                 return Results.NotFound(NoSuchPerson);
             }
@@ -68,7 +85,7 @@ public static class MessageApi
         app.MapPost("/api/messages/{slug}", (string slug, SendMessageRequest? request, HttpContext context, IRuntimeStore store) =>
         {
             var caller = Caller(context);
-            if (!IsMessageablePerson(slug, caller, store))
+            if (!MessageRules.MayConverseWith(slug, caller, store))
             {
                 return Results.NotFound(NoSuchPerson);
             }
@@ -94,22 +111,17 @@ public static class MessageApi
         });
     }
 
-    // A person, not an agent, not yourself, and someone who actually exists. All
-    // three failures answer identically.
-    private static bool IsMessageablePerson(string slug, RuntimePrincipal caller, IRuntimeStore store) =>
-        !string.Equals(slug, caller.Slug, StringComparison.Ordinal)
-        && store.Users.Any(user => string.Equals(user.Slug, slug, StringComparison.Ordinal));
-
     private static RuntimePrincipal Caller(HttpContext context) =>
         (RuntimePrincipal)context.Items["principal"]!;
 
     private static void AppendAudit(IRuntimeStore store, RuntimePrincipal caller, string action, string detail)
     {
         var userId = caller.Kind == PrincipalKind.Human ? caller.Subject : (Guid?)null;
+        var agentId = caller.Kind == PrincipalKind.Agent ? caller.Subject : (Guid?)null;
         // The message TEXT is not in the detail. An audit trail an administrator
         // can read must not turn into a transcript of everyone's private messages —
         // that it happened is the auditable fact, not what was said.
-        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, userId, null,
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, userId, agentId,
             action, AuditOutcome.Success, detail, Principal: caller.Slug));
     }
 }
