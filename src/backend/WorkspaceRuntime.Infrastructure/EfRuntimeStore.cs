@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Storage;
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
 
@@ -23,9 +25,17 @@ public sealed class EfRuntimeStore : IRuntimeStore
     {
         using var context = contextFactory.CreateDbContext();
 
-        // Testing / first-run: build the schema straight from the model, so a new
-        // column needs no migration. No history and no upgrade path — exactly right
-        // while the schema is still being shaken out. Production keeps Migrate().
+        // Tests only, and opt-in: build the schema straight from the model, so a
+        // new column needs no migration. No history and no upgrade path.
+        //
+        // This used to be the DEFAULT, including in production, and the comment here
+        // claimed "Production keeps Migrate()" while nothing in distro/ or release/
+        // ever set the flag that would have made that true. The effect was that every
+        // installed machine built its schema once and then never changed it: fresh
+        // installs were always correct, and an existing machine taking a new release
+        // crash-looped on the first query for a column no migration had ever added
+        // (#49). Defaulting to Migrate() means a mistake now fails on a fresh install,
+        // where it is loud and harmless, instead of on someone's running machine.
         if (ensureCreated)
         {
             context.Database.EnsureCreated();
@@ -33,12 +43,28 @@ public sealed class EfRuntimeStore : IRuntimeStore
         else
         {
 
+        // A schema built by EnsureCreated has no history at all, so there is no way
+        // to tell WHICH migrations it already reflects. Migrate() would try to create
+        // tables that are already there and fail with something about a duplicate
+        // table, which reads like a corrupt database rather than a recoverable one.
+        // Say what actually happened, and leave the data untouched.
+        var appliedMigrations = context.Database.GetAppliedMigrations().ToList();
+        if (appliedMigrations.Count == 0
+            && context.Database.GetService<IRelationalDatabaseCreator>().HasTables())
+        {
+            throw new InvalidOperationException(
+                "This database has tables but no migration history, so it was created by a build that "
+                + "used EnsureCreated (#49). Which schema version it holds cannot be determined, and "
+                + "migrating it blindly would risk the data. Export what you need, or stamp "
+                + "__EFMigrationsHistory to the version this schema actually matches, then restart.");
+        }
+
         // A DB that was migrated by a newer build contains history rows this build
         // does not know about. Applying this build's migrations to it would either
         // no-op or fail later in a query; refusing here makes the rollback path
         // explicit and points at the backup that the newer build should have left.
         var knownMigrations = context.Database.GetMigrations().ToHashSet(StringComparer.Ordinal);
-        var unknownAppliedMigrations = context.Database.GetAppliedMigrations()
+        var unknownAppliedMigrations = appliedMigrations
             .Where(migration => !knownMigrations.Contains(migration))
             .ToList();
         if (unknownAppliedMigrations.Count > 0)

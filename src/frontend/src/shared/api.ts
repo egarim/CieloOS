@@ -315,3 +315,102 @@ export async function ensureAgentSession(agentSlug: string): Promise<void> {
   }
   await command("session", "create", { owner: agentSlug, profile: "agent-console" });
 }
+
+// ---------------------------------------------------------------------------
+// Threads: where a conversation lives between visits.
+
+export type ThreadSummary = {
+  id: string;
+  ownerSlug: string;
+  title: string;
+  state: string;
+  createdAt: string;
+  lastActivityAt: string;
+};
+
+export type ThreadMessage = {
+  id: string;
+  threadId: string;
+  role: "Person" | "Agent";
+  text: string;
+  createdAt: string;
+};
+
+export type ThreadDetail = ThreadSummary & { messages: ThreadMessage[] };
+
+export const listThreads = () => api<ThreadSummary[]>("/api/threads");
+
+export const getThread = (id: string) => api<ThreadDetail>(`/api/threads/${id}`);
+
+export const createThread = (title: string, message: string) =>
+  api<ThreadSummary>("/api/threads", {
+    method: "POST",
+    body: JSON.stringify({ title, message }),
+  });
+
+// The streaming ask. The endpoint has emitted per-step progress all along — the
+// portal simply never asked for it, so a minute of work looked like a frozen page.
+//
+// Steps are identified by the cielo_step flag the server sets, NOT by sniffing the
+// "›" the text happens to start with. A client that recognised progress by a
+// character would break silently the day anyone restyled it: commands would just
+// start appearing inside the answer.
+export async function askAgentStreaming(
+  messages: AgentChatMessage[],
+  options: { threadId?: string; onStep: (text: string) => void; onReply: (text: string) => void },
+): Promise<void> {
+  const response = await fetch("/v1/agent/chat/completions", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ stream: true, messages, thread_id: options.threadId }),
+  });
+  if (response.status === 401) {
+    throw new UnauthorizedError("The session token was rejected.");
+  }
+  if (!response.ok || !response.body) {
+    throw new ApiError(response.status, await response.text().catch(() => "The agent could not be reached."));
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  // SSE frames are separated by a blank line and can be split across reads, so the
+  // tail of the buffer is kept rather than parsed. Reading line-by-line as chunks
+  // arrive would truncate any reply that happened to straddle a packet boundary.
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let separator = buffer.indexOf("\n\n");
+    while (separator !== -1) {
+      const frame = buffer.slice(0, separator).trim();
+      buffer = buffer.slice(separator + 2);
+      separator = buffer.indexOf("\n\n");
+
+      if (!frame.startsWith("data:")) continue;
+      const payload = frame.slice(5).trim();
+      if (payload === "[DONE]") return;
+
+      try {
+        const parsed = JSON.parse(payload) as {
+          cielo_step?: boolean;
+          choices?: { delta?: { content?: string; cielo_step?: boolean } }[];
+        };
+        const delta = parsed.choices?.[0]?.delta;
+        const content = delta?.content ?? "";
+        if (!content) continue;
+        if (delta?.cielo_step === true || parsed.cielo_step === true) {
+          options.onStep(content.trim());
+        } else {
+          options.onReply(content);
+        }
+      } catch {
+        // A frame we cannot parse is skipped rather than thrown: losing one line of
+        // progress is not a reason to fail a request the agent already completed.
+      }
+    }
+  }
+}

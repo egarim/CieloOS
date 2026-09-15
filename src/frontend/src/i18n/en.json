@@ -530,5 +530,9 @@
   "portal.widgets.cancel": "Cancel",
   "portal.widgets.run": "Run",
   "portal.widgets.remove": "Remove this task",
-  "portal.widgets.done": "Done. Check Files for anything Cielo made."
+  "portal.widgets.done": "Done. Check Files for anything Cielo made.",
+  "portal.chat.newThread": "New conversation",
+  "portal.chat.threads": "Your conversations",
+  "portal.chat.threadsError": "Could not load your conversations.",
+  "portal.chat.doing": "What Cielo is doing"
 }

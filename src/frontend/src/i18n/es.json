@@ -530,5 +530,9 @@
   "portal.widgets.cancel": "Cancelar",
   "portal.widgets.run": "Ejecutar",
   "portal.widgets.remove": "Eliminar esta tarea",
-  "portal.widgets.done": "Listo. Mira en Archivos lo que Cielo haya creado."
+  "portal.widgets.done": "Listo. Mira en Archivos lo que Cielo haya creado.",
+  "portal.chat.newThread": "Nueva conversación",
+  "portal.chat.threads": "Tus conversaciones",
+  "portal.chat.threadsError": "No se pudieron cargar tus conversaciones.",
+  "portal.chat.doing": "Qué está haciendo Cielo"
 }

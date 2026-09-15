@@ -530,5 +530,9 @@
   "portal.widgets.cancel": "Отмена",
   "portal.widgets.run": "Запустить",
   "portal.widgets.remove": "Удалить эту задачу",
-  "portal.widgets.done": "Готово. Посмотрите в Файлах, что создал Cielo."
+  "portal.widgets.done": "Готово. Посмотрите в Файлах, что создал Cielo.",
+  "portal.chat.newThread": "Новый разговор",
+  "portal.chat.threads": "Ваши разговоры",
+  "portal.chat.threadsError": "Не удалось загрузить ваши разговоры.",
+  "portal.chat.doing": "Что делает Cielo"
 }

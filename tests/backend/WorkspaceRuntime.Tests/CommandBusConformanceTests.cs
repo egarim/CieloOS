@@ -29,6 +29,10 @@ public class CommandBusConformanceTests
                                        // machine is an ordinary policy-checked console.type, so the bus sees
                                        // all of it; this endpoint only decides what to ask the agent for.
         "/api/users",                  // add a teammate: control-plane identity creation, human-only
+        "/api/threads",                // start a conversation: the person's own record of what they
+                                       // delegated. Nothing in a workspace changes, and authorship is
+                                       // taken from the caller rather than the body, so this cannot be
+                                       // used to forge a message from someone else.
         "/api/usage/limits",           // set a model budget: an owner's ceiling on spend, human-only
         "/api/auth/login",             // sign in: the control plane's own front door
         "/api/auth/logout",

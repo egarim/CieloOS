@@ -53,7 +53,7 @@ switch (databaseProvider)
             ?? throw new InvalidOperationException("Database:PostgresConnection is required when Database:Provider is postgres.");
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseNpgsql(postgresConnection));
         builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled,
-            ensureCreated: !string.Equals(builder.Configuration["Database:EnsureCreated"], "false", StringComparison.OrdinalIgnoreCase)));
+            ensureCreated: string.Equals(builder.Configuration["Database:EnsureCreated"], "true", StringComparison.OrdinalIgnoreCase)));
         break;
 
     case "sqlite":
@@ -66,7 +66,7 @@ switch (databaseProvider)
         }
         builder.Services.AddDbContextFactory<RuntimeDbContext>(options => options.UseSqlite($"Data Source={sqlitePath}"));
         builder.Services.AddSingleton<IRuntimeStore>(sp => new EfRuntimeStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>(), demoEnabled, sqlitePath,
-            ensureCreated: !string.Equals(builder.Configuration["Database:EnsureCreated"], "false", StringComparison.OrdinalIgnoreCase)));
+            ensureCreated: string.Equals(builder.Configuration["Database:EnsureCreated"], "true", StringComparison.OrdinalIgnoreCase)));
         break;
 
     default:
@@ -1845,6 +1845,37 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
         return file?.Content;
     }
 
+    // A thread the caller may write to, or nothing. Resolved before any work starts,
+    // so an unreachable thread fails here rather than after the agent has already
+    // spent a minute and the person is owed an answer.
+    //
+    // The messages are written HERE rather than by the browser because authorship is
+    // not the caller's to claim: POST /api/threads/{id}/messages derives the role
+    // from who is calling, so a person can only ever write a Person message. The
+    // agent's reply has to be recorded by something that legitimately speaks for the
+    // agent, and that is this endpoint, which just ran it.
+    WorkspaceRuntime.Domain.Thread? thread = null;
+    if (request.ThreadId is { } threadId)
+    {
+        var detail = store.GetThread(threadId);
+        if (detail is not null && Ownership.CanAccessHome(caller, detail.Thread.OwnerSlug, store))
+        {
+            thread = detail.Thread;
+        }
+    }
+
+    void RecordInThread(ThreadMessageRole role, string text)
+    {
+        if (thread is null || string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        store.AppendThreadMessage(thread.Id, role, text);
+    }
+
+    RecordInThread(ThreadMessageRole.Person, userMessage);
+
     var outboxBefore = await ReadOutboxAsync();
 
     async Task<string> ReplyOfAsync(ConsoleLoopResult run)
@@ -1896,11 +1927,19 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
                 {
                     if (step.Done || string.IsNullOrWhiteSpace(step.Text)) return;
                     typed++;
-                    await SendAsync(Chunk(new { content = $"› `{step.Text}`\n" }, null));
+                    // Marked as a step, not merely prefixed with "> ". A client that
+                    // had to recognise progress by sniffing for a particular
+                    // character would break the day somebody restyled the prefix,
+                    // and the break would be silent: the command would simply start
+                    // appearing in the middle of the answer. The extra field is
+                    // ignored by OpenAI-compatible clients, which is why it is safe
+                    // to put here rather than in a shape of our own.
+                    await SendAsync(Chunk(new { cielo_step = true, content = $"› `{step.Text}`\n" }, null));
                 },
                 model: billed);
 
             var reply = await ReplyOfAsync(run);
+            RecordInThread(ThreadMessageRole.Agent, reply);
             await SendAsync(Chunk(new { content = typed > 0 ? $"\n{reply}" : reply }, null));
         }
 
@@ -1919,6 +1958,8 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
     {
         var run = await loop.RunAsync(session.Id, goal, 8, caller, userId, agentId, brain, cancellationToken, model: billed);
         var reply = await ReplyOfAsync(run);
+
+        RecordInThread(ThreadMessageRole.Agent, reply);
 
         var actions = string.Join("\n", run.Steps
             .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
@@ -2440,7 +2481,10 @@ public sealed record AgentChatMessage(
 public sealed record AgentChatRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("model")] string? Model,
     [property: System.Text.Json.Serialization.JsonPropertyName("messages")] List<AgentChatMessage>? Messages,
-    [property: System.Text.Json.Serialization.JsonPropertyName("stream")] bool? Stream);
+    [property: System.Text.Json.Serialization.JsonPropertyName("stream")] bool? Stream,
+    // Which conversation this belongs to. Optional: the OpenAI-compatible clients
+    // that also use this endpoint know nothing about threads and must keep working.
+    [property: System.Text.Json.Serialization.JsonPropertyName("thread_id")] Guid? ThreadId);
 
 public sealed record OpenAiCompatChatRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("model")] string? Model,
