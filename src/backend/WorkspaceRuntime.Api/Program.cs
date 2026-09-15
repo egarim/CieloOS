@@ -1879,21 +1879,100 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
 
     var outboxBefore = await ReadOutboxAsync();
 
+    // A reply is not evidence. The agent once answered "Done! saved as
+    // mountains.xlsx", in the best prose of the day, having run exactly one command
+    // — a READ of a different file that happened to already exist (#50). Nothing in
+    // that reply invited doubt, which is what made it worse than failing.
+    //
+    // So the runtime checks before the claim reaches a person. It is the runtime's
+    // check to make, not the model's: a model that would reliably notice would not
+    // have made the claim in the first place.
+    async Task<string> VerifiedAsync(string reply, ConsoleLoopResult run)
+    {
+        var owner = Ownership.RootUserSlug(caller.Slug, store);
+        var listing = await home.ListSharedAsync(owner, "", cancellationToken);
+        var present = new HashSet<string>(
+            listing?.Entries.Select(entry => entry.Name) ?? Array.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+
+        // EndsWith as well as equality, because a name with a space in it arrives
+        // here as its last word. This tolerance can only cause a claim to be MISSED,
+        // never invented — which is the right way round: a false correction under a
+        // truthful reply would teach people to ignore corrections everywhere.
+        bool IsPresent(string name) =>
+            present.Contains(name)
+            || present.Any(entry => entry.EndsWith(name, StringComparison.OrdinalIgnoreCase));
+
+        var missing = ClaimedFiles.In(reply)
+            .Where(name => !IsPresent(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (missing.Count == 0)
+        {
+            return reply;
+        }
+
+        // Recorded, because an agent claiming a file it did not write is exactly the
+        // kind of thing an owner should be able to find later without having kept
+        // the conversation.
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, userId, agentId,
+            "agent.unverified-claim", AuditOutcome.Blocked,
+            $"Reply named {string.Join(", ", missing)}, absent from '{owner}' shared workspace.",
+            Principal: caller.Slug));
+
+        // The agent's own words are kept. We cannot know whether it meant "I made
+        // this" or "I could not find this", and rewriting someone's answer to fit
+        // our guess is its own kind of dishonesty. What we can say is what is true.
+        var names = string.Join(", ", missing);
+        var correction = missing.Count == 1
+            ? $"**{names} is not in your files.** It was named above but never arrived, so whatever was described has not been saved."
+            : $"**These are not in your files: {names}.** They were named above but never arrived, so whatever was described has not been saved.";
+
+        return $"{reply}\n\n---\n\n{correction}";
+    }
+
+    // What the person is told when the loop ran out of road.
+    //
+    // It used to be `run.Steps.LastOrDefault(s => s.Note is not null)?.Note`, which
+    // handed back the agent's own internal reasoning as if it were an answer — "Need
+    // to inspect the contents of all three xlsx files" (#51). That is a thought, not
+    // a reply, and it left the person unable to tell whether anything had happened.
+    static string UnfinishedReply(ConsoleLoopResult run)
+    {
+        var did = run.Steps
+            .Where(step => !step.Done && !string.IsNullOrWhiteSpace(step.Text))
+            .Select(step => step.Text!.Trim())
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        var what = did.Count == 0
+            ? "I did not get as far as doing anything on the machine."
+            : $"I got as far as running {did.Count} command{(did.Count == 1 ? "" : "s")}, which you can see below.";
+
+        var why = string.IsNullOrWhiteSpace(run.StopReason)
+            ? "I ran out of steps before I could finish."
+            : run.StopReason.Trim();
+
+        return $"I could not finish this. {what}\n\nReason: {why}\n\n"
+            + "If part of what you asked is unclear, tell me which part and I will start again from there.";
+    }
+
     async Task<string> ReplyOfAsync(ConsoleLoopResult run)
     {
         var finished = run.Steps.LastOrDefault(step => step.Done && !string.IsNullOrWhiteSpace(step.Note));
         if (finished?.Note is { } note && !string.IsNullOrWhiteSpace(note))
         {
-            return note.Trim();
+            return await VerifiedAsync(note.Trim(), run);
         }
 
         var outboxAfter = await ReadOutboxAsync();
         if (!string.IsNullOrWhiteSpace(outboxAfter) && !string.Equals(outboxAfter, outboxBefore, StringComparison.Ordinal))
         {
-            return outboxAfter.Trim();
+            return await VerifiedAsync(outboxAfter.Trim(), run);
         }
 
-        return run.Steps.LastOrDefault(step => step.Note is not null)?.Note ?? run.StopReason;
+        return UnfinishedReply(run);
     }
 
     if (request.Stream == true)
@@ -2493,3 +2572,28 @@ public sealed record OpenAiCompatChatRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("temperature")] double? Temperature,
     [property: System.Text.Json.Serialization.JsonPropertyName("max_tokens")] int? MaxTokens,
     [property: System.Text.Json.Serialization.JsonPropertyName("response_format")] JsonElement? ResponseFormat);
+
+// Files a reply claims exist.
+//
+// Only document-ish extensions, so "python3.11", "api.deepseek.com" and "wb.active"
+// are not mistaken for deliverables. This exists to catch "I saved it as
+// report.xlsx" (#50), not to parse prose, and it errs towards missing a claim
+// rather than inventing one: a false correction on a reply that was true would
+// teach people to ignore corrections everywhere.
+public static class ClaimedFiles
+{
+    private static readonly System.Text.RegularExpressions.Regex Pattern = new(
+        // No spaces in the class. Allowing them made the match swallow the words
+        // before the name — "Saved as report.xlsx" captured the whole phrase. A
+        // file genuinely named "quarterly summary.xlsx" is therefore seen as
+        // "summary.xlsx", which the presence check below tolerates deliberately.
+        //
+        // "/" is allowed immediately before, so a path yields its basename, which
+        // is what a directory listing can be compared against.
+        @"(?<![\w.\-])(?<name>[\w][\w.\-]{0,80}?\.(?:xlsx|xls|csv|docx|doc|pdf|pptx|txt|md|json|png|jpg|jpeg|zip))(?![\w])",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    public static IEnumerable<string> In(string text) =>
+        Pattern.Matches(text ?? "").Select(match => match.Groups["name"].Value.Trim());
+}
