@@ -1108,6 +1108,8 @@ app.MapGet("/api/approvals", async (HttpContext context, IRuntimeStore store, ID
 
 ThreadApi.Map(app);
 MessageApi.Map(app);
+// Engines reach the bus here, and only here (docs/agent-engines.md).
+McpApi.Map(app);
 
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {
@@ -2282,30 +2284,10 @@ static (Guid userId, Guid agentId) ActingAgent(RuntimePrincipal principal, Guid?
     return (principal.Subject, chosen);
 }
 
-static Dictionary<string, string> ToArguments(Dictionary<string, JsonElement>? input)
-{
-    var arguments = new Dictionary<string, string>(StringComparer.Ordinal);
-    if (input is null)
-    {
-        return arguments;
-    }
-
-    foreach (var pair in input)
-    {
-        // JSON null/undefined values are treated as absent, not as the
-        // literal string "null" — the required-input validation catches them.
-        if (pair.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
-        {
-            continue;
-        }
-
-        arguments[pair.Key] = pair.Value.ValueKind == JsonValueKind.String
-            ? pair.Value.GetString() ?? ""
-            : pair.Value.GetRawText();
-    }
-
-    return arguments;
-}
+// Shared with the MCP server, so both ways into the bus agree on what an absent
+// argument is. See SurfaceArguments.
+static Dictionary<string, string> ToArguments(Dictionary<string, JsonElement>? input) =>
+    SurfaceArguments.From(input);
 
 public sealed record SurfaceCommandRequest(
     Dictionary<string, JsonElement>? Input,

@@ -63,6 +63,9 @@ public sealed record ExampleRun(
 public sealed class ExampleRunner
 {
     private readonly ConcurrentDictionary<string, ExampleRun> runs = new(StringComparer.Ordinal);
+    // Guards the read-then-write in TryClaim. The dictionary stays concurrent for
+    // the lock-free readers (Current, Update).
+    private readonly object claimGate = new();
 
     public ExampleRun? Current(string owner) => runs.GetValueOrDefault(owner);
 
@@ -70,22 +73,32 @@ public sealed class ExampleRunner
     {
         // Read-then-write is not atomic just because the dictionary is: two
         // requests a millisecond apart could both see "nothing running" and both
-        // start driving the same desktop. AddOrUpdate runs its factory under the
-        // bucket lock, so exactly one of them wins.
-        var claimed = false;
-        runs.AddOrUpdate(
-            owner,
-            _ => { claimed = true; return run; },
-            (_, existing) =>
+        // start driving the same desktop.
+        //
+        // This used to be AddOrUpdate, on the belief that its factory runs under
+        // the bucket lock so exactly one caller could win. It does not.
+        // ConcurrentDictionary invokes the factories OUTSIDE the lock and may
+        // invoke them more than once; only the final insert is atomic. So every
+        // racing caller ran the factory, every one of them set claimed = true, and
+        // the gate was open to all of them. 64 concurrent callers produced 10
+        // winners.
+        //
+        // The test for this had been green for months. It only started failing when
+        // the machine was busy enough for Parallel.For to actually run in parallel
+        // — the race was always there, the test just never achieved one.
+        //
+        // A plain lock instead. Contention is one person starting one demo.
+        lock (claimGate)
+        {
+            if (runs.TryGetValue(owner, out var existing)
+                && existing.State is ExampleRunState.Running or ExampleRunState.AwaitingApproval)
             {
-                if (existing.State is ExampleRunState.Running or ExampleRunState.AwaitingApproval)
-                {
-                    return existing;
-                }
-                claimed = true;
-                return run;
-            });
-        return claimed;
+                return false;
+            }
+
+            runs[owner] = run;
+            return true;
+        }
     }
 
     public void Update(string owner, Func<ExampleRun, ExampleRun> change)
