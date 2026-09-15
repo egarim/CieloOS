@@ -1903,7 +1903,7 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
             present.Contains(name)
             || present.Any(entry => entry.EndsWith(name, StringComparison.OrdinalIgnoreCase));
 
-        var missing = ClaimedFiles.In(reply)
+        var missing = ClaimedFiles.ClaimedAsDone(reply)
             .Where(name => !IsPresent(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -2596,4 +2596,63 @@ public static class ClaimedFiles
 
     public static IEnumerable<string> In(string text) =>
         Pattern.Matches(text ?? "").Select(match => match.Groups["name"].Value.Trim());
+
+    // A file the reply says ALREADY EXISTS, as opposed to one it offers to make.
+    //
+    // The first version of this checked every filename, and corrected an agent that
+    // had answered honestly: asked for a summary with no data, it declined to invent
+    // numbers, asked where the figures were, and said "once I have that, I'll produce
+    // quarterly_summary.xlsx". A correction appeared under that, claiming the file
+    // "never arrived" — which was true and completely beside the point.
+    //
+    // That is the exact failure this was supposed to avoid. A correction printed
+    // under a truthful reply teaches people to skip corrections, and then the one
+    // that matters is skipped too.
+    //
+    // So a claim needs a completion cue in the same sentence, and no cue that it is
+    // something the agent intends to do later. Both lists err the same way: miss a
+    // fabrication rather than invent one.
+    private static readonly string[] Done =
+    {
+        "saved", "wrote", "written", "created", "generated", "produced", "built",
+        "is at", "is in", "it's at", "it's in", "available at", "you can open",
+        "you'll find", "you will find", "done", "finished", "ready at",
+    };
+
+    private static readonly string[] NotYet =
+    {
+        "i'll", "i will", "once ", "after ", "when you", "going to", "plan to",
+        "would ", "could ", "can produce", "let me know", "if you",
+    };
+
+    public static IEnumerable<string> ClaimedAsDone(string text)
+    {
+        foreach (System.Text.RegularExpressions.Match match in Pattern.Matches(text ?? ""))
+        {
+            var sentence = SentenceAround(text!, match.Index);
+            var lower = sentence.ToLowerInvariant();
+            if (Done.Any(cue => lower.Contains(cue, StringComparison.Ordinal))
+                && !NotYet.Any(cue => lower.Contains(cue, StringComparison.Ordinal)))
+            {
+                yield return match.Groups["name"].Value.Trim();
+            }
+        }
+    }
+
+    // Sentence rather than a fixed window: "I'll produce x.xlsx" and "I saved
+    // x.xlsx" can sit two lines apart in the same reply, and a character count
+    // would mix them.
+    private static string SentenceAround(string text, int index)
+    {
+        // Sentence rather than a fixed window: "I'll produce x.xlsx" and "I saved
+        // x.xlsx" can sit two lines apart in one reply, and a character count would
+        // mix them.
+        var breaks = new char[] { '.', '!', '?', (char)10, (char)13 };
+        var at = Math.Max(0, Math.Min(index, text.Length - 1));
+        var start = text.LastIndexOfAny(breaks, at);
+        var end = text.IndexOfAny(breaks, at);
+        start = start < 0 ? 0 : start + 1;
+        end = end < 0 ? text.Length : end;
+        return end > start ? text[start..end] : "";
+    }
 }

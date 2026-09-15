@@ -71,6 +71,64 @@ public class ClaimedFilesTests
         Assert.All(found, name => Assert.Equal("mountains.xlsx", name));
     }
 
+    // The reply that exposed the first version of this checker as too eager. Asked
+    // for a summary with no data, the agent declined to invent numbers, asked where
+    // the figures were, and OFFERED to make a file. A correction appeared underneath
+    // saying the file "never arrived" — true, and completely beside the point.
+    //
+    // A correction printed under a truthful reply teaches people to skip
+    // corrections, and then the one that matters gets skipped too.
+    private const string HonestRefusal = """
+        I don't have the actual quarterly data to summarize — I don't see any source
+        figures in our shared workspace. The only thing I found in ~/shared is an
+        unrelated mountains.xlsx from earlier work.
+
+        So I can't build a real summary without guessing, and I'd rather not hand you
+        a spreadsheet full of invented numbers.
+
+        Once I have that, I'll produce ~/shared/quarterly_summary.xlsx with a clean
+        summary sheet and let you know it's ready.
+        """;
+
+    [Fact]
+    public void An_offer_to_make_a_file_is_not_a_claim_to_have_made_one()
+    {
+        var claimed = ClaimedFiles.ClaimedAsDone(HonestRefusal).ToList();
+
+        Assert.DoesNotContain("quarterly_summary.xlsx", claimed);
+        // mountains.xlsx is named as something it FOUND, which is a claim about the
+        // present — but it is in the workspace, so the caller will not correct it.
+        // What matters here is that the promise is not treated as a claim.
+    }
+
+    [Fact]
+    public void The_fabrication_is_still_caught()
+    {
+        // The whole point: tightening this must not let #50 back through.
+        Assert.Contains("mountains.xlsx", ClaimedFiles.ClaimedAsDone(RealReply));
+    }
+
+    [Theory]
+    [InlineData("I saved it as report.xlsx", "report.xlsx")]
+    [InlineData("Done — data.csv is in your shared folder.", "data.csv")]
+    [InlineData("I've created notes.md for you.", "notes.md")]
+    [InlineData("You'll find summary.pdf there now.", "summary.pdf")]
+    public void Claims_of_completion_are_caught(string reply, string expected)
+    {
+        Assert.Contains(expected, ClaimedFiles.ClaimedAsDone(reply));
+    }
+
+    [Theory]
+    [InlineData("I'll produce report.xlsx once you send the figures.")]
+    [InlineData("I could generate summary.csv if that helps.")]
+    [InlineData("Would you like me to write notes.md?")]
+    [InlineData("Let me know and I'll put it in results.xlsx.")]
+    [InlineData("After you upload data.csv I can start.")]
+    public void Offers_and_questions_are_not_claims(string reply)
+    {
+        Assert.Empty(ClaimedFiles.ClaimedAsDone(reply));
+    }
+
     [Fact]
     public void Nothing_in_nothing_out()
     {
