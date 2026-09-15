@@ -135,7 +135,7 @@ public sealed class SessionOrchestrator : ISurfaceExecutor, ISessionBackend, ICo
 
     private async Task<ToolExecutionResult> CreateAsync(string owner, string profile, CancellationToken cancellationToken)
     {
-        var id = $"{owner}-{Guid.NewGuid():N}"[..Math.Min(owner.Length + 9, 40)];
+        var id = SessionNaming.NewId(owner);
         var name = options.NamePrefix + id;
         var homeVolume = options.HomeVolumePrefix + owner;
 
