@@ -54,15 +54,28 @@ public class UntrustedTextTests
     }
 
     [Fact]
-    public void Ordinary_text_is_left_alone()
+    public void Ordinary_words_survive_even_though_structure_does_not()
     {
-        // The failure mode of a neutraliser is mangling honest content. Nothing here
-        // resembles the marker, so nothing should change.
+        // The rule got stricter when project text started using this envelope:
+        // angle brackets go entirely rather than the closing marker being escaped.
+        // There is no escaping convention a model is guaranteed to honour, and
+        // nothing downstream parses this back out, so the cheapest correct thing is
+        // that content cannot express structure AT ALL — no clever spacing to
+        // reason about.
+        //
+        // The cost is a literal angle bracket in page text, which arrives here
+        // already tag-stripped. The WORDS have to survive, or an agent cannot tell
+        // its owner what a page said.
         const string ordinary = "Prices are in EUR; see section 2 <b>bold</b> & co.";
         var wrapped = UntrustedPageText.Wrap("https://example.test/a?b=1&c=2", ordinary);
 
-        Assert.Contains(ordinary, wrapped, StringComparison.Ordinal);
+        Assert.Contains("Prices are in EUR; see section 2", wrapped, StringComparison.Ordinal);
+        Assert.Contains("bold", wrapped, StringComparison.Ordinal);
+        Assert.Contains("& co.", wrapped, StringComparison.Ordinal);
         Assert.Contains("https://example.test/a?b=1&c=2", wrapped, StringComparison.Ordinal);
         Assert.Contains(UntrustedPageText.Preamble, wrapped, StringComparison.Ordinal);
+
+        // And the structure is gone.
+        Assert.DoesNotContain("<b>", wrapped, StringComparison.Ordinal);
     }
 }

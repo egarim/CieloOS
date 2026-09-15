@@ -1982,9 +1982,19 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
         ? ""
         : "Earlier in this conversation:\n" + string.Join("\n", priorTurns) + "\n\n";
 
+    // BEFORE the owner's ask, deliberately.
+    //
+    // The goal ends with the owner's message and a block of runtime-voice
+    // instructions. Putting third-party text AFTER all of that would give it the
+    // most recency-salient position in the prompt and strand the runtime's own
+    // guidance behind it — so the position is part of the mitigation, not a
+    // formatting preference, and there is a test asserting it sits before the ask.
+    var projectBriefing = ProjectBriefing.Compose(Ownership.RootUserSlug(caller.Slug, store), store);
+
     var goal =
         whereYouAre +
         history +
+        projectBriefing +
         $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
         "If you can answer from what you already know, just answer — do not touch the console. " +
         "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
