@@ -52,7 +52,7 @@
   "portal.permission.notYours": "Esta solicitud ya no te corresponde decidirla.",
   "portal.permission.failed": "Cielo no pudo guardar tu respuesta. Inténtalo de nuevo.",
   "portal.chat.lead": "Pídele algo a Cielo. Trabaja en un ordenador propio, así que puede buscar información, escribir documentos y hojas de cálculo, y dejártelos en tus archivos. Cuando termine algo que no estabas mirando, te avisará en Mensajes.",
-  "portal.chat.placeholder": "Hazme un top 10 de las montañas más altas en una hoja de cálculo",
+  "portal.chat.placeholder": "Pide una hoja de cálculo, un resumen, una búsqueda...",
   "portal.chat.inputLabel": "¿Qué quieres que haga Cielo?",
   "portal.chat.send": "Enviar",
   "portal.chat.waking": "Despertando a Cielo...",

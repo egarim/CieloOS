@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, MessageSquarePlus, Send, Terminal } from "lucide-react";
+import { Loader2, MessagesSquare, MessageSquarePlus, Send, Terminal } from "lucide-react";
 import {
   askAgentStreaming,
   createThread,
@@ -49,6 +49,11 @@ export function Chat({ whoami }: { whoami: Whoami }) {
   const [steps, setSteps] = React.useState<string[]>([]);
   const [pending, setPending] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  // Narrow screens show the list or the conversation, never both. It is explicit
+  // state rather than derived from "is a thread open", because a NEW conversation
+  // has no thread yet and still needs the composer — deriving it hid the only way
+  // to type.
+  const [listOpen, setListOpen] = React.useState(false);
   const endRef = React.useRef<HTMLDivElement | null>(null);
 
   const agentSlug = whoami.homes.find((home) => home !== whoami.slug) ?? `${whoami.slug}-agent`;
@@ -168,10 +173,18 @@ export function Chat({ whoami }: { whoami: Whoami }) {
     }
   }
 
+  // On a phone you are either picking a conversation or in one. Stacked, the list
+  // pushes the conversation off the screen and the composer below the fold. On a
+  // laptop there is room for both, so this governs only the narrow case.
+
   return (
     <section className="flex min-h-[60vh] flex-col gap-4 md:flex-row">
-      <aside className="md:w-56 md:shrink-0">
-        <Button className="w-full" onClick={startNew} disabled={busy}>
+      <aside className={(listOpen ? "flex flex-col" : "hidden") + " md:flex md:w-56 md:shrink-0 md:flex-col"}>
+        {/* The phone shows this pane on its own, so it needs to say what it is.
+            On a laptop it sits beside a titled conversation and the heading would
+            be repetition. */}
+        <h2 className="mb-3 text-2xl font-semibold md:hidden">{t("portal.chat.threads")}</h2>
+        <Button className="w-full" onClick={() => { startNew(); setListOpen(false); }} disabled={busy}>
           <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
           {t("portal.chat.newThread")}
         </Button>
@@ -181,7 +194,7 @@ export function Chat({ whoami }: { whoami: Whoami }) {
             <button
               key={thread.id}
               type="button"
-              onClick={() => void openThread(thread.id)}
+              onClick={() => { setListOpen(false); void openThread(thread.id); }}
               disabled={busy}
               aria-current={thread.id === activeId ? "true" : undefined}
               className={
@@ -197,8 +210,19 @@ export function Chat({ whoami }: { whoami: Whoami }) {
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <h2 className="text-2xl font-semibold">{t("portal.nav.chat")}</h2>
+      <div className={(listOpen ? "hidden" : "flex") + " min-w-0 flex-1 flex-col md:flex"}>
+        <div className="flex items-center gap-2">
+          <h2 className="min-w-0 flex-1 truncate text-2xl font-semibold">{t("portal.nav.chat")}</h2>
+          {/* Phone only: the way back to the list, which is a rail on a laptop. */}
+          <button
+            type="button"
+            onClick={() => setListOpen(true)}
+            aria-label={t("portal.chat.threads")}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-200 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <MessagesSquare className="h-5 w-5" aria-hidden="true" />
+          </button>
+        </div>
 
         {messages.length === 0 && !busy ? (
           <p className="mt-2 max-w-prose text-sm leading-6 text-slate-600 dark:text-slate-300">

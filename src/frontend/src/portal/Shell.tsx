@@ -42,21 +42,24 @@ export function Shell({
   return (
     <div className="min-h-dvh bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-50">
       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-3">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
           <div className="min-w-0">
-            <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+            <p className="hidden text-xs font-medium text-slate-500 sm:block dark:text-slate-400">
               {t("portal.navigation")}
             </p>
-            <h1 className="break-words text-xl font-semibold">{t("portal.title")}</h1>
+            <h1 className="truncate text-lg font-semibold sm:text-xl">{t("portal.title")}</h1>
           </div>
 
-          <div className="ml-auto flex flex-wrap items-center gap-3">
-            <p className="min-w-0 break-words text-sm text-slate-600 dark:text-slate-300">
+          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
+            {/* Who you are is reassurance on a laptop and clutter on a phone, where
+                it pushed the language picker and sign-out onto a second row. */}
+            <p className="hidden min-w-0 truncate text-sm text-slate-600 lg:block dark:text-slate-300">
               {t("portal.user", { display: whoami.display })}
             </p>
             <label className="flex min-h-11 items-center gap-2 text-sm">
-              <span>{t("portal.language")}</span>
+              <span className="hidden sm:inline">{t("portal.language")}</span>
               <select
+                aria-label={t("portal.language")}
                 className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-1 text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
                 value={language}
                 onChange={(event) => onLanguageChange(event.target.value as Language)}
@@ -68,17 +71,21 @@ export function Shell({
                 ))}
               </select>
             </label>
-            <Button variant="ghost" onClick={onSignOut}>
+            <Button variant="ghost" onClick={onSignOut} aria-label={t("portal.signOut")}>
               <LogOut className="h-4 w-4" aria-hidden="true" />
-              {t("portal.signOut")}
+              <span className="hidden sm:inline">{t("portal.signOut")}</span>
             </Button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:flex-row">
+      {/* pb-24 on small screens keeps the last line of content clear of the fixed
+          bottom bar. Without it the composer sits underneath the navigation and
+          cannot be reached. */}
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 pb-24 md:flex-row md:pb-4">
+        {/* Desktop: a rail beside the work. */}
         <nav
-          className="grid grid-cols-2 gap-2 md:flex md:w-56 md:shrink-0 md:flex-col"
+          className="hidden md:flex md:w-56 md:shrink-0 md:flex-col md:gap-2"
           aria-label={t("portal.navigation")}
         >
           {PLACES.map((place) => {
@@ -100,6 +107,45 @@ export function Shell({
           <ActiveView whoami={whoami} />
         </main>
       </div>
+
+      {/* Mobile: a bottom bar, where a thumb is. A phone is not a narrow desktop,
+          and navigation stacked at the top of a scrolling page is out of reach by
+          the time you need it.
+
+          env(safe-area-inset-bottom) keeps it clear of the iOS home indicator;
+          without it the last row of targets sits under the gesture bar. */}
+      <nav
+        aria-label={t("portal.navigation")}
+        className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 backdrop-blur md:hidden dark:border-slate-800 dark:bg-slate-900/95"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        {PLACES.map((place) => {
+          const Icon = place.icon;
+          const isActive = place.id === active;
+          return (
+            <button
+              key={place.id}
+              type="button"
+              onClick={() => setActive(place.id)}
+              aria-current={isActive ? "page" : undefined}
+              className={
+                "relative flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-slate-500 " +
+                (isActive
+                  ? "text-slate-900 dark:text-slate-50"
+                  : "text-slate-500 dark:text-slate-400")
+              }
+            >
+              <Icon className="h-5 w-5 shrink-0" aria-hidden="true" />
+              {/* Russian runs ~30% longer; the label wraps to two short lines
+                  rather than being clipped or forcing the bar wider. */}
+              <span className="w-full text-center leading-tight break-words">{t(place.labelKey)}</span>
+              {isActive ? (
+                <span aria-hidden="true" className="absolute top-0 h-0.5 w-10 rounded-full bg-slate-900 dark:bg-slate-50" />
+              ) : null}
+            </button>
+          );
+        })}
+      </nav>
     </div>
   );
 }

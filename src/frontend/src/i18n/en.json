@@ -52,7 +52,7 @@
   "portal.permission.notYours": "This request is no longer yours to decide.",
   "portal.permission.failed": "Cielo could not record your answer. Try again.",
   "portal.chat.lead": "Ask Cielo to do something. It works on a real computer of its own, so it can look things up, write documents and spreadsheets, and put them in your files. When it finishes something you were not watching, it will tell you in Messages.",
-  "portal.chat.placeholder": "Make me a top 10 of the tallest mountains as a spreadsheet",
+  "portal.chat.placeholder": "Ask for a spreadsheet, a summary, a lookup...",
   "portal.chat.inputLabel": "What would you like Cielo to do?",
   "portal.chat.send": "Send",
   "portal.chat.waking": "Waking Cielo up...",

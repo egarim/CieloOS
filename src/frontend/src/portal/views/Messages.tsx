@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Bot, Loader2, Send } from "lucide-react";
+import { ArrowLeft, Bot, Loader2, Send } from "lucide-react";
 import {
   listMessages,
   readConversation,
@@ -135,10 +135,18 @@ export function Messages({ whoami }: { whoami: Whoami }) {
   // a new conversation is not a different gesture from continuing an old one.
   const talked = new Set(conversations.map((conversation) => conversation.withSlug));
   const others = people.filter((person) => !talked.has(person.slug));
+  // Your agent should look like your agent wherever it appears. It was only marked
+  // in the "everyone else" list, so once you had talked to it, it moved into the
+  // conversations list and became a pair of initials like any colleague.
+  const agentSlugs = new Set(people.filter((person) => person.isAgent).map((person) => person.slug));
+
+  // Same master/detail rule as Chat: on a phone, the list or the conversation,
+  // never both stacked with the composer below the fold.
+  const showList = activeSlug === null;
 
   return (
     <section className="flex min-h-[60vh] flex-col gap-4 md:flex-row">
-      <aside className="md:w-64 md:shrink-0">
+      <aside className={(showList ? "block" : "hidden") + " md:block md:w-64 md:shrink-0"}>
         <h2 className="text-2xl font-semibold">{t("portal.nav.messages")}</h2>
         <nav aria-label={t("portal.nav.messages")} className="mt-3 flex flex-col gap-1">
           {conversations.map((conversation) => (
@@ -158,7 +166,11 @@ export function Messages({ whoami }: { whoami: Whoami }) {
                 aria-hidden="true"
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-200"
               >
-                {initials(conversation.withDisplay)}
+                {agentSlugs.has(conversation.withSlug) ? (
+                  <Bot className="h-4 w-4" />
+                ) : (
+                  initials(conversation.withDisplay)
+                )}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block break-words font-medium">{conversation.withDisplay}</span>
@@ -216,7 +228,17 @@ export function Messages({ whoami }: { whoami: Whoami }) {
         </nav>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={(showList ? "hidden" : "flex") + " min-w-0 flex-1 flex-col md:flex"}>
+        {activeSlug !== null ? (
+          <button
+            type="button"
+            onClick={() => setActiveSlug(null)}
+            className="-ml-2 mb-2 flex h-11 w-fit items-center gap-2 rounded-lg px-2 text-sm text-slate-600 hover:bg-slate-200 md:hidden dark:text-slate-300 dark:hover:bg-slate-800"
+          >
+            <ArrowLeft className="h-5 w-5" aria-hidden="true" />
+            {t("portal.nav.messages")}
+          </button>
+        ) : null}
         {activeSlug === null ? (
           <p className="max-w-prose text-sm leading-6 text-slate-600 dark:text-slate-300">
             {t("portal.messages.lead")}
