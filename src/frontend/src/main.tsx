@@ -1217,6 +1217,13 @@ function App() {
                 ))
               )}
             </div>
+            {/* Owner-gated, like the People screen already was. This shortcut was
+                not, so it offered every signed-in person a button that creates a
+                user on the machine — which the server now refuses. An offer the
+                server will refuse is worse than no offer: it reads as a broken
+                panel rather than as a permission they do not have. People is where
+                this belongs anyway, because that is where organizations are. */}
+            {whoami?.isOwner && (
             <div className="teammate">
               <button className="ghost addTeammateToggle" data-automation-id="teammate-toggle" onClick={() => setTeammateOpen((open) => !open)}>
                 {teammateOpen ? "− Cancel" : "+ Add teammate"}
@@ -1279,6 +1286,7 @@ function App() {
                 </div>
               )}
             </div>
+            )}
           </aside>
 
           <div className="deskMain">
@@ -2224,33 +2232,83 @@ function HomeView({
 // more, each with their own space.
 // ---------------------------------------------------------------------------
 
-type Person = { slug: string; displayName: string; email?: string };
+type Person = {
+  slug: string;
+  displayName: string;
+  // Which organization they are in. The AUTHORITY on that — never the slug
+  // prefix, because someone moved between organizations keeps the prefix they
+  // were minted with, and the people who predate organizations have none.
+  orgSlug: string;
+  isMachineOwner: boolean;
+};
+
+type OrganizationView = {
+  slug: string;
+  displayName: string;
+  people: number;
+};
 
 function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView[]; onChanged: () => void }) {
   const [people, setPeople] = React.useState<Person[]>([]);
+  const [orgs, setOrgs] = React.useState<OrganizationView[]>([]);
   const [name, setName] = React.useState("");
   const [profile, setProfile] = React.useState(deskProfiles[0]?.id ?? "office");
+  const [org, setOrg] = React.useState("");
+  const [orgName, setOrgName] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [result, setResult] = React.useState<{ slug: string; token: string } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
+  async function load() {
+    const [loadedPeople, loadedOrgs] = await Promise.all([
+      api<Person[]>("/api/users"),
+      api<OrganizationView[]>("/api/organizations")
+    ]);
+    setPeople(loadedPeople);
+    setOrgs(loadedOrgs);
+    // Default to the first organization rather than to none: a person has to be
+    // in one, and an empty selection would post an organization that does not
+    // exist.
+    setOrg((current) => current || loadedOrgs[0]?.slug || "");
+  }
+
   React.useEffect(() => {
-    api<Person[]>("/api/users").then(setPeople).catch(() => undefined);
+    load().catch(() => undefined);
   }, []);
+
+  async function addOrganization() {
+    const trimmed = orgName.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api<{ slug: string }>("/api/organizations", {
+        method: "POST",
+        body: JSON.stringify({ name: trimmed })
+      });
+      setOrgName("");
+      await load();
+      setOrg(created.slug);
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function addPerson() {
     const trimmed = name.trim();
-    if (!trimmed || busy) return;
+    if (!trimmed || !org || busy) return;
     setBusy(true);
     setError(null);
     try {
       const created = await api<{ slug: string; token: string }>("/api/users", {
         method: "POST",
-        body: JSON.stringify({ name: trimmed, deskProfile: profile })
+        body: JSON.stringify({ name: trimmed, deskProfile: profile, orgSlug: org })
       });
       setResult(created);
       setName("");
-      setPeople(await api<Person[]>("/api/users"));
+      await load();
       onChanged();
     } catch (problem) {
       setError(problem instanceof Error ? problem.message : String(problem));
@@ -2259,11 +2317,69 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
     }
   }
 
+  async function move(slug: string, target: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/api/users/${encodeURIComponent(slug)}/organization`, {
+        method: "POST",
+        body: JSON.stringify({ orgSlug: target })
+      });
+      await load();
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : String(problem));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const nameOf = (slug: string) => orgs.find((candidate) => candidate.slug === slug)?.displayName ?? slug;
+
   return (
     <section className="grid" data-automation-id="people">
       <div className="panel">
+        <h2>Organizations</h2>
+        <p className="muted small">
+          People in different organizations cannot see each other, message each other, or reach
+          each other&rsquo;s files. You can see everyone, because you run this machine.
+        </p>
+        {orgs.length === 0 ? (
+          <p className="muted">None yet.</p>
+        ) : (
+          <div className="personList">
+            {orgs.map((organization) => (
+              <div className="person" key={organization.slug}>
+                <div>
+                  <div className="n">{organization.displayName}</div>
+                  <div className="r">{organization.slug}</div>
+                </div>
+                <span className="chip avail">{organization.people} {organization.people === 1 ? "person" : "people"}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="field">
+          <label>New organization</label>
+          <input data-automation-id="org-name" value={orgName} placeholder="e.g. Acme" disabled={busy}
+            onChange={(event) => setOrgName(event.target.value)}
+            onKeyDown={(event) => event.key === "Enter" && addOrganization()} />
+        </div>
+        {/* The short name becomes the prefix of everyone created here, so it is
+            shown before anything is created rather than discovered afterwards —
+            it cannot be changed later without renaming a home volume. */}
+        {orgName.trim() && (
+          <p className="muted small" data-automation-id="org-preview">
+            People here will be named like <code>{slugPreview(orgName)}-maria</code>. The short name is permanent.
+          </p>
+        )}
+        <button data-automation-id="org-add" disabled={busy || !orgName.trim()} onClick={addOrganization}>
+          {busy ? <><Loader2 size={16} className="spin" /> Creating…</> : <>Create organization</>}
+        </button>
+      </div>
+
+      <div className="panel">
         <h2>People who use this machine</h2>
-        <p className="muted small">Each person gets their own space, assistant, and desktop. Add someone to share this machine.</p>
+        <p className="muted small">Each person gets their own space, assistant, and desktop.</p>
         {people.length === 0 ? (
           <p className="muted">No one yet.</p>
         ) : (
@@ -2272,9 +2388,21 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
               <div className="person" key={person.slug}>
                 <div>
                   <div className="n">{person.displayName || person.slug}</div>
-                  <div className="r">{person.slug}</div>
+                  <div className="r">{person.slug} &middot; {nameOf(person.orgSlug)}</div>
                 </div>
-                <span className="chip avail">{person.slug === people[0]?.slug ? "Owner" : "Space"}</span>
+                {person.isMachineOwner ? (
+                  <span className="chip avail">Owner</span>
+                ) : (
+                  <select
+                    data-automation-id={`person-org-${person.slug}`}
+                    value={person.orgSlug}
+                    disabled={busy}
+                    onChange={(event) => move(person.slug, event.target.value)}>
+                    {orgs.map((organization) => (
+                      <option key={organization.slug} value={organization.slug}>{organization.displayName}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             ))}
           </div>
@@ -2289,6 +2417,15 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
             onChange={(event) => setName(event.target.value)}
             onKeyDown={(event) => event.key === "Enter" && addPerson()} />
         </div>
+        <div className="field">
+          <label>Their organization</label>
+          <select data-automation-id="people-org" value={org} disabled={busy || orgs.length === 0}
+            onChange={(event) => setOrg(event.target.value)}>
+            {orgs.map((organization) => (
+              <option key={organization.slug} value={organization.slug}>{organization.displayName}</option>
+            ))}
+          </select>
+        </div>
         {deskProfiles.length > 0 && (
           <div className="field">
             <label>Their space</label>
@@ -2300,19 +2437,26 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
             </select>
           </div>
         )}
-        <button data-automation-id="people-add" disabled={busy || !name.trim()} onClick={addPerson}>
+        <button data-automation-id="people-add" disabled={busy || !name.trim() || !org} onClick={addPerson}>
           {busy ? <><Loader2 size={16} className="spin" /> Adding…</> : <><UserPlus size={16} /> Add someone</>}
         </button>
         {error && <p className="decision deny small">{error}</p>}
         {result && (
           <div className="teammateToken" data-automation-id="people-result">
-            <p className="muted small">Created <strong>{result.slug}</strong>. Share this with them — it's how they sign in:</p>
+            <p className="muted small">Created <strong>{result.slug}</strong>. Share this with them — it&rsquo;s how they sign in:</p>
             <code className="tokenValue">{result.token}</code>
           </div>
         )}
       </div>
     </section>
   );
+}
+
+// What the server will make of a name, so the permanent part of a decision is
+// visible before it is made. Deliberately the same rule as Slug.Of on the server:
+// keep letters and digits, collapse every other run to a single dash.
+function slugPreview(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 12) || "org";
 }
 
 // ---------------------------------------------------------------------------
