@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "kind": "engine",
+  "id": "openclaw",
+  "displayName": "OpenClaw",
+  "version": "2026.9.4",
+  "install": {
+    "kind": "npm",
+    "package": "openclaw@2026.9.4",
+    "digest": null,
+    "configure": [
+      "openclaw config set tools.profile minimal",
+      "openclaw config set tools.allow '[\"cielo__*\"]' --json",
+      "openclaw mcp add cielo --url {mcpUrl} --transport streamable-http --header 'Authorization=Bearer {token}' --timeout 60",
+      "openclaw config set models.providers.cielo.baseUrl {modelUrl}",
+      "openclaw config set models.providers.cielo.apiKey {token}"
+    ]
+  },
+  "invoke": {
+    "command": "openclaw",
+    "args": [
+      "agent",
+      "--local",
+      "--session-key",
+      "{session}",
+      "--model",
+      "cielo/hosted",
+      "-m",
+      "{goal}"
+    ],
+    "env": {}
+  },
+  "network": "none",
+  "notes": "Verified against 2026.9.4 on 15 September 2026. tools.allow is an ABSOLUTE allowlist that replaces the profile's defaults, which is what leaves the agent with no shell and no file write of its own. Transport must be streamable-http: the default SSE transport opens with a GET and gets a 405. The model name is nominal — /engine/v1/chat/completions ignores it and substitutes whatever the host resolved for this agent. A fresh --session-key per run is not optional: reusing one made three spike runs answer from a previous conversation's memory instead of calling any tool at all. Digest is null because it has not been recorded yet; the wizard must refuse to install without one."
+}

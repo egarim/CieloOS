@@ -293,6 +293,14 @@ builder.Services.AddSingleton<IDesktopBrainRegistry>(sp => new DesktopBrainRegis
 // Watches each owner's shared inbox.md (e.g. from the desktop "Message Agent"
 // launcher) and dispatches new messages to their agent, reply in outbox.md.
 builder.Services.AddHostedService<WorkspaceRuntime.Api.SharedInboxWatcher>();
+// The engine model endpoint forwards on this client, so TokenMeteringHandler sits
+// in the path and a foreign engine is counted whether or not it cooperates.
+builder.Services.AddSingleton(sp => new EngineModelClient(
+    new HttpClient(new TokenMeteringHandler(sp.GetRequiredService<ITokenLedger>(), new HttpClientHandler()))
+    {
+        Timeout = TimeSpan.FromSeconds(120)
+    }));
+
 builder.Services.AddHttpClient<ILocalInferenceRouter, LocalInferenceRouter>(client =>
 {
     client.Timeout = TimeSpan.FromMinutes(3);
@@ -1110,6 +1118,8 @@ ThreadApi.Map(app);
 MessageApi.Map(app);
 // Engines reach the bus here, and only here (docs/agent-engines.md).
 McpApi.Map(app);
+// ...and a model ONLY here: no key of its own, and the host picks the model.
+EngineModelApi.Map(app);
 
 app.MapGet("/api/surfaces", (HttpContext context, ISurfaceRegistry surfaces, IRuntimeStore store) =>
 {
