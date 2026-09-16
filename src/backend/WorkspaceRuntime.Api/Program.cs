@@ -1980,8 +1980,11 @@ app.MapPost("/v1/agent/chat/completions", async (AgentChatRequest request, HttpC
         projectBriefing +
         $"Your owner sent you this chat message: \"{userMessage}\". Reply to them directly. " +
         "If you can answer from what you already know, just answer — do not touch the console. " +
-        "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
-        "~/shared), then give the answer. Put your full reply in the note when you finish.";
+        // A constant, because a hosted engine has none of these and ForeignProcessEngine
+        // swaps this exact sentence for one that is true of it. Reworded here as a
+        // literal, that swap would fail by doing nothing.
+        EngineBriefing.NativeTail +
+        "Put your full reply in the note when you finish.";
     // The reply travels as JSON on the finishing step, so newlines, quotes and code
     // blocks survive. outbox.md stays a fallback for agents that still write it — but
     // ONLY if this run actually changed it. The current prompt tells the agent not to
