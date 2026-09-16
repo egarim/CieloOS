@@ -279,15 +279,31 @@ echo
 EOF
 cat > /usr/local/bin/cielo-add-user <<EOF
 #!/usr/bin/env bash
-# Add a teammate. Usage: cielo-add-user "Their Name" <owner-token> [desk-profile]
+# Add a teammate. Usage: cielo-add-user "Their Name" [desk-profile]
 # The desk profile decides their toolchain (office, dotnet, marketing); omitted
 # means office, which is the desk everyone had before profiles existed.
+#
+# This took the owner's identity token as an argument until creating a person
+# became an action you have to prove a password for. It signs in instead: the
+# password is typed here and never becomes a shell argument, so it stays out of
+# the process list and out of .bash_history, which is more than the token it
+# replaced ever managed.
+#
+# If you have not set a password yet, do that first — on this box, because a
+# first password is loopback-only:
+#   curl -fsS -XPOST http://127.0.0.1:${PORT}/api/auth/password \
+#     -H "Authorization: Bearer \$(cat /opt/cielo/.data/secrets/<you>.token)" \
+#     -H 'Content-Type: application/json' -d '{"newPassword":"..."}'
 set -euo pipefail
-name="\${1:?Usage: cielo-add-user \"Name\" <owner-token> [desk-profile]}"
-token="\${2:?owner token required}"
-desk="\${3:-office}"
-curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/users" \
-  -H "Authorization: Bearer \${token}" \
+name="\${1:?Usage: cielo-add-user \"Name\" [desk-profile]}"
+desk="\${2:-office}"
+read -rp  "Your desk name: " who
+read -rsp "Your password:  " pass; echo
+jar="\$(mktemp)"; trap 'rm -f "\$jar"' EXIT
+curl -fsS -c "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"slug\": \"\${who}\", \"password\": \"\${pass}\"}" >/dev/null
+curl -fsS -b "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/users" \
   -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 echo
 EOF

@@ -417,40 +417,23 @@ app.Use(async (context, next) =>
             return;
         }
 
-        // OwnerOnly implies HumanOnly: an agent or an API key is refused by the
-        // clause below before this one is reached.
-        if (level == AccessLevel.OwnerOnly
-            && !store.Users.Any(user => user.IsMachineOwner
-                && string.Equals(user.Slug, principal.Slug, StringComparison.Ordinal)))
-        {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                error = "Only the owner of this machine can do that."
-            });
-            return;
-        }
+        // The decision itself lives in PrincipalGate (Security.cs) so it can be
+        // tested; this is only the part that needs an HttpContext. It was four
+        // inline `if` blocks, and while they sat here no test in the suite could
+        // reach them — which is how OwnerOnly went out as a slug comparison that a
+        // leaked identity token satisfied from any address.
+        var refusal = PrincipalGate.Check(
+            level,
+            principal.Kind,
+            isMachineOwner: store.Users.Any(user => user.IsMachineOwner
+                && string.Equals(user.Slug, principal.Slug, StringComparison.Ordinal)),
+            hasSession: context.Items.ContainsKey("session"),
+            isApiKey: context.Items.ContainsKey("apiKey"));
 
-        if ((level == AccessLevel.HumanOnly || level == AccessLevel.OwnerOnly) && principal.Kind != PrincipalKind.Human)
+        if (refusal != PrincipalRefusal.None)
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new { error = "This operation requires a human principal." });
-            return;
-        }
-
-        // An API key acts AS a person but is not one. Human-only routes are the
-        // owner's own decisions — minting and revoking credentials, signing out
-        // everywhere, adding users, approving an agent's request — and a leaked
-        // integration key must not be able to make them. Otherwise the key that
-        // exists so the chat need not hold the owner's credential would be able
-        // to do everything that credential could.
-        if ((level == AccessLevel.HumanOnly || level == AccessLevel.OwnerOnly) && context.Items.ContainsKey("apiKey"))
-        {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsJsonAsync(new
-            {
-                error = "An API key cannot do this. Sign in as yourself for credential and owner actions."
-            });
+            await context.Response.WriteAsJsonAsync(new { error = PrincipalGate.Explain(refusal) });
             return;
         }
 
