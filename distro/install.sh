@@ -102,11 +102,25 @@ apt_retry() {
   local tries=0 max="${CIELO_APT_TRIES:-60}" rc
   while :; do
     set +e
-    "$@" 2>&1 | tee -a "$APT_LOG"
-    rc=${PIPESTATUS[0]}
+    if [[ "$tries" -eq 0 ]]; then
+      "$@" 2>&1 | tee -a "$APT_LOG"
+      rc=${PIPESTATUS[0]}
+    else
+      # Retries go to the log only. Reprinting the same lock complaint every ten
+      # seconds is not information, it is wallpaper — and it makes a machine that is
+      # patiently waiting look like a machine that is failing over and over.
+      "$@" >>"$APT_LOG" 2>&1
+      rc=$?
+    fi
     set -e
-    [[ "$rc" -eq 0 ]] && return 0
-    tail -n 6 "$APT_LOG" | grep -qi 'could not get lock\|frontend lock\|temporarily unavailable' || return "$rc"
+    if [[ "$rc" -eq 0 ]]; then
+      [[ "$tries" -gt 0 ]] && echo "    apt is free (waited $((tries * 10))s); carrying on"
+      return 0
+    fi
+    tail -n 6 "$APT_LOG" | grep -qi 'could not get lock\|frontend lock\|temporarily unavailable' || {
+      [[ "$tries" -gt 0 ]] && tail -n 6 "$APT_LOG" >&2
+      return "$rc"
+    }
     tries=$((tries + 1))
     if [[ "$tries" -ge "$max" ]]; then
       echo "    apt has been locked for $((max * 10))s — something is stuck, not merely busy." >&2
@@ -114,9 +128,10 @@ apt_retry() {
       return "$rc"
     fi
     if [[ "$tries" -eq 1 ]]; then
-      echo
       echo "    apt is locked by another process. A machine this fresh is almost always"
-      echo "    still running unattended-upgrades; waiting for it to finish."
+      echo "    still running unattended-upgrades; waiting for it to finish (up to $((max * 10 / 60))m)."
+    elif [[ $((tries % 6)) -eq 0 ]]; then
+      echo "    still waiting for apt ($((tries * 10))s)"
     fi
     sleep 10
   done
@@ -462,7 +477,10 @@ echo "==> [5/9] Install to /opt/cielo"
 # Replace files only while the runtime is stopped: overwriting a running
 # executable is undefined at best. Stage 7 starts it again after the service
 # unit and environment file have been refreshed.
-if [[ "$LIVE" -eq 1 && "$CI" -eq 0 ]]; then
+if [[ "$LIVE" -eq 1 && "$CI" -eq 0 && -f /etc/systemd/system/cielo-runtime.service ]]; then
+  # Only when there is something to stop. A first install printed
+  #   Failed to stop cielo-runtime.service: Unit cielo-runtime.service not loaded.
+  # which is an alarming way to say "this machine is new".
   systemctl stop cielo-runtime.service || true
 fi
 install -d /opt/cielo
