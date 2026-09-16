@@ -124,7 +124,14 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
                 return Stop("model returned no content");
             }
 
-            var decision = JsonSerializer.Deserialize<BrainDecision>(content, JsonOptions);
+            // Take the first complete JSON object out of the reply rather than
+            // demanding the whole reply IS one. Models put things around it: a
+            // ```json fence, a sentence of preamble, a stray bullet afterwards. A
+            // real run died on the last of those — two good searches in, then
+            //   model error: '-' is invalid after a single JSON value.
+            // and that sentence was handed to the owner as the agent's answer.
+            var decision = JsonSerializer.Deserialize<BrainDecision>(
+                ModelReply.FirstJsonObject(content) ?? content, JsonOptions);
             if (decision is null)
             {
                 return Stop("could not parse the model's action");
@@ -145,4 +152,84 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
     private sealed record Choice([property: JsonPropertyName("message")] Message? Message);
     private sealed record Message([property: JsonPropertyName("content")] string? Content);
     private sealed record BrainDecision(bool Done, string? Text, bool Submit, string? Note, string? Question);
+}
+
+
+// Pulling the model's decision out of whatever it wrapped it in.
+//
+// Public, and in its own class, because the alternative was leaving it private in
+// a type that only exists behind an HTTP call — untestable, which is how the
+// original one-line Deserialize survived long enough to kill a run in front of
+// somebody.
+public static class ModelReply
+{
+    // The first balanced {...} in the text, or null if there is none.
+    //
+    // Brace counting has to respect string literals or a command containing a }
+    // — which shell commands frequently do — would close the object early and
+    // truncate the very field the loop is about to execute. Escapes have to be
+    // respected for the same reason: \" inside a command must not be read as the
+    // end of the string.
+    public static string? FirstJsonObject(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return null;
+        }
+
+        var start = content.IndexOf('{');
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var i = start; i < content.Length; i++)
+        {
+            var c = content[i];
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (inString && c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+            {
+                continue;
+            }
+
+            if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return content[start..(i + 1)];
+                }
+            }
+        }
+
+        // Unbalanced — a truncated reply, usually. Say nothing rather than hand
+        // back a fragment that would parse into a half-formed action.
+        return null;
+    }
 }
