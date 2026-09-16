@@ -38,7 +38,7 @@ ENV DOTNET_NOLOGO=1
 # VS Code ships a per-arch .deb, like ONLYOFFICE. The installer passes the one
 # that matches the target (see cielo-build-profile-images).
 ARG VSCODE_DEB=https://update.code.visualstudio.com/latest/linux-deb-arm64/stable
-RUN curl -fsSL -o /tmp/code.deb "$VSCODE_DEB" \
+RUN curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 -o /tmp/code.deb "$VSCODE_DEB" \
     && (dpkg -i /tmp/code.deb || apt-get update && apt-get install -y -f --no-install-recommends) \
     && rm -f /tmp/code.deb && apt-get clean && rm -rf /var/lib/apt/lists/*
 

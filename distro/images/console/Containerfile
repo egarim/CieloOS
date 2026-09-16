@@ -4,6 +4,19 @@
 # while a human can attach to the very same screen through ttyd.
 FROM docker.io/library/ubuntu:24.04
 
+ENV DEBIAN_FRONTEND=noninteractive
+
+# One dropped connection should not discard a multi-gigabyte build.
+#
+# A clean-room install lost the whole desktop image to a single TLS hiccup:
+#   curl: (56) OpenSSL SSL_read: ... unexpected eof while reading
+# Neither apt nor curl retried, so several GB of completed work was thrown away
+# because one mirror closed one socket. On a VPS with an ordinary consumer link
+# that is not an unlucky day, it is a Tuesday. Set it once here rather than on
+# every apt-get: this file is inherited by every image built FROM this one.
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+      > /etc/apt/apt.conf.d/99cielo-retries
+
 # Check-Date / Valid-Until are relaxed because trial VMs can boot with a skewed
 # clock, which otherwise makes apt reject the archive metadata.
 # Base shell tools + the "hands" for real work: an HTTP client (curl), JSON
