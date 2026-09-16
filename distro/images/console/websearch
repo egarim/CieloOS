@@ -2,7 +2,7 @@
 # websearch "QUERY" [COUNT] — private web search via the OS's SearXNG service.
 # Prints one result per line as TSV: rank<TAB>title<TAB>url<TAB>snippet
 # (spreadsheet-friendly). Point SEARXNG_URL elsewhere to override the endpoint.
-set -euo pipefail
+set -uo pipefail
 if [ "$#" -lt 1 ]; then
   echo "usage: websearch \"query\" [count]" >&2
   exit 2
@@ -11,13 +11,40 @@ query="$1"
 count="${2:-10}"
 url="${SEARXNG_URL:-http://host.containers.internal:8888}"
 
-curl -sS -m 30 --get "$url/search" \
+# Fetch first and judge the result, rather than piping a failed curl straight into
+# a JSON parser.
+#
+# When the service was not running this printed a raw Python JSONDecodeError
+# traceback — "Expecting value: line 1 column 1 (char 0)" over six lines of stack.
+# An agent reading that learns nothing about what is wrong or what to do, and the
+# two runs that hit it concluded the web was unreachable and went off hand-rolling
+# their own scrapers against DuckDuckGo. A tool that fails has one job: say what
+# broke, in a sentence its caller can act on.
+body="$(curl -sS -m 30 --get "$url/search" \
   --data-urlencode "q=${query}" \
-  --data-urlencode "format=json" \
-| python3 -c '
+  --data-urlencode "format=json" 2>/dev/null)"
+status=$?
+
+if [ "$status" -ne 0 ] || [ -z "$body" ]; then
+  echo "websearch: the search service at ${url} is not answering." >&2
+  echo "websearch: web search is unavailable on this machine — do NOT try to scrape a" >&2
+  echo "           search engine instead, they block it. Tell your owner that the search" >&2
+  echo "           service is down and that it starts with:" >&2
+  echo "             sudo -u cielo HOME=/var/lib/cielo bash /opt/cielo/services/searxng/run.sh" >&2
+  exit 3
+fi
+
+printf '%s' "$body" | python3 -c '
 import sys, json
 count = int(sys.argv[1])
-data = json.load(sys.stdin)
+try:
+    data = json.load(sys.stdin)
+except json.JSONDecodeError:
+    # The service answered with something that is not JSON — an error page, or a
+    # proxy in the way. Same rule as above: a sentence, not a traceback.
+    print("websearch: the search service replied with something that is not JSON.", file=sys.stderr)
+    sys.exit(4)
+
 results = data.get("results", [])[:count]
 if not results:
     print("(no results)", file=sys.stderr)

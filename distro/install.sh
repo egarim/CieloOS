@@ -103,7 +103,7 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
 fi
 CIELO_UID="$(id -u cielo)"
 
-echo "==> [3/9] Session images (built here so they match this machine's architecture)"
+echo "==> [3/9] Session images + the search service"
 # The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
 # to arm64; on an x64 target that would install a foreign-architecture .deb, which
 # either fails or gets masked by apt-get -f and silently ships no editor.
@@ -184,11 +184,69 @@ else
   fi
 fi
 
+# The search service the console image's `websearch` tool talks to.
+#
+# It is started here because it never was anywhere. distro/services/searxng/run.sh
+# has been in the repo the whole time, referenced by nothing, and services/ was not
+# staged into the tarball — so websearch has failed on every installed machine while
+# the agent's own prompt told it to use it. Two benchmark runs against OpenClaw were
+# lost to hand-rolled scraping that got bot-challenged, by an agent whose actual
+# search tool was one command away and pointed at nothing.
+if [[ "$CI" -eq 1 || "$OFFLINE" -eq 1 ]]; then
+  echo "    (search service deferred)"
+elif [[ ! -f "$BUNDLE/services/searxng/run.sh" ]]; then
+  echo "    (no services/ in this bundle — skipping the search service)"
+else
+  SEARCH_LOG="/var/log/cielo-search.log"
+  echo "    starting the search service (websearch needs it); log: $SEARCH_LOG"
+  if runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME=/var/lib/cielo \
+       bash "$BUNDLE/services/searxng/run.sh" >"$SEARCH_LOG" 2>&1; then
+    echo "    search service up on :8888"
+  else
+    echo "    WARNING: the search service did not start; see $SEARCH_LOG" >&2
+    tail -n 3 "$SEARCH_LOG" 2>/dev/null | sed 's/^/      | /' >&2 || true
+    degrade "The agent cannot search the web: the search service did not start.
+    Everything else works — this only costs the websearch tool, which agents lean on
+    for any research task.
+    Why: see $SEARCH_LOG
+    Fix:  sudo -u cielo HOME=/var/lib/cielo bash /opt/cielo/services/searxng/run.sh"
+  fi
+fi
+
 echo "==> [4/9] Session restart policy"
-# Sessions are created with --restart=unless-stopped; podman-restart.service is what
-# acts on that after a reboot. Without it the runtime comes back and every session is
-# dead. This is a USER unit for cielo, so offline installs get the wants-symlink
-# written directly rather than being skipped: systemctl cannot run in a chroot.
+# Sessions are created with --restart=unless-stopped. podman-restart.service runs
+#     podman start --all --filter restart-policy=always
+# which cannot match them, so it has never restarted a single session. Measured on a
+# real reboot: runtime back, every session dead; and measured again with the filters
+# side by side — =unless-stopped matched all three containers on the box, =always
+# matched none.
+#
+# Rather than change the sessions to always (which would also resurrect ones the
+# owner deliberately stopped, the exact thing unless-stopped exists to prevent), we
+# ship the unit podman is missing. podman-restart stays enabled: it costs nothing and
+# covers anything that really is =always.
+#
+# These are USER units for cielo, so offline installs get the wants-symlink written
+# directly rather than being skipped: systemctl cannot run in a chroot.
+install -d -o cielo -g cielo /var/lib/cielo/.config/systemd/user
+cat > /var/lib/cielo/.config/systemd/user/cielo-sessions.service <<'UNIT'
+[Unit]
+Description=Start CieloOS sessions that were running before the reboot
+Documentation=https://github.com/egarim/CieloOS
+After=podman.socket
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# unless-stopped is what SessionOrchestrator sets, and what podman's own
+# podman-restart.service does NOT match.
+ExecStart=/usr/bin/podman start --all --filter restart-policy=unless-stopped
+
+[Install]
+WantedBy=default.target
+UNIT
+chown cielo:cielo /var/lib/cielo/.config/systemd/user/cielo-sessions.service
 if [[ "$CI" -eq 1 ]]; then
   echo "    (skipped: --ci)"
 elif [[ "$OFFLINE" -eq 1 ]]; then
@@ -196,11 +254,16 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
   ln -sf /usr/lib/systemd/user/podman-restart.service \
     /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
   chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
-  echo "    podman-restart linked for cielo (activates on first boot)"
+  ln -sf /var/lib/cielo/.config/systemd/user/cielo-sessions.service \
+    /var/lib/cielo/.config/systemd/user/default.target.wants/cielo-sessions.service
+  chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/cielo-sessions.service
+  echo "    podman-restart + cielo-sessions linked for cielo (activate on first boot)"
 else
   runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable podman-restart.service >/dev/null 2>&1 \
-    && echo "    podman-restart enabled for cielo" \
+    && runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+         systemctl --user enable cielo-sessions.service >/dev/null 2>&1 \
+    && echo "    podman-restart + cielo-sessions enabled for cielo" \
     || { echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
          degrade "Sessions will not survive a reboot: podman-restart could not be enabled.
     They will start fine and keep running; they just will not come back after the machine restarts.
@@ -224,6 +287,12 @@ cp -a "$BUNDLE/bin" "$BUNDLE/panel" "$BUNDLE/surfaces" "$BUNDLE/config" /opt/cie
 # dir: it is documentation of what /opt/cielo runs, so /opt/cielo is the right home.
 if [[ -f "$BUNDLE/THIRD-PARTY.md" ]]; then
   cp "$BUNDLE/THIRD-PARTY.md" /opt/cielo/THIRD-PARTY.md
+fi
+# services/ travels to /opt/cielo too, so the "Fix:" line printed when the search
+# service fails names a path that exists on the installed machine rather than a
+# directory that only ever lived in the unpacked tarball.
+if [[ -d "$BUNDLE/services" ]]; then
+  cp -a "$BUNDLE/services" /opt/cielo/
 fi
 install -d -o cielo -g cielo /opt/cielo/.data
 chown -R cielo:cielo /opt/cielo

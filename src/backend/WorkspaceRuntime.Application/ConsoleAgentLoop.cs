@@ -283,7 +283,16 @@ public sealed class ConsoleAgentLoop
                 $"{why} Do NOT try another command — none will be run. Write ONE question to your owner in "
                 + "\"question\": say what you were trying to do, what you actually found out on the way, what "
                 + "stopped you, and the single thing you need from them to continue. Offer concrete options if "
-                + $"there are any. The original request was: {goal}",
+                // Reaching the limit used to mean the run failed, so this asked only what
+                // stopped you. Now that the agent deliberately produces before its budget
+                // runs out, the limit is often where a SUCCESSFUL run ends — and the first
+                // one that did wrote a spreadsheet on its last step and then told its owner
+                // "I have a draft ready to write". The file was there. Nobody would have
+                // looked.
+                + "there are any. Before any of that, say what you PRODUCED: if you wrote a file, name it and "
+                + "where it is, even if it is only partial and even though you were stopped. A file you wrote "
+                + "and did not mention is a file nobody will ever find. "
+                + $"The original request was: {goal}",
                 screen, history, step, maxSteps, cancellationToken);
 
             // Question, or a note the brain marked as FINAL. A note on a

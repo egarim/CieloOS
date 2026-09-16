@@ -70,6 +70,17 @@ if [[ -d "$ROOT/engines" ]]; then
   mkdir -p "$STAGE/engines"
   cp "$ROOT"/engines/*.engine.json "$STAGE/engines/"
 fi
+# The same shape again, and this one cost more than the engines did. The console
+# image ships /usr/local/bin/websearch and the agent's prompt tells it to use it;
+# websearch queries a SearXNG service whose setup script is distro/services/searxng
+# /run.sh, referenced nowhere in install.sh and never staged here. So the search
+# tool has never worked on ANY installed machine — every benchmark run against
+# OpenClaw was made by an agent whose only research faculty was unplugged, and
+# nothing failed loudly enough to notice.
+if [[ -d "$ROOT/distro/services" ]]; then
+  mkdir -p "$STAGE/services"
+  cp -a "$ROOT/distro/services/." "$STAGE/services/"
+fi
 cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
 # Local inference: the config names a model registry, and the registry names the
 # per-provider manifests. All three have to travel or /api/inference/status reports
