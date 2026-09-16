@@ -123,12 +123,13 @@ podman system df
 podman image prune -a
 ```
 
-On an `install.sh` machine, the runtime's images live in the `cielo` user's
-rootless store, so run those as `cielo`:
+On an `install.sh` machine the runtime's images live in the `cielo` user's
+rootless store, which is invisible to a plain `podman` run as yourself.
+`cielo-podman` runs against the right store:
 
 ```bash
-sudo -u cielo env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" podman system df
-sudo -u cielo env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" podman image prune -a
+sudo cielo-podman system df
+sudo cielo-podman image prune -a
 ```
 
 On WSL, pruning only frees space inside Linux. Shrink the Windows-side virtual

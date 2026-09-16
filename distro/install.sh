@@ -439,6 +439,25 @@ exit \$rc
 SCRIPT
 chmod +x /usr/local/bin/cielo-enable-boot-units
 
+# Rootless podman keeps its containers, images and volumes per user, so everything
+# CieloOS runs is only visible to cielo. Every maintenance command therefore had to
+# be written as `sudo -u cielo env XDG_RUNTIME_DIR=/run/user/1001 podman ...`, which
+# is how the docs still read. Wrap it once instead: `sudo cielo-podman image prune -a`.
+cat > /usr/local/bin/cielo-podman <<SCRIPT
+#!/usr/bin/env bash
+# Run podman against the store CieloOS actually uses. Usage: cielo-podman <args...>
+#   sudo cielo-podman ps -a
+#   sudo cielo-podman system df
+set -euo pipefail
+if [[ "\$(id -u)" -eq 0 ]]; then
+  cd /   # runuser inherits OUR cwd, which cielo may not be allowed to enter
+  exec runuser -u cielo -- env HOME="${CIELO_HOME}" \
+    XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" /usr/local/bin/cielo-podman "\$@"
+fi
+exec podman "\$@"
+SCRIPT
+chmod +x /usr/local/bin/cielo-podman
+
 echo "==> [5/9] Install to /opt/cielo"
 # Replace files only while the runtime is stopped: overwriting a running
 # executable is undefined at best. Stage 7 starts it again after the service
@@ -637,8 +656,11 @@ if [[ "$NO_CHAT" -eq 1 ]]; then
   # up on a machine whose operator just said "no chat" would be the worst outcome.
   if [[ "$LIVE" -eq 1 ]]; then
     systemctl disable --now cielo-chat.service >/dev/null 2>&1 || true
-    runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-      podman rm -f cielo-chat >/dev/null 2>&1 || true
+    # as_cielo, not a bare runuser: this one is || true, so a "cannot chdir" would
+    # not stop the install - it would leave the container running and report the
+    # opt-out as done. An unauthenticated page holding the owner's token, still up,
+    # on a machine whose operator just asked for it to be gone.
+    as_cielo podman rm -f cielo-chat >/dev/null 2>&1 || true
   fi
   rm -f /etc/systemd/system/cielo-chat.service \
         /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
