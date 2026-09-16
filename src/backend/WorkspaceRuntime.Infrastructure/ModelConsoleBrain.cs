@@ -62,6 +62,15 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         + "hunting — hunting is searching for something only they can tell you; this is confirming "
         + "something you already suspect, and it turns a question they have to think about into one "
         + "they can answer in a word. Do not build the deliverable on the guess either way. "
+        // Knowing the number is useless without being told what to do near the end
+        // of it. Gathering is open-ended and producing is not, so an agent that does
+        // not consciously switch will always run out mid-gather — which is exactly
+        // what happened: eight searches, real prices found, no file written.
+        + "STEP tells you which step you are on and how many you have in total. Spend them: "
+        + "gathering is open-ended and producing is not, so when roughly a third of your budget "
+        + "is left, stop looking for more and DELIVER what you already have. A smaller result that "
+        + "exists beats a better one you ran out of steps before writing. If what you have is too "
+        + "thin to deliver, say so and ask rather than spending the last steps gathering. "
         + "Ask as well when you are BLOCKED: if two or three attempts at the same thing have failed "
         + "and you have no genuinely different idea, say what you learned and what stopped you rather "
         + "than trying another variation of what already did not work. " +
@@ -81,10 +90,10 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         this.http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/') + "/");
     }
 
-    public async Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+    public async Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken)
     {
         var user =
-            $"GOAL:\n{goal}\n\nSCREEN:\n{screen}\n\nSTEP: {step}\n" +
+            $"GOAL:\n{goal}\n\nSCREEN:\n{screen}\n\nSTEP: {step} of {maxSteps}\n" +
             $"HISTORY (most recent last):\n{(history.Count == 0 ? "(nothing yet)" : string.Join("\n", history))}";
 
         var payload = new
