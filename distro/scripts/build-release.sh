@@ -13,7 +13,19 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT="$ROOT/release"
 STAGE="$OUT/cielo"
 
-echo "==> CieloOS release bundle ($ARCH)"
+# What this bundle IS. Nothing recorded it until now: the tarball is always called
+# cielo-linux-x64.tar.gz, /opt/cielo held no version file, and no assembly carried a
+# commit — so an installed machine could not answer "which build am I running?".
+# Establishing that took scanning a compiled assembly for a UTF-16 string literal,
+# twice with the wrong probe, each returning a clean-looking zero.
+#
+# --always so a checkout with no tags still produces something, --dirty so a bundle
+# built from uncommitted work says so rather than claiming to be the commit it
+# nearly is.
+VERSION="$(cd "$ROOT" && git describe --tags --always --dirty 2>/dev/null || echo unknown)"
+BUILT_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+echo "==> CieloOS release bundle ($ARCH) — $VERSION"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/bin" "$STAGE/panel" "$STAGE/surfaces" "$STAGE/engines" "$STAGE/config" "$STAGE/systemd"
 
@@ -81,6 +93,11 @@ if [[ -d "$ROOT/distro/services" ]]; then
   mkdir -p "$STAGE/services"
   cp -a "$ROOT/distro/services/." "$STAGE/services/"
 fi
+# Beside the binary, so it travels wherever bin/ is copied and the runtime can find
+# it without knowing anything about the install layout. A second copy at the bundle
+# root is for whoever is holding the tarball.
+printf '%s\n' "$VERSION" > "$STAGE/bin/VERSION"
+printf 'version: %s\narch:    %s\nbuilt:   %s\n' "$VERSION" "$ARCH" "$BUILT_AT" > "$STAGE/VERSION"
 cp "$ROOT/config/branding.json" "$STAGE/config/branding.json"
 # Local inference: the config names a model registry, and the registry names the
 # per-provider manifests. All three have to travel or /api/inference/status reports

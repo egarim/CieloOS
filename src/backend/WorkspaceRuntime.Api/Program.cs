@@ -451,11 +451,34 @@ if (!panelServed)
     app.MapGet("/", () => Results.Redirect("/api/branding"));
 }
 
+// Which build is this? Read once, beside the assembly, because the file is written
+// at package time and cannot change under a running process.
+//
+// Empty rather than "unknown" when absent: a dev checkout run from `dotnet run` has
+// no bundle and should show nothing, while an INSTALLED machine that cannot name
+// itself is a fault worth seeing.
+var buildVersion = TryReadVersion();
+static string TryReadVersion()
+{
+    try
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "VERSION");
+        return File.Exists(path) ? File.ReadAllText(path).Trim() : "";
+    }
+    catch
+    {
+        return "";
+    }
+}
+
 app.MapGet("/api/branding", (IConfiguration configuration) =>
 {
     var section = configuration.GetSection("Branding");
     return Results.Ok(new
     {
+        // Public on purpose: the panel shows it, and a machine that will not say what
+        // it is running cannot be supported. It is a git describe, not a secret.
+        buildVersion,
         productName = section["ProductName"] ?? "Workspace Runtime",
         shortName = section["ShortName"] ?? "Runtime",
         companyName = section["CompanyName"] ?? "Workspace Runtime Labs",

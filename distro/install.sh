@@ -92,6 +92,13 @@ echo "==> [2/9] Service user 'cielo' + rootless podman prerequisites"
 if ! id -u cielo >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/cielo --shell /bin/bash cielo
 fi
+# useradd --create-home leaves an EXISTING directory's ownership alone, and by the
+# time this runs something else may already have made it. On a fresh install that
+# left /var/lib/cielo owned by root:root — so cielo could not write to its own home,
+# the search service died on `mkdir $HOME/lunos` with permission denied, and
+# `systemctl --user enable` could not create its symlink. Both surfaced as unrelated
+# failures in the closing banner and neither named the cause.
+chown cielo:cielo /var/lib/cielo
 grep -q '^cielo:' /etc/subuid || usermod --add-subuids 100000-165535 cielo
 grep -q '^cielo:' /etc/subgid || usermod --add-subgids 100000-165535 cielo
 # linger (so /run/user/<uid> exists for rootless podman): loginctl on a live system,
@@ -168,7 +175,7 @@ else
   # log file costs nothing and keeps both.
   IMAGE_LOG="/var/log/cielo-session-images.log"
   echo "    building now (this takes a while); log: $IMAGE_LOG"
-  if runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  if runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
        /usr/local/bin/cielo-build-session-images >"$IMAGE_LOG" 2>&1; then
     echo "    session images built"
   else
@@ -199,7 +206,7 @@ elif [[ ! -f "$BUNDLE/services/searxng/run.sh" ]]; then
 else
   SEARCH_LOG="/var/log/cielo-search.log"
   echo "    starting the search service (websearch needs it); log: $SEARCH_LOG"
-  if runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME=/var/lib/cielo \
+  if runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME=/var/lib/cielo \
        bash "$BUNDLE/services/searxng/run.sh" >"$SEARCH_LOG" 2>&1; then
     echo "    search service up on :8888"
   else
@@ -259,15 +266,27 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
   chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/cielo-sessions.service
   echo "    podman-restart + cielo-sessions linked for cielo (activate on first boot)"
 else
-  runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable podman-restart.service >/dev/null 2>&1 \
-    && runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-         systemctl --user enable cielo-sessions.service >/dev/null 2>&1 \
-    && echo "    podman-restart + cielo-sessions enabled for cielo" \
-    || { echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
-         degrade "Sessions will not survive a reboot: podman-restart could not be enabled.
-    They will start fine and keep running; they just will not come back after the machine restarts.
+    && echo "    podman-restart enabled for cielo" \
+    || { echo "    WARNING: could not enable podman-restart." >&2
+         degrade "podman-restart could not be enabled.
     Fix:  sudo -u cielo systemctl --user enable podman-restart.service"; }
+
+  # Ours, enabled separately. Chained behind podman-restart with && it reported the
+  # WRONG unit when it failed — the banner blamed podman-restart for a fault that was
+  # entirely in cielo-sessions, which is worse than no message.
+  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    systemctl --user daemon-reload >/dev/null 2>&1 || true
+  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    systemctl --user enable cielo-sessions.service >/dev/null 2>&1 \
+    && echo "    cielo-sessions enabled for cielo" \
+    || { echo "    WARNING: could not enable cielo-sessions; sessions will not survive a reboot." >&2
+         degrade "Sessions will not survive a reboot: cielo-sessions could not be enabled.
+    They start fine and keep running; they just will not come back after the machine restarts.
+    podman-restart cannot cover this — it only matches restart-policy=always, and sessions
+    are created unless-stopped.
+    Fix:  sudo -u cielo HOME=/var/lib/cielo systemctl --user enable cielo-sessions.service"; }
 fi
 
 echo "==> [5/9] Install to /opt/cielo"
@@ -455,7 +474,7 @@ if [[ "$NO_CHAT" -eq 1 ]]; then
   # up on a machine whose operator just said "no chat" would be the worst outcome.
   if [[ "$LIVE" -eq 1 ]]; then
     systemctl disable --now cielo-chat.service >/dev/null 2>&1 || true
-    runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
       podman rm -f cielo-chat >/dev/null 2>&1 || true
   fi
   rm -f /etc/systemd/system/cielo-chat.service \
@@ -629,7 +648,8 @@ EOF
 fi
 
 echo
-echo "================ CieloOS installed ($MODE) ================"
+CIELO_VERSION="$(cat "$BUNDLE/bin/VERSION" 2>/dev/null || echo unknown)"
+echo "================ CieloOS $CIELO_VERSION installed ($MODE) ================"
 if [[ "$LIVE" -eq 1 ]]; then
   systemctl --no-pager --lines=0 status cielo-runtime.service || true
 fi
