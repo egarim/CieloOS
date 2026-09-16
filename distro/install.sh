@@ -92,19 +92,6 @@ echo "==> [2/9] Service user 'cielo' + rootless podman prerequisites"
 if ! id -u cielo >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/cielo --shell /bin/bash cielo
 fi
-# Make sure cielo owns its own home, whether or not anything has created it yet.
-#
-# On a fresh Ubuntu 24.04, `useradd --system --create-home --home-dir /var/lib/cielo`
-# does NOT leave that directory behind — something later in the install makes it, as
-# root. The result was a service user that could not write to its own home: the
-# search service died on `mkdir $HOME/lunos` with permission denied, and
-# `systemctl --user enable` could not create its symlink. Both surfaced as unrelated
-# entries in the closing banner and neither named the cause.
-#
-# `install -d` rather than `chown`, because a chown here aborts the whole install
-# under `set -e` on exactly the machines where the directory is missing — which is
-# all of them. Creates it if absent, fixes the ownership if present.
-install -d -o cielo -g cielo /var/lib/cielo
 grep -q '^cielo:' /etc/subuid || usermod --add-subuids 100000-165535 cielo
 grep -q '^cielo:' /etc/subgid || usermod --add-subgids 100000-165535 cielo
 # linger (so /run/user/<uid> exists for rootless podman): loginctl on a live system,
@@ -115,6 +102,20 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
   install -d /var/lib/systemd/linger && : > /var/lib/systemd/linger/cielo
 fi
 CIELO_UID="$(id -u cielo)"
+# ASK the account where it lives rather than assuming /var/lib/cielo.
+#
+# The useradd above is skipped when a user called cielo already exists, and that
+# user's home can be anywhere. A machine where someone already had a login account
+# named cielo silently installed into a stranger's home, wrote user units to a path
+# systemd never searches, and surfaced the whole thing as "sessions will not survive
+# a reboot" — three wrong diagnoses away from the cause.
+#
+# Deriving it is also the only version that is correct on both machines: the service
+# account we create AND the account we adopt.
+CIELO_HOME="$(getent passwd cielo | cut -d: -f6)"
+CIELO_HOME="${CIELO_HOME:-/var/lib/cielo}"
+echo "    service user 'cielo' (uid ${CIELO_UID}) home: ${CIELO_HOME}"
+install -d -o cielo -g cielo "$CIELO_HOME"
 
 echo "==> [3/9] Session images + the search service"
 # The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
@@ -130,9 +131,9 @@ esac
 # whatever is missing: that covers --offline (chroot, no podman yet) and recovers from
 # a build that failed here.
 if [[ -d "$BUNDLE/images" ]]; then
-  install -d -o cielo -g cielo /var/lib/cielo/images
-  cp -a "$BUNDLE/images/." /var/lib/cielo/images/
-  chown -R cielo:cielo /var/lib/cielo/images
+  install -d -o cielo -g cielo "$CIELO_HOME/images"
+  cp -a "$BUNDLE/images/." "$CIELO_HOME/images/"
+  chown -R cielo:cielo "$CIELO_HOME/images"
   cat > /etc/systemd/system/cielo-session-images.service <<UNIT
 [Unit]
 Description=Build the CieloOS session images if they are missing
@@ -158,7 +159,7 @@ for img in console desktop; do
   if podman image exists "localhost/lunos-\$img:latest"; then continue; fi
   args=(build -t "localhost/lunos-\$img:latest")
   if [[ "\$img" == "desktop" ]]; then args+=(--build-arg "ONLYOFFICE_DEB=\${OO_DEB}"); fi
-  podman "\${args[@]}" "/var/lib/cielo/images/\$img"
+  podman "\${args[@]}" "${CIELO_HOME}/images/\$img"
 done
 SCRIPT
   chmod +x /usr/local/bin/cielo-build-session-images
@@ -181,7 +182,7 @@ else
   # log file costs nothing and keeps both.
   IMAGE_LOG="/var/log/cielo-session-images.log"
   echo "    building now (this takes a while); log: $IMAGE_LOG"
-  if runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  if runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
        /usr/local/bin/cielo-build-session-images >"$IMAGE_LOG" 2>&1; then
     echo "    session images built"
   else
@@ -212,7 +213,7 @@ elif [[ ! -f "$BUNDLE/services/searxng/run.sh" ]]; then
 else
   SEARCH_LOG="/var/log/cielo-search.log"
   echo "    starting the search service (websearch needs it); log: $SEARCH_LOG"
-  if runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME=/var/lib/cielo \
+  if runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME="$CIELO_HOME" \
        bash "$BUNDLE/services/searxng/run.sh" >"$SEARCH_LOG" 2>&1; then
     echo "    search service up on :8888"
   else
@@ -222,7 +223,7 @@ else
     Everything else works — this only costs the websearch tool, which agents lean on
     for any research task.
     Why: see $SEARCH_LOG
-    Fix:  sudo -u cielo HOME=/var/lib/cielo bash /opt/cielo/services/searxng/run.sh"
+    Fix:  sudo -u cielo HOME="$CIELO_HOME" bash /opt/cielo/services/searxng/run.sh"
   fi
 fi
 
@@ -241,8 +242,8 @@ echo "==> [4/9] Session restart policy"
 #
 # These are USER units for cielo, so offline installs get the wants-symlink written
 # directly rather than being skipped: systemctl cannot run in a chroot.
-install -d -o cielo -g cielo /var/lib/cielo/.config/systemd/user
-cat > /var/lib/cielo/.config/systemd/user/cielo-sessions.service <<'UNIT'
+install -d -o cielo -g cielo "$CIELO_HOME"/.config/systemd/user
+cat > "$CIELO_HOME"/.config/systemd/user/cielo-sessions.service <<'UNIT'
 [Unit]
 Description=Start CieloOS sessions that were running before the reboot
 Documentation=https://github.com/egarim/CieloOS
@@ -259,20 +260,20 @@ ExecStart=/usr/bin/podman start --all --filter restart-policy=unless-stopped
 [Install]
 WantedBy=default.target
 UNIT
-chown cielo:cielo /var/lib/cielo/.config/systemd/user/cielo-sessions.service
+chown cielo:cielo "$CIELO_HOME"/.config/systemd/user/cielo-sessions.service
 if [[ "$CI" -eq 1 ]]; then
   echo "    (skipped: --ci)"
 elif [[ "$OFFLINE" -eq 1 ]]; then
-  install -d -o cielo -g cielo /var/lib/cielo/.config/systemd/user/default.target.wants
+  install -d -o cielo -g cielo "$CIELO_HOME"/.config/systemd/user/default.target.wants
   ln -sf /usr/lib/systemd/user/podman-restart.service \
-    /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
-  chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service
-  ln -sf /var/lib/cielo/.config/systemd/user/cielo-sessions.service \
-    /var/lib/cielo/.config/systemd/user/default.target.wants/cielo-sessions.service
-  chown -h cielo:cielo /var/lib/cielo/.config/systemd/user/default.target.wants/cielo-sessions.service
+    "$CIELO_HOME"/.config/systemd/user/default.target.wants/podman-restart.service
+  chown -h cielo:cielo "$CIELO_HOME"/.config/systemd/user/default.target.wants/podman-restart.service
+  ln -sf "$CIELO_HOME"/.config/systemd/user/cielo-sessions.service \
+    "$CIELO_HOME"/.config/systemd/user/default.target.wants/cielo-sessions.service
+  chown -h cielo:cielo "$CIELO_HOME"/.config/systemd/user/default.target.wants/cielo-sessions.service
   echo "    podman-restart + cielo-sessions linked for cielo (activate on first boot)"
 else
-  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable podman-restart.service >/dev/null 2>&1 \
     && echo "    podman-restart enabled for cielo" \
     || { echo "    WARNING: could not enable podman-restart." >&2
@@ -282,9 +283,9 @@ else
   # Ours, enabled separately. Chained behind podman-restart with && it reported the
   # WRONG unit when it failed — the banner blamed podman-restart for a fault that was
   # entirely in cielo-sessions, which is worse than no message.
-  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user daemon-reload >/dev/null 2>&1 || true
-  runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable cielo-sessions.service >/dev/null 2>&1 \
     && echo "    cielo-sessions enabled for cielo" \
     || { echo "    WARNING: could not enable cielo-sessions; sessions will not survive a reboot." >&2
@@ -292,7 +293,7 @@ else
     They start fine and keep running; they just will not come back after the machine restarts.
     podman-restart cannot cover this — it only matches restart-policy=always, and sessions
     are created unless-stopped.
-    Fix:  sudo -u cielo HOME=/var/lib/cielo systemctl --user enable cielo-sessions.service"; }
+    Fix:  sudo -u cielo HOME="$CIELO_HOME" systemctl --user enable cielo-sessions.service"; }
 fi
 
 echo "==> [5/9] Install to /opt/cielo"
@@ -420,8 +421,8 @@ if [[ "$(id -u)" -eq 0 ]]; then
     /usr/local/bin/cielo-build-desk-image "$id"
 fi
 
-root="/var/lib/cielo/images/profiles/${id}"
-test -d "$root" || { echo "No desk profile '${id}' under /var/lib/cielo/images/profiles." >&2; exit 2; }
+root="${CIELO_HOME}/images/profiles/\${id}"
+test -d "\$root" || { echo "No desk profile '\${id}' under ${CIELO_HOME}/images/profiles." >&2; exit 2; }
 
 # VS Code ships a per-architecture .deb, like ONLYOFFICE in the session image.
 case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -480,7 +481,7 @@ if [[ "$NO_CHAT" -eq 1 ]]; then
   # up on a machine whose operator just said "no chat" would be the worst outcome.
   if [[ "$LIVE" -eq 1 ]]; then
     systemctl disable --now cielo-chat.service >/dev/null 2>&1 || true
-    runuser -u cielo -- env HOME=/var/lib/cielo XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+    runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
       podman rm -f cielo-chat >/dev/null 2>&1 || true
   fi
   rm -f /etc/systemd/system/cielo-chat.service \
@@ -540,7 +541,7 @@ token_file="/opt/cielo/.data/secrets/\${owner}.token"
 # The chat gets its OWN revocable key rather than the owner's master credential
 # (issue #9, point 6). Minted once with the owner token and cached 0600; revoke it
 # from the panel and this chat stops working without touching anything else.
-key_file="/var/lib/cielo/chat-api-key"
+key_file="${CIELO_HOME}/chat-api-key"
 if [[ ! -s "\$key_file" ]]; then
   minted="\$(curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/keys" \\
     -H "Authorization: Bearer \$(cat "\$token_file")" \\
