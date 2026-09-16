@@ -261,6 +261,76 @@ public interface ITokenAuthenticator
 // Ownership: a human may act as, and inhabit, only the agents it owns; an
 // agent is only ever itself. This is the boundary that makes "joche's agents"
 // distinct from "yulia's agents".
+// Why a principal was refused, so the middleware can say which without owning the
+// decision.
+public enum PrincipalRefusal
+{
+    None,
+    NeedsSession,
+    NotOwner,
+    NotHuman,
+    ApiKeyRefused,
+}
+
+// The authorisation decision, out of the request pipeline and into a function.
+//
+// It lived as four sequential `if` blocks inside the middleware, which is not
+// reachable from a test — there is no TestServer in this solution — and so was
+// covered by exactly none of the suite. That mattered: OwnerOnly was a slug
+// comparison with no second factor, and a leaked identity token could create an
+// organization and a person inside it from another machine. Four hundred and
+// nineteen tests stayed green through all of it, because none of them could see
+// this code. A rule nothing can test is a rule nobody is checking.
+//
+// Order is load-bearing and matches what the middleware did: the session check
+// comes before the owner check so somebody holding a valid owner token is told to
+// sign in rather than told they are not the owner, which would be a lie.
+public static class PrincipalGate
+{
+    public static PrincipalRefusal Check(
+        AccessLevel level,
+        PrincipalKind kind,
+        bool isMachineOwner,
+        bool hasSession,
+        bool isApiKey)
+    {
+        var elevated = level == AccessLevel.HumanOnly || level == AccessLevel.OwnerOnly;
+
+        if (level == AccessLevel.OwnerOnly && !hasSession)
+        {
+            return PrincipalRefusal.NeedsSession;
+        }
+
+        if (level == AccessLevel.OwnerOnly && !isMachineOwner)
+        {
+            return PrincipalRefusal.NotOwner;
+        }
+
+        if (elevated && kind != PrincipalKind.Human)
+        {
+            return PrincipalRefusal.NotHuman;
+        }
+
+        if (elevated && isApiKey)
+        {
+            return PrincipalRefusal.ApiKeyRefused;
+        }
+
+        return PrincipalRefusal.None;
+    }
+
+    public static string Explain(PrincipalRefusal refusal) => refusal switch
+    {
+        PrincipalRefusal.NeedsSession =>
+            "Sign in with your password for this. An identity token or API key is not enough for owner actions.",
+        PrincipalRefusal.NotOwner => "Only the owner of this machine can do that.",
+        PrincipalRefusal.NotHuman => "This operation requires a human principal.",
+        PrincipalRefusal.ApiKeyRefused =>
+            "An API key cannot do this. Sign in as yourself for credential and owner actions.",
+        _ => "",
+    };
+}
+
 public static class Ownership
 {
     public static bool CanAccessHome(RuntimePrincipal principal, string homeSlug, IRuntimeStore store)

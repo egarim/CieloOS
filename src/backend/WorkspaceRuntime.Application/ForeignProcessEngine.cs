@@ -85,7 +85,12 @@ public sealed class ForeignProcessEngine : IAgentEngine
 
     private static string Fill(string template, EngineRun run, EngineEndpoints wiring) =>
         template
-            .Replace("{goal}", run.Goal, StringComparison.Ordinal)
+            // Not run.Goal as written: that text was composed for the native console
+            // loop and describes a shell, python3 and a filesystem this engine does
+            // not have. It also never named the session id that eleven of the fifteen
+            // MCP tools require, which is the difference between an engine with three
+            // usable tools and one with fifteen. See EngineBriefing.
+            .Replace("{goal}", EngineBriefing.Retarget(run.Goal, run.SessionId), StringComparison.Ordinal)
             // An engine's idea of a session is its own, and it is NOT ours. Three
             // spike runs answered from a previous conversation's memory instead of
             // doing the work, because the key was reused. One CieloOS run is one

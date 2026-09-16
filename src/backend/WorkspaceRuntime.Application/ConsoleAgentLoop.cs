@@ -39,9 +39,15 @@ public sealed record ConsoleLoopResult(
 // The pluggable brain. A deterministic recipe stands in for it today; a
 // model-backed brain (cloud or local) drops in behind the same seam without the
 // loop, the policy bus, or the audit trail changing.
+// maxSteps is passed, not just step, because a brain that does not know its budget
+// cannot spend it. A run asked to research a product and then produce a spreadsheet
+// spent all eight steps searching — it found real listings and real prices, and had
+// nothing left to write the file with. It was told "STEP: 3" on every turn and never
+// that there were eight, so "I should stop looking and start delivering" was not a
+// thought available to it.
 public interface IConsoleAgentBrain
 {
-    Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken);
+    Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken);
 }
 
 // A deterministic stand-in for a model: it leaves a durable note in the agent's
@@ -49,7 +55,7 @@ public interface IConsoleAgentBrain
 // — observe, decide, act-through-the-bus, audit — with no external model.
 public sealed class RecipeConsoleBrain : IConsoleAgentBrain
 {
-    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken)
     {
         var safeGoal = Sanitize(goal);
         return Task.FromResult(step switch
@@ -82,7 +88,7 @@ public sealed class UnconfiguredBrain : IConsoleAgentBrain
 
     public UnconfiguredBrain(string? message = null) => this.message = string.IsNullOrWhiteSpace(message) ? DefaultMessage : message;
 
-    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+    public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
         Task.FromResult(new ConsoleAgentAction(true, null, false, message));
 }
 
@@ -170,7 +176,7 @@ public sealed class ConsoleAgentLoop
                 return new ConsoleLoopResult(sessionId, goal, false, $"Console unavailable: {view.Detail}", steps);
             }
 
-            var action = await brain.DecideAsync(goal, view.Screen, history, step, cancellationToken);
+            var action = await brain.DecideAsync(goal, view.Screen, history, step, maxSteps, cancellationToken);
 
             // Asking is checked before Done, because a model that sets both means
             // the more specific one. The step is marked Done so the reply path
@@ -201,7 +207,7 @@ public sealed class ConsoleAgentLoop
             {
                 steps.Add(new ConsoleLoopStep(step, view.Screen, text, action.Submit, false, action.Note, "Stopped", "Repeated a command already run."));
                 return await EndByAskingAsync(
-                    sessionId, goal, steps, brain, view.Screen, history, step, onStep,
+                    sessionId, goal, steps, brain, view.Screen, history, step, maxSteps, onStep,
                     "You have repeated a command you already ran, so trying again will not help.",
                     "Stopped: the agent repeated a command it had already run without making progress (its earlier result stands — check the home).",
                     cancellationToken);
@@ -238,7 +244,7 @@ public sealed class ConsoleAgentLoop
 
         var lastScreen = steps.LastOrDefault()?.ScreenBefore ?? "";
         return await EndByAskingAsync(
-            sessionId, goal, steps, brain, lastScreen, history, cap, onStep,
+            sessionId, goal, steps, brain, lastScreen, history, cap, cap, onStep,
             $"You have used all {cap} steps you were given.",
             $"Reached the step limit ({cap}) before finishing.",
             cancellationToken);
@@ -265,6 +271,7 @@ public sealed class ConsoleAgentLoop
         string screen,
         List<string> history,
         int step,
+        int maxSteps,
         Func<ConsoleLoopStep, Task>? onStep,
         string why,
         string fallbackStopReason,
@@ -277,7 +284,7 @@ public sealed class ConsoleAgentLoop
                 + "\"question\": say what you were trying to do, what you actually found out on the way, what "
                 + "stopped you, and the single thing you need from them to continue. Offer concrete options if "
                 + $"there are any. The original request was: {goal}",
-                screen, history, step, cancellationToken);
+                screen, history, step, maxSteps, cancellationToken);
 
             // Question, or a note the brain marked as FINAL. A note on a
             // non-final action is "one line of reasoning about the next command" —

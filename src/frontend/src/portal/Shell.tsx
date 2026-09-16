@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Bot, ClipboardList, Folder, LogOut, Mail } from "lucide-react";
+import { Bot, ClipboardList, Folder, HomeIcon, Languages, LogOut, Mail } from "lucide-react";
 import type { Whoami } from "../shared/api";
 import { LANGUAGES, useT, type Language } from "../shared/i18n";
 import { Button } from "./ui/button";
@@ -8,15 +8,17 @@ import { Chat } from "./views/Chat";
 import { Files } from "./views/Files";
 import { Messages } from "./views/Messages";
 import { Projects } from "./views/Projects";
+import { Home } from "./views/Home";
 
-type PortalPlace = "chat" | "files" | "messages" | "projects";
+type PortalPlace = "home" | "chat" | "files" | "messages" | "projects";
 
 const PLACES: {
   id: PortalPlace;
   labelKey: string;
   icon: React.ComponentType<{ className?: string }>;
-  View: React.ComponentType<{ whoami: Whoami }>;
+  View: React.ComponentType<{ whoami: Whoami; onNavigate?: (place: PortalPlace) => void }>;
 }[] = [
+  { id: "home", labelKey: "portal.nav.home", icon: HomeIcon, View: Home },
   { id: "chat", labelKey: "portal.nav.chat", icon: Bot, View: Chat },
   { id: "files", labelKey: "portal.nav.files", icon: Folder, View: Files },
   { id: "messages", labelKey: "portal.nav.messages", icon: Mail, View: Messages },
@@ -42,7 +44,7 @@ export function Shell({
   onSignOut: () => void;
 }) {
   const t = useT();
-  const [active, setActive] = React.useState<PortalPlace>("chat");
+  const [active, setActive] = React.useState<PortalPlace>("home");
   const activePlace = PLACES.find((place) => place.id === active) ?? PLACES[0];
   const ActiveView = activePlace.View;
 
@@ -63,11 +65,37 @@ export function Shell({
             <p className="hidden min-w-0 truncate text-sm text-slate-600 lg:block dark:text-slate-300">
               {t("portal.user", { display: whoami.display })}
             </p>
-            <label className="flex min-h-11 items-center gap-2 text-sm">
-              <span className="hidden sm:inline">{t("portal.language")}</span>
+            {/* Choosing a language is something you do once. It was a bordered
+                box carrying the word "Language" AND the language name, at the same
+                visual weight as the product title and sign-out, and on a phone it
+                took about a third of the header — prominence out of all proportion
+                to how often anyone touches it.
+
+                Still a real <select>. The options are the native names, which is
+                the part that matters: somebody who cannot read the current
+                interface language has to be able to find their own. A custom
+                popover would have looked tidier and been worse — the native
+                control already has keyboard support, screen-reader semantics and
+                the platform's own picker on a phone.
+
+                So the select is kept and made invisible ON TOP of what you see: a
+                globe alone at phone width, globe plus the language's own name from
+                sm up. Focus is drawn on the wrapper, because a transparent control
+                cannot show its own focus ring. */}
+            <div className="relative flex items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 focus-within:ring-2 focus-within:ring-slate-400 dark:text-slate-300 dark:hover:bg-slate-800">
+              {/* min-w-11 as well as min-h-11: with the name hidden at phone width
+                  this is an icon alone, and padding around a 16px glyph came to a
+                  32px-wide target — under the 44px minimum, on the layout where
+                  it is hardest to hit. From sm up the name makes it wider anyway. */}
+              <span className="pointer-events-none flex min-h-11 min-w-11 items-center justify-center gap-2 px-2 text-sm sm:justify-start" aria-hidden="true">
+                <Languages className="h-4 w-4" />
+                <span className="hidden sm:inline">
+                  {LANGUAGES.find((item) => item.code === language)?.native ?? language}
+                </span>
+              </span>
               <select
                 aria-label={t("portal.language")}
-                className="min-h-11 rounded-lg border border-slate-300 bg-white px-2 py-1 text-slate-950 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-50"
+                className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
                 value={language}
                 onChange={(event) => onLanguageChange(event.target.value as Language)}
               >
@@ -77,7 +105,7 @@ export function Shell({
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
             <Button variant="ghost" onClick={onSignOut} aria-label={t("portal.signOut")}>
               <LogOut className="h-4 w-4" aria-hidden="true" />
               <span className="hidden sm:inline">{t("portal.signOut")}</span>
@@ -111,7 +139,7 @@ export function Shell({
         </nav>
 
         <main className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white p-4 md:p-6 dark:border-slate-800 dark:bg-slate-900">
-          <ActiveView whoami={whoami} />
+          <ActiveView whoami={whoami} onNavigate={setActive} />
         </main>
       </div>
 

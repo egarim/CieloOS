@@ -101,13 +101,13 @@ public class AskingTests
     {
         private readonly string question;
         public AskingBrain(string question) => this.question = question;
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(new ConsoleAgentAction(false, null, false, null, question));
     }
 
     private sealed class BothBrain : IConsoleAgentBrain
     {
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(new ConsoleAgentAction(true, null, false, "All done!", "Which one did you mean?"));
     }
 
@@ -115,7 +115,7 @@ public class AskingTests
     {
         private readonly string[] commands;
         public CyclingBrain(params string[] commands) => this.commands = commands;
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(new ConsoleAgentAction(false, commands[(step - 1) % commands.Length], true, "looking around"));
     }
 
@@ -123,7 +123,7 @@ public class AskingTests
     {
         private readonly string[] commands;
         public ScriptedBrain(params string[] commands) => this.commands = commands;
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(step <= commands.Length
                 ? new ConsoleAgentAction(false, commands[step - 1], true, "working")
                 : new ConsoleAgentAction(true, null, false, "Finished."));
@@ -234,7 +234,7 @@ public class AskingTests
     // loop's closing prompt with a question.
     private sealed class StuckThenAsksBrain : IConsoleAgentBrain
     {
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(goal.Contains("Do NOT try another command", StringComparison.Ordinal)
                 ? new ConsoleAgentAction(false, null, false, null,
                     "I am blocked: the search engine returned a bot challenge three times. Do you have a specific shop in mind?")
@@ -245,7 +245,7 @@ public class AskingTests
     {
         public string ClosingGoal { get; private set; } = "";
 
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken)
         {
             if (goal.Contains("Do NOT try another command", StringComparison.Ordinal))
             {
@@ -258,7 +258,7 @@ public class AskingTests
 
     private sealed class StuckThenThrowsBrain : IConsoleAgentBrain
     {
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             goal.Contains("Do NOT try another command", StringComparison.Ordinal)
                 ? throw new HttpRequestException("provider down")
                 : Task.FromResult(new ConsoleAgentAction(false, "curl -s https://example.test", true, "searching"));

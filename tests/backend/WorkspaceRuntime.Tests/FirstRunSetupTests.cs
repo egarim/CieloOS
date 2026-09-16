@@ -227,7 +227,7 @@ public sealed class FirstRunSetupTests
     public async Task UnconfiguredBrain_ends_the_turn_with_an_honest_message()
     {
         var brain = new UnconfiguredBrain();
-        var action = await brain.DecideAsync("do something", "", Array.Empty<string>(), 1, CancellationToken.None);
+        var action = await brain.DecideAsync("do something", "", Array.Empty<string>(), 1, 6, CancellationToken.None);
 
         Assert.True(action.Done);
         Assert.Null(action.Text); // types nothing

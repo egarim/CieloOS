@@ -91,7 +91,7 @@ public class ConsoleLoopTests
     {
         private readonly string command;
         public StuckBrain(string command) => this.command = command;
-        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken) =>
+        public Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken) =>
             Task.FromResult(new ConsoleAgentAction(false, command, true, "stuck"));
     }
 

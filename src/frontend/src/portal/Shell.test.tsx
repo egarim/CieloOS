@@ -19,6 +19,7 @@ vi.mock("./views/Chat", () => ({ Chat: () => <div>chat</div> }));
 vi.mock("./views/Files", () => ({ Files: () => <div>files</div> }));
 vi.mock("./views/Messages", () => ({ Messages: () => <div>messages</div> }));
 vi.mock("./views/Projects", () => ({ Projects: () => <div>projects</div> }));
+vi.mock("./views/Home", () => ({ Home: () => <div>home</div> }));
 
 const whoami: Whoami = {
   slug: "dev-test",

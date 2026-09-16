@@ -40,6 +40,21 @@ case "$MODE" in headless|app|kiosk) ;; *) echo "--mode must be headless|app|kios
 # LIVE = a running system where we can start/verify services now.
 LIVE=1; { [[ "$CI" -eq 1 ]] || [[ "$OFFLINE" -eq 1 ]]; } && LIVE=0
 
+# Things that failed without failing the install.
+#
+# Several steps here are deliberately non-fatal: a session image that will not
+# build should not cost you the runtime, the panel and the service units that all
+# installed perfectly well. That judgement is right. What was wrong is where the
+# warning ended up — printed once, on stderr, and then followed by six more steps
+# and a closing banner reading "CieloOS installed" with an active green service
+# under it. Between two multi-gigabyte image pulls, nobody scrolls back. The last
+# screen is the one people read, and it said everything was fine.
+#
+# So every soft failure is recorded here and reprinted at the very end, after the
+# banner, as the last thing on screen.
+DEGRADED=()
+degrade() { DEGRADED+=("$1"); }
+
 # Enable a systemd unit whether the system is running (systemctl) or not (symlink,
 # searching the vendor unit dirs for package-provided units like seatd).
 enable_unit() {
@@ -147,10 +162,26 @@ elif [[ "$SKIP_IMAGES" -eq 1 ]]; then
 elif [[ ! -d "$BUNDLE/images" ]]; then
   echo "    (no images/ in this bundle - skipping)"
 else
-  echo "    building now (this takes a while); first boot would otherwise do it"
-  runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-    /usr/local/bin/cielo-build-session-images >/dev/null || {
-      echo "    WARNING: image build failed here; cielo-session-images.service retries at boot." >&2; }
+  # The build's own output used to go to /dev/null, which keeps the install
+  # readable and makes a failure impossible to diagnose without running the whole
+  # thing again — a 3GB pull and a 35-step build to find out which step broke. A
+  # log file costs nothing and keeps both.
+  IMAGE_LOG="/var/log/cielo-session-images.log"
+  echo "    building now (this takes a while); log: $IMAGE_LOG"
+  if runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
+       /usr/local/bin/cielo-build-session-images >"$IMAGE_LOG" 2>&1; then
+    echo "    session images built"
+  else
+    echo "    WARNING: image build failed; see $IMAGE_LOG" >&2
+    # The last few lines are almost always the actual error. Showing them here
+    # means the common case needs no second command.
+    tail -n 4 "$IMAGE_LOG" 2>/dev/null | sed 's/^/      | /' >&2 || true
+    degrade "Sessions cannot start: the session images did not build.
+    Nothing else is affected — the runtime, panel and services are fine.
+    Why: see $IMAGE_LOG (the last lines are the error).
+    Fix:  sudo -u cielo /usr/local/bin/cielo-build-session-images
+    It also retries by itself at the next boot."
+  fi
 fi
 
 echo "==> [4/9] Session restart policy"
@@ -170,7 +201,10 @@ else
   runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
     systemctl --user enable podman-restart.service >/dev/null 2>&1 \
     && echo "    podman-restart enabled for cielo" \
-    || echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
+    || { echo "    WARNING: could not enable podman-restart; sessions will not survive a reboot." >&2
+         degrade "Sessions will not survive a reboot: podman-restart could not be enabled.
+    They will start fine and keep running; they just will not come back after the machine restarts.
+    Fix:  sudo -u cielo systemctl --user enable podman-restart.service"; }
 fi
 
 echo "==> [5/9] Install to /opt/cielo"
@@ -245,15 +279,31 @@ echo
 EOF
 cat > /usr/local/bin/cielo-add-user <<EOF
 #!/usr/bin/env bash
-# Add a teammate. Usage: cielo-add-user "Their Name" <owner-token> [desk-profile]
+# Add a teammate. Usage: cielo-add-user "Their Name" [desk-profile]
 # The desk profile decides their toolchain (office, dotnet, marketing); omitted
 # means office, which is the desk everyone had before profiles existed.
+#
+# This took the owner's identity token as an argument until creating a person
+# became an action you have to prove a password for. It signs in instead: the
+# password is typed here and never becomes a shell argument, so it stays out of
+# the process list and out of .bash_history, which is more than the token it
+# replaced ever managed.
+#
+# If you have not set a password yet, do that first — on this box, because a
+# first password is loopback-only:
+#   curl -fsS -XPOST http://127.0.0.1:${PORT}/api/auth/password \
+#     -H "Authorization: Bearer \$(cat /opt/cielo/.data/secrets/<you>.token)" \
+#     -H 'Content-Type: application/json' -d '{"newPassword":"..."}'
 set -euo pipefail
-name="\${1:?Usage: cielo-add-user \"Name\" <owner-token> [desk-profile]}"
-token="\${2:?owner token required}"
-desk="\${3:-office}"
-curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/users" \
-  -H "Authorization: Bearer \${token}" \
+name="\${1:?Usage: cielo-add-user \"Name\" [desk-profile]}"
+desk="\${2:-office}"
+read -rp  "Your desk name: " who
+read -rsp "Your password:  " pass; echo
+jar="\$(mktemp)"; trap 'rm -f "\$jar"' EXIT
+curl -fsS -c "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"slug\": \"\${who}\", \"password\": \"\${pass}\"}" >/dev/null
+curl -fsS -b "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/users" \
   -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 echo
 EOF
@@ -526,6 +576,21 @@ else
   echo "  or run:  cielo-claim \"Your Name\""
 fi
 echo
-echo "Sessions (console/desktop) need their podman images. If not present they build"
-echo "on first use; to prebuild, run the distro image Containerfiles as the 'cielo' user."
+echo "Sessions (console/desktop) need their podman images. They do NOT build on demand:"
+echo "until the image exists, creating a session is refused. cielo-session-images.service"
+echo "builds them at boot, or run: sudo -u cielo /usr/local/bin/cielo-build-session-images"
 echo "Add an AI provider anytime from the panel's Models tab (no restart)."
+
+# Last, so it is the last thing on screen. An install that half-worked should not
+# be able to end on a green line.
+if [[ "${#DEGRADED[@]}" -gt 0 ]]; then
+  echo
+  echo "=============== BUT ${#DEGRADED[@]} THING(S) DID NOT WORK ==============="
+  for item in "${DEGRADED[@]}"; do
+    echo
+    echo "  * $item"
+  done
+  echo
+  echo "CieloOS is installed and running; the above is what it cannot do yet."
+  echo "======================================================="
+fi

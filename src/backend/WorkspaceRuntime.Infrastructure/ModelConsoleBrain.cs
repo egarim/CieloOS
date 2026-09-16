@@ -51,6 +51,26 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         + "options where there are some. Asking is a legitimate way to finish a run: guessing wrong "
         + "costs the person far more time than asking does. Do not ask when you can reasonably "
         + "proceed, and never ask twice for the same thing. "
+        // "Do not spend steps hunting" was read, correctly, as "do not check your own
+        // hypothesis". A run asked for a product whose name looked wrong, searched six
+        // times, concluded the name was wrong, NAMED the likely correction in its
+        // question — and stopped with two steps unspent. One search on that name would
+        // have found the company and its microcontroller line. The owner then has to
+        // answer a question the agent could have answered itself.
+        + "One exception, and only one: if you can NAME the specific thing you think they meant, "
+        + "spend a single step checking it, and put what you found in your question. That is not "
+        + "hunting — hunting is searching for something only they can tell you; this is confirming "
+        + "something you already suspect, and it turns a question they have to think about into one "
+        + "they can answer in a word. Do not build the deliverable on the guess either way. "
+        // Knowing the number is useless without being told what to do near the end
+        // of it. Gathering is open-ended and producing is not, so an agent that does
+        // not consciously switch will always run out mid-gather — which is exactly
+        // what happened: eight searches, real prices found, no file written.
+        + "STEP tells you which step you are on and how many you have in total. Spend them: "
+        + "gathering is open-ended and producing is not, so when roughly a third of your budget "
+        + "is left, stop looking for more and DELIVER what you already have. A smaller result that "
+        + "exists beats a better one you ran out of steps before writing. If what you have is too "
+        + "thin to deliver, say so and ask rather than spending the last steps gathering. "
         + "Ask as well when you are BLOCKED: if two or three attempts at the same thing have failed "
         + "and you have no genuinely different idea, say what you learned and what stopped you rather "
         + "than trying another variation of what already did not work. " +
@@ -70,10 +90,10 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         this.http.BaseAddress ??= new Uri(options.BaseUrl.TrimEnd('/') + "/");
     }
 
-    public async Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, CancellationToken cancellationToken)
+    public async Task<ConsoleAgentAction> DecideAsync(string goal, string screen, IReadOnlyList<string> history, int step, int maxSteps, CancellationToken cancellationToken)
     {
         var user =
-            $"GOAL:\n{goal}\n\nSCREEN:\n{screen}\n\nSTEP: {step}\n" +
+            $"GOAL:\n{goal}\n\nSCREEN:\n{screen}\n\nSTEP: {step} of {maxSteps}\n" +
             $"HISTORY (most recent last):\n{(history.Count == 0 ? "(nothing yet)" : string.Join("\n", history))}";
 
         var payload = new
@@ -113,7 +133,14 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
                 return Stop("model returned no content");
             }
 
-            var decision = JsonSerializer.Deserialize<BrainDecision>(content, JsonOptions);
+            // Take the first complete JSON object out of the reply rather than
+            // demanding the whole reply IS one. Models put things around it: a
+            // ```json fence, a sentence of preamble, a stray bullet afterwards. A
+            // real run died on the last of those — two good searches in, then
+            //   model error: '-' is invalid after a single JSON value.
+            // and that sentence was handed to the owner as the agent's answer.
+            var decision = JsonSerializer.Deserialize<BrainDecision>(
+                ModelReply.FirstJsonObject(content) ?? content, JsonOptions);
             if (decision is null)
             {
                 return Stop("could not parse the model's action");
@@ -134,4 +161,84 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
     private sealed record Choice([property: JsonPropertyName("message")] Message? Message);
     private sealed record Message([property: JsonPropertyName("content")] string? Content);
     private sealed record BrainDecision(bool Done, string? Text, bool Submit, string? Note, string? Question);
+}
+
+
+// Pulling the model's decision out of whatever it wrapped it in.
+//
+// Public, and in its own class, because the alternative was leaving it private in
+// a type that only exists behind an HTTP call — untestable, which is how the
+// original one-line Deserialize survived long enough to kill a run in front of
+// somebody.
+public static class ModelReply
+{
+    // The first balanced {...} in the text, or null if there is none.
+    //
+    // Brace counting has to respect string literals or a command containing a }
+    // — which shell commands frequently do — would close the object early and
+    // truncate the very field the loop is about to execute. Escapes have to be
+    // respected for the same reason: \" inside a command must not be read as the
+    // end of the string.
+    public static string? FirstJsonObject(string? content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return null;
+        }
+
+        var start = content.IndexOf('{');
+        if (start < 0)
+        {
+            return null;
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escaped = false;
+
+        for (var i = start; i < content.Length; i++)
+        {
+            var c = content[i];
+
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (inString && c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+
+            if (inString)
+            {
+                continue;
+            }
+
+            if (c == '{')
+            {
+                depth++;
+            }
+            else if (c == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return content[start..(i + 1)];
+                }
+            }
+        }
+
+        // Unbalanced — a truncated reply, usually. Say nothing rather than hand
+        // back a fragment that would parse into a half-formed action.
+        return null;
+    }
 }
