@@ -51,6 +51,17 @@ public sealed class ModelConsoleBrain : IConsoleAgentBrain
         + "options where there are some. Asking is a legitimate way to finish a run: guessing wrong "
         + "costs the person far more time than asking does. Do not ask when you can reasonably "
         + "proceed, and never ask twice for the same thing. "
+        // "Do not spend steps hunting" was read, correctly, as "do not check your own
+        // hypothesis". A run asked for a product whose name looked wrong, searched six
+        // times, concluded the name was wrong, NAMED the likely correction in its
+        // question — and stopped with two steps unspent. One search on that name would
+        // have found the company and its microcontroller line. The owner then has to
+        // answer a question the agent could have answered itself.
+        + "One exception, and only one: if you can NAME the specific thing you think they meant, "
+        + "spend a single step checking it, and put what you found in your question. That is not "
+        + "hunting — hunting is searching for something only they can tell you; this is confirming "
+        + "something you already suspect, and it turns a question they have to think about into one "
+        + "they can answer in a word. Do not build the deliverable on the guess either way. "
         + "Ask as well when you are BLOCKED: if two or three attempts at the same thing have failed "
         + "and you have no genuinely different idea, say what you learned and what stopped you rather "
         + "than trying another variation of what already did not work. " +
