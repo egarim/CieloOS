@@ -92,13 +92,19 @@ echo "==> [2/9] Service user 'cielo' + rootless podman prerequisites"
 if ! id -u cielo >/dev/null 2>&1; then
   useradd --system --create-home --home-dir /var/lib/cielo --shell /bin/bash cielo
 fi
-# useradd --create-home leaves an EXISTING directory's ownership alone, and by the
-# time this runs something else may already have made it. On a fresh install that
-# left /var/lib/cielo owned by root:root — so cielo could not write to its own home,
-# the search service died on `mkdir $HOME/lunos` with permission denied, and
+# Make sure cielo owns its own home, whether or not anything has created it yet.
+#
+# On a fresh Ubuntu 24.04, `useradd --system --create-home --home-dir /var/lib/cielo`
+# does NOT leave that directory behind — something later in the install makes it, as
+# root. The result was a service user that could not write to its own home: the
+# search service died on `mkdir $HOME/lunos` with permission denied, and
 # `systemctl --user enable` could not create its symlink. Both surfaced as unrelated
-# failures in the closing banner and neither named the cause.
-chown cielo:cielo /var/lib/cielo
+# entries in the closing banner and neither named the cause.
+#
+# `install -d` rather than `chown`, because a chown here aborts the whole install
+# under `set -e` on exactly the machines where the directory is missing — which is
+# all of them. Creates it if absent, fixes the ownership if present.
+install -d -o cielo -g cielo /var/lib/cielo
 grep -q '^cielo:' /etc/subuid || usermod --add-subuids 100000-165535 cielo
 grep -q '^cielo:' /etc/subgid || usermod --add-subgids 100000-165535 cielo
 # linger (so /run/user/<uid> exists for rootless podman): loginctl on a live system,
