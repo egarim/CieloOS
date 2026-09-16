@@ -28,9 +28,24 @@ public static class EngineBriefing
     // Retarget below cannot silently stop matching it — a string-replace against a
     // sentence somebody later reworded would fail by doing nothing, and the symptom
     // would be an engine quietly going back to being told about python3.
+    // "websearch" named as a capability rather than a command cost two T7 runs.
+    //
+    // /usr/local/bin/websearch is real and ships in the console image, and with the
+    // search service up it returns clean TSV. Both runs ignored it and hand-rolled
+    // urllib against DuckDuckGo, Bing and Marginalia instead, getting bot-challenge
+    // pages from all three and stopping with nothing. A model reading "use your
+    // tools (websearch, python3, ...)" has no reason to think the first word is an
+    // executable when the second is a language — so it treated searching as
+    // something to implement rather than something to call.
+    //
+    // Naming the command and showing its shape is the whole fix. The same mistake in
+    // the foreign-engine path is what ForeignTail exists to correct.
     public const string NativeTail =
-        "If it needs work on the machine, use your tools (websearch, python3, the files in ~ and " +
-        "~/shared), then give the answer. ";
+        "If it needs work on the machine, use your tools, then give the answer. To search the web " +
+        "run the command websearch \"your query\" — it prints one result per line as " +
+        "rank/title/url/snippet, and it is far more reliable than fetching a search engine's HTML " +
+        "yourself, which gets bot-challenged. You also have python3 and the files in ~ and " +
+        "~/shared. ";
 
     // What is true for an engine driving the machine through MCP.
     public static string ForeignTail(string sessionId) =>
