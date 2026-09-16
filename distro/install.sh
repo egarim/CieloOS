@@ -79,13 +79,56 @@ if [[ "$MODE" == "headless" ]]; then BIND="http://0.0.0.0:$PORT"; else BIND="htt
 
 echo "==> [1/9] Dependencies"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -y
+
+# A freshly booted machine is the worst possible moment to run apt-get, and it is
+# exactly when this runs.
+#
+# cloud-init has just finished, unattended-upgrades has the dpkg frontend lock for
+# the next few minutes, and the first thing a new customer does with a new VPS is
+# paste the one-liner. Measured on a guest that had been up for ninety seconds:
+#
+#   E: Could not get lock /var/lib/dpkg/lock-frontend. It is held by process 1657
+#      (unattended-upgr)
+#
+# and set -e turned that into an abort at step 1 of 9 — no banner, no diagnosis, and
+# no hint that doing nothing for two minutes would have fixed it. On a real VPS this
+# is not an edge case; it may be the single most likely way the installer fails.
+#
+# Waiting is the right answer for a lock and the wrong answer for anything else, so
+# only a lock is retried. A bad mirror or a missing package still fails immediately
+# rather than hiding behind ten minutes of patience.
+APT_LOG="/var/log/cielo-apt.log"
+apt_retry() {
+  local tries=0 max="${CIELO_APT_TRIES:-60}" rc
+  while :; do
+    set +e
+    "$@" 2>&1 | tee -a "$APT_LOG"
+    rc=${PIPESTATUS[0]}
+    set -e
+    [[ "$rc" -eq 0 ]] && return 0
+    tail -n 6 "$APT_LOG" | grep -qi 'could not get lock\|frontend lock\|temporarily unavailable' || return "$rc"
+    tries=$((tries + 1))
+    if [[ "$tries" -ge "$max" ]]; then
+      echo "    apt has been locked for $((max * 10))s — something is stuck, not merely busy." >&2
+      echo "    See who holds it:  sudo fuser -v /var/lib/dpkg/lock-frontend" >&2
+      return "$rc"
+    fi
+    if [[ "$tries" -eq 1 ]]; then
+      echo
+      echo "    apt is locked by another process. A machine this fresh is almost always"
+      echo "    still running unattended-upgrades; waiting for it to finish."
+    fi
+    sleep 10
+  done
+}
+
+apt_retry apt-get update -y
 if [[ "$CI" -eq 1 ]]; then
   # Automated test only needs what the runtime + helpers use; podman/session bits
   # can't be exercised in a plain container anyway.
-  apt-get install -y --no-install-recommends curl ca-certificates
+  apt_retry apt-get install -y --no-install-recommends curl ca-certificates
 else
-  apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
+  apt_retry apt-get install -y --no-install-recommends podman uidmap slirp4netns fuse-overlayfs curl ca-certificates
 fi
 
 echo "==> [2/9] Service user 'cielo' + rootless podman prerequisites"
@@ -728,11 +771,11 @@ if [[ "$MODE" == "kiosk" && "$CI" -eq 0 ]]; then
   # firefox-esr from Mozilla's apt repository instead.
   if ! {
     install -d -m 0755 /etc/apt/keyrings
-    apt-get install -y --no-install-recommends gnupg
+    apt_retry apt-get install -y --no-install-recommends gnupg
     curl -fsSL https://packages.mozilla.org/apt/repo-signing-key.gpg | gpg --dearmor > /etc/apt/keyrings/packages.mozilla.org.gpg
     echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.gpg] https://packages.mozilla.org/apt mozilla main" > /etc/apt/sources.list.d/mozilla.list
-    apt-get update -y
-    apt-get install -y --no-install-recommends cage seatd firefox-esr
+    apt_retry apt-get update -y
+    apt_retry apt-get install -y --no-install-recommends cage seatd firefox-esr
   }; then
     echo "==> Kiosk browser install failed; this machine will boot without a UI." >&2
     exit 1
