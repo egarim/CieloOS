@@ -115,7 +115,37 @@ CIELO_UID="$(id -u cielo)"
 CIELO_HOME="$(getent passwd cielo | cut -d: -f6)"
 CIELO_HOME="${CIELO_HOME:-/var/lib/cielo}"
 echo "    service user 'cielo' (uid ${CIELO_UID}) home: ${CIELO_HOME}"
-install -d -o cielo -g cielo "$CIELO_HOME"
+
+# Create EVERY level, not just the last one.
+#
+# `install -d -o cielo a/b/c` creates a and a/b as root:root and chowns only c. So
+# cielo owned .config/systemd/user while .config itself stayed root's, and rootless
+# podman - which has to create .config/cni and .local/share/containers before it can
+# do anything at all - failed with "permission denied" three steps later, on a path
+# this installer never mentions. Naming each level also repairs a home where an
+# earlier install already did this, because install -d applies ownership to
+# directories that already exist.
+install -d -o cielo -g cielo \
+  "$CIELO_HOME" \
+  "$CIELO_HOME"/.config \
+  "$CIELO_HOME"/.config/systemd \
+  "$CIELO_HOME"/.config/systemd/user \
+  "$CIELO_HOME"/.local \
+  "$CIELO_HOME"/.local/share
+
+# Run something as the service user, from a directory it can actually enter.
+#
+# runuser keeps the CALLER's working directory. `curl ... | sudo bash` runs from the
+# operator's own home, mode 750, so every drop to cielo died with
+#   runuser: cannot chdir to /home/<them>: Permission denied
+# before the command it was handed ever ran. On a real install that single fault wore
+# three different names in the closing banner: no session images, no search service,
+# and podman-restart could not be enabled. The subshell keeps the cd local; BUNDLE is
+# absolute, so nothing else cares where we stand.
+as_cielo() {
+  ( cd / && runuser -u cielo -- env HOME="$CIELO_HOME" \
+      XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" "$@" )
+}
 
 echo "==> [3/9] Session images + the search service"
 # The desktop Containerfile takes the ONLYOFFICE package as a build arg and defaults
@@ -154,6 +184,18 @@ UNIT
 #!/usr/bin/env bash
 # Builds any missing session image. Safe to re-run: present images are left alone.
 set -euo pipefail
+
+# Re-exec as the service user when called with sudo, so the published command is
+# "sudo cielo-build-session-images" and not a recital of who we run as and where
+# their home is. Rootless podman also keeps a store PER USER: built as root the image
+# lands in root's store, invisible to the runtime, and the session still reports the
+# image as missing with the image sitting right there.
+if [[ "\$(id -u)" -eq 0 ]]; then
+  cd /   # runuser inherits OUR cwd, which cielo may not be allowed to enter
+  exec runuser -u cielo -- env HOME="${CIELO_HOME}" \
+    XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" /usr/local/bin/cielo-build-session-images
+fi
+
 OO_DEB="${OO_DEB}"
 for img in console desktop; do
   if podman image exists "localhost/lunos-\$img:latest"; then continue; fi
@@ -182,8 +224,7 @@ else
   # log file costs nothing and keeps both.
   IMAGE_LOG="/var/log/cielo-session-images.log"
   echo "    building now (this takes a while); log: $IMAGE_LOG"
-  if runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-       /usr/local/bin/cielo-build-session-images >"$IMAGE_LOG" 2>&1; then
+  if /usr/local/bin/cielo-build-session-images >"$IMAGE_LOG" 2>&1; then
     echo "    session images built"
   else
     echo "    WARNING: image build failed; see $IMAGE_LOG" >&2
@@ -193,7 +234,7 @@ else
     degrade "Sessions cannot start: the session images did not build.
     Nothing else is affected — the runtime, panel and services are fine.
     Why: see $IMAGE_LOG (the last lines are the error).
-    Fix:  sudo -u cielo /usr/local/bin/cielo-build-session-images
+    Fix:  sudo cielo-build-session-images
     It also retries by itself at the next boot."
   fi
 fi
@@ -206,6 +247,40 @@ fi
 # the agent's own prompt told it to use it. Two benchmark runs against OpenClaw were
 # lost to hand-rolled scraping that got bot-challenged, by an agent whose actual
 # search tool was one command away and pointed at nothing.
+# services/ goes to its installed home BEFORE anything is started from it. Step 5
+# copies it again and cp -a over identical files is free; what this buys is that the
+# helper below, and the "Fix:" line that may be printed at the end, name a path that
+# still exists once the unpacked tarball has been deleted.
+if [[ -d "$BUNDLE/services" ]]; then
+  install -d /opt/cielo
+  cp -a "$BUNDLE/services" /opt/cielo/
+  chown -R cielo:cielo /opt/cielo/services
+fi
+
+# A named command, for the same reason cielo-claim is one. What was actually printed
+# on a real install was
+#   sudo -u cielo HOME=/var/lib/cielo bash /opt/cielo/services/searxng/run.sh
+# which asks the operator to know the service account, its home, that the home
+# matters at all, and an internal path - four implementation details, handed over at
+# the one moment they are already annoyed that something did not work.
+cat > /usr/local/bin/cielo-start-search <<SCRIPT
+#!/usr/bin/env bash
+# Start (or restart) the private search service that an agent's websearch tool queries.
+set -euo pipefail
+RUN=/opt/cielo/services/searxng/run.sh
+test -f "\$RUN" || { echo "cielo: \$RUN is missing - this install shipped no services/." >&2; exit 2; }
+
+# Rootless podman keeps a container store per user; started as root, the container
+# would be invisible to the runtime, which runs as cielo.
+if [[ "\$(id -u)" -eq 0 ]]; then
+  cd /   # runuser inherits OUR cwd, which cielo may not be allowed to enter
+  exec runuser -u cielo -- env HOME="${CIELO_HOME}" \
+    XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" /usr/local/bin/cielo-start-search
+fi
+exec bash "\$RUN"
+SCRIPT
+chmod +x /usr/local/bin/cielo-start-search
+
 if [[ "$CI" -eq 1 || "$OFFLINE" -eq 1 ]]; then
   echo "    (search service deferred)"
 elif [[ ! -f "$BUNDLE/services/searxng/run.sh" ]]; then
@@ -213,8 +288,7 @@ elif [[ ! -f "$BUNDLE/services/searxng/run.sh" ]]; then
 else
   SEARCH_LOG="/var/log/cielo-search.log"
   echo "    starting the search service (websearch needs it); log: $SEARCH_LOG"
-  if runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" HOME="$CIELO_HOME" \
-       bash "$BUNDLE/services/searxng/run.sh" >"$SEARCH_LOG" 2>&1; then
+  if /usr/local/bin/cielo-start-search >"$SEARCH_LOG" 2>&1; then
     echo "    search service up on :8888"
   else
     echo "    WARNING: the search service did not start; see $SEARCH_LOG" >&2
@@ -223,7 +297,7 @@ else
     Everything else works — this only costs the websearch tool, which agents lean on
     for any research task.
     Why: see $SEARCH_LOG
-    Fix:  sudo -u cielo HOME="$CIELO_HOME" bash /opt/cielo/services/searxng/run.sh"
+    Fix:  sudo cielo-start-search"
   fi
 fi
 
@@ -273,28 +347,54 @@ elif [[ "$OFFLINE" -eq 1 ]]; then
   chown -h cielo:cielo "$CIELO_HOME"/.config/systemd/user/default.target.wants/cielo-sessions.service
   echo "    podman-restart + cielo-sessions linked for cielo (activate on first boot)"
 else
-  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-    systemctl --user enable podman-restart.service >/dev/null 2>&1 \
+  UNIT_LOG="/var/log/cielo-boot-units.log"
+  : > "$UNIT_LOG"
+  as_cielo systemctl --user enable podman-restart.service >>"$UNIT_LOG" 2>&1 \
     && echo "    podman-restart enabled for cielo" \
-    || { echo "    WARNING: could not enable podman-restart." >&2
+    || { echo "    WARNING: could not enable podman-restart; see $UNIT_LOG" >&2
+         tail -n 2 "$UNIT_LOG" 2>/dev/null | sed 's/^/      | /' >&2 || true
          degrade "podman-restart could not be enabled.
-    Fix:  sudo -u cielo systemctl --user enable podman-restart.service"; }
+    Why: see $UNIT_LOG
+    Fix:  sudo cielo-enable-boot-units"; }
 
   # Ours, enabled separately. Chained behind podman-restart with && it reported the
   # WRONG unit when it failed — the banner blamed podman-restart for a fault that was
   # entirely in cielo-sessions, which is worse than no message.
-  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-    systemctl --user daemon-reload >/dev/null 2>&1 || true
-  runuser -u cielo -- env HOME="$CIELO_HOME" XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" \
-    systemctl --user enable cielo-sessions.service >/dev/null 2>&1 \
+  as_cielo systemctl --user daemon-reload >>"$UNIT_LOG" 2>&1 || true
+  as_cielo systemctl --user enable cielo-sessions.service >>"$UNIT_LOG" 2>&1 \
     && echo "    cielo-sessions enabled for cielo" \
     || { echo "    WARNING: could not enable cielo-sessions; sessions will not survive a reboot." >&2
          degrade "Sessions will not survive a reboot: cielo-sessions could not be enabled.
     They start fine and keep running; they just will not come back after the machine restarts.
     podman-restart cannot cover this — it only matches restart-policy=always, and sessions
     are created unless-stopped.
-    Fix:  sudo -u cielo HOME="$CIELO_HOME" systemctl --user enable cielo-sessions.service"; }
+    Why: see $UNIT_LOG
+    Fix:  sudo cielo-enable-boot-units"; }
 fi
+
+# The remedy for either of the two above. Both are idempotent, so it does not matter
+# which one failed - and the operator should not have to work that out from a banner.
+cat > /usr/local/bin/cielo-enable-boot-units <<SCRIPT
+#!/usr/bin/env bash
+# Make sessions survive a reboot.
+#
+# Two units, because one is not enough: podman's own podman-restart.service only
+# matches restart-policy=always, and sessions are created unless-stopped, so it has
+# never restarted a single one. cielo-sessions.service is the unit podman is missing.
+set -uo pipefail
+if [[ "\$(id -u)" -eq 0 ]]; then
+  cd /   # runuser inherits OUR cwd, which cielo may not be allowed to enter
+  exec runuser -u cielo -- env HOME="${CIELO_HOME}" \
+    XDG_RUNTIME_DIR="/run/user/${CIELO_UID}" /usr/local/bin/cielo-enable-boot-units
+fi
+systemctl --user daemon-reload || true
+rc=0
+systemctl --user enable podman-restart.service || rc=1
+systemctl --user enable cielo-sessions.service  || rc=1
+[[ \$rc -eq 0 ]] && echo "sessions will now come back after a reboot"
+exit \$rc
+SCRIPT
+chmod +x /usr/local/bin/cielo-enable-boot-units
 
 echo "==> [5/9] Install to /opt/cielo"
 # Replace files only while the runtime is stopped: overwriting a running
@@ -402,8 +502,18 @@ curl -fsS -b "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/users" \
   -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 echo
 EOF
-cat > /usr/local/bin/cielo-build-desk-image <<'EOF'
-#!/usr/bin/env bash
+# The two values this script needs from install time are written as a prelude rather
+# than interpolated into the body. The heredoc below is QUOTED, and it has to stay
+# quoted: the body is full of $tag, ${3:-}, $(podman ...) and {{.Id}} that all belong
+# to runtime. It was not quoted carefully enough before - the body asked for
+# ${CIELO_HOME} and got it literally, so root= evaluated to /images/profiles/${id},
+# and every desk build failed with "No desk profile 'x' under /images/profiles",
+# naming a directory that has never existed on any machine.
+{
+echo '#!/usr/bin/env bash'
+echo "CIELO_HOME=${CIELO_HOME}"
+echo "CIELO_UID=${CIELO_UID}"
+cat <<'EOF'
 # Build a desk profile's image on this machine. Usage: cielo-build-desk-image dotnet
 #
 # These are built on demand rather than at install (issue #15): a developer desk
@@ -417,12 +527,14 @@ id="${1:?Usage: cielo-build-desk-image <profile>}"
 # session would still say the image is missing, with the image sitting right
 # there. Drop to cielo the way the session-image builder does.
 if [[ "$(id -u)" -eq 0 ]]; then
-  exec runuser -u cielo -- env XDG_RUNTIME_DIR="/run/user/$(id -u cielo)" \
+  cd /   # runuser inherits OUR cwd, which cielo may not be allowed to enter
+  exec runuser -u cielo -- env HOME="$CIELO_HOME" \
+    XDG_RUNTIME_DIR="/run/user/$CIELO_UID" \
     /usr/local/bin/cielo-build-desk-image "$id"
 fi
 
-root="${CIELO_HOME}/images/profiles/\${id}"
-test -d "\$root" || { echo "No desk profile '\${id}' under ${CIELO_HOME}/images/profiles." >&2; exit 2; }
+root="$CIELO_HOME/images/profiles/${id}"
+test -d "$root" || { echo "No desk profile '${id}' under $CIELO_HOME/images/profiles." >&2; exit 2; }
 
 # VS Code ships a per-architecture .deb, like ONLYOFFICE in the session image.
 case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
@@ -463,6 +575,7 @@ if [ -d "$root/console" ]; then
   build_tagged "localhost/cielo-console-${id}:latest" "$root/console"
 fi
 EOF
+} > /usr/local/bin/cielo-build-desk-image
 chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
@@ -674,7 +787,7 @@ fi
 echo
 echo "Sessions (console/desktop) need their podman images. They do NOT build on demand:"
 echo "until the image exists, creating a session is refused. cielo-session-images.service"
-echo "builds them at boot, or run: sudo -u cielo /usr/local/bin/cielo-build-session-images"
+echo "builds them at boot, or run: sudo cielo-build-session-images"
 echo "Add an AI provider anytime from the panel's Models tab (no restart)."
 
 # Last, so it is the last thing on screen. An install that half-worked should not
