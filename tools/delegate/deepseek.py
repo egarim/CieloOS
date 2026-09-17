@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Hand a task to DeepSeek, get files back, leave them in the working tree.
 
-    python tools/delegate/deepseek.py --brief docs/briefs/invites-01-storage.md \
-        --context docs/invites.md src/backend/WorkspaceRuntime.Domain/*.cs \
-        --write
+    python tools/delegate/deepseek.py --brief docs/briefs/01-foo.md \
+        --context 'docs/tls-and-proxies.md' 'src/backend/**/*.cs' --write
 
 The division of labour this exists to serve: DeepSeek does the task, codex
 reviews it. That only works if the task arrives with enough context to be done
@@ -16,6 +15,14 @@ Deliberate choices:
   the model held constant; a harness that silently upgraded itself would make
   every past number meaningless. --model exists, but the default does not drift.
 
+* **Files come back between markers, not as JSON.** The first version asked for
+  JSON, which worked for a two-paragraph smoke test and failed on the first real
+  task: the model returned raw C#, and it was right to. Putting a thousand lines
+  of source inside a JSON string means escaping every quote, backslash and
+  newline in it, which spends output tokens on punctuation and turns one bad
+  escape into an unparseable reply with the work already paid for. Markers cost
+  nothing and cannot be escaped wrong.
+
 * **It writes into the working tree and commits nothing.** The whole point is
   that a human or a reviewer sees a diff before anything is permanent. --write is
   opt-in; without it you get a manifest and nothing touches disk.
@@ -24,12 +31,13 @@ Deliberate choices:
   model mistake at best, so it is a hard error rather than a warning.
 
 * **The key is read from the environment and never printed**, not in errors, not
-  in --dry-run, not in the transcript it saves.
+  in the transcript it saves.
 """
 import argparse
 import glob
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -57,19 +65,29 @@ Never print a stack trace as a user-facing error.
 SCOPE. Do exactly the task. Do not reformat untouched code, do not rename things \
 that were not asked about, do not add abstractions for hypothetical futures.
 
-OUTPUT. Reply with a single JSON object and nothing else:
+OUTPUT FORMAT. Reply in exactly this shape and nothing else. Do not wrap it in \
+markdown fences. Do not add commentary outside the sections.
 
-{
-  "files":   [{"path": "relative/path.cs", "content": "<entire file content>"}],
-  "notes":   "what you did and why, in prose",
-  "concerns": ["anything you think is wrong with the task as specified"],
-  "followups": ["work this task implies but deliberately leaves undone"]
-}
+===NOTES===
+What you did and why, in prose.
+===CONCERNS===
+- anything you believe is wrong with the task as specified, one per line
+===FOLLOWUPS===
+- work this task implies but deliberately leaves undone, one per line
+===FILE path/relative/to/repo/root.cs===
+the entire file content, verbatim, with no escaping of any kind
+===END FILE===
+===FILE another/file.cs===
+...
+===END FILE===
 
-Every file must be COMPLETE. Never emit a fragment, a diff, or an ellipsis \
-standing in for unchanged code: the content you give replaces the file entirely. \
-If a file is too large to reproduce in full, say so in "concerns" and leave it \
-out of "files" rather than truncating it."""
+Repeat FILE blocks as needed. Every file must be COMPLETE: the content you give \
+REPLACES the file entirely, so never emit a fragment, a diff, or an ellipsis \
+standing in for unchanged code. If a file is too large to reproduce in full, say \
+so under CONCERNS and omit it rather than truncating it."""
+
+FILE_OPEN = re.compile(r"^===FILE\s+(.+?)===\s*$", re.MULTILINE)
+FILE_CLOSE = "===END FILE==="
 
 
 def read_key():
@@ -80,7 +98,7 @@ def read_key():
 
 
 def gather(patterns, root, budget):
-    """Collect context files, newest-listed-first, stopping at the character budget.
+    """Collect context files, stopping at the character budget.
 
     Silently dropping context is how a delegation quietly gets worse, so what did
     not fit is reported rather than swallowed.
@@ -113,7 +131,6 @@ def call(key, model, messages, max_tokens, retries=3):
         "messages": messages,
         "temperature": 0,
         "max_tokens": max_tokens,
-        "response_format": {"type": "json_object"},
     }).encode()
     last = None
     for attempt in range(1, retries + 1):
@@ -127,16 +144,37 @@ def call(key, model, messages, max_tokens, retries=3):
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:400]
             last = "HTTP %s: %s" % (exc.code, detail)
-            # 4xx other than rate limiting will not improve by asking again.
             if exc.code not in (429, 500, 502, 503, 504):
                 break
-        except Exception as exc:  # network, timeout
+        except Exception as exc:
             last = str(exc)
         if attempt < retries:
             wait = 5 * attempt
             print("  attempt %d failed (%s); retrying in %ds" % (attempt, last, wait), file=sys.stderr)
             time.sleep(wait)
     sys.exit("DeepSeek call failed: %s" % last)
+
+
+def parse(raw):
+    """Split the reply into prose sections and complete files."""
+    sections = {"NOTES": "", "CONCERNS": "", "FOLLOWUPS": ""}
+    for name in sections:
+        match = re.search(r"^===%s===\s*$(.*?)(?=^===|\Z)" % name, raw, re.MULTILINE | re.DOTALL)
+        if match:
+            sections[name] = match.group(1).strip()
+
+    files, unterminated = [], []
+    for match in FILE_OPEN.finditer(raw):
+        path = match.group(1).strip()
+        start = match.end()
+        end = raw.find(FILE_CLOSE, start)
+        if end < 0:
+            # Almost always the token ceiling. Writing a half file would be worse
+            # than writing none, so it is reported and dropped.
+            unterminated.append(path)
+            continue
+        files.append((path, raw[start:end].lstrip("\n").rstrip() + "\n"))
+    return sections, files, unterminated
 
 
 def main():
@@ -166,11 +204,9 @@ def main():
         print("    SKIPPED : %s" % item, file=sys.stderr)
 
     # Context selection decides the quality of what comes back, and the failure is
-    # silent. The harness's own smoke run proposed adding a test that already
-    # existed, asserting exactly the thing it asserts — a reasonable inference from
-    # having been shown the code and not the tests. A delegate cannot tell the
-    # difference between "untested" and "tests not supplied", so say so here rather
-    # than reading the suggestion later and believing it.
+    # silent. An early run proposed adding a test that already existed, asserting
+    # exactly what that test asserts — a fair inference from having been shown the
+    # code and not the tests. Nothing can tell "untested" from "tests not supplied".
     if not any("test" in chunk.split("\n", 1)[0].lower() for chunk in chunks):
         print("    NOTE    : no test files in context. Expect followups proposing "
               "tests that already exist.", file=sys.stderr)
@@ -185,46 +221,46 @@ def main():
     finish = payload["choices"][0].get("finish_reason")
     print("    tokens  : %s in, %s out (%s)" % (
         usage.get("prompt_tokens"), usage.get("completion_tokens"), finish))
-    if finish == "length":
-        print("    WARNING : the reply hit the token ceiling and is probably truncated.",
-              file=sys.stderr)
 
     if args.transcript:
-        open(args.transcript, "w", encoding="utf-8").write(raw)
+        target = args.transcript if os.path.isabs(args.transcript) else os.path.join(root, args.transcript)
+        with open(target, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(raw)
+        print("    saved   : %s" % target)
 
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        sys.exit("the reply was not JSON (%s). Re-run with --transcript to inspect it." % exc)
+    sections, files, unterminated = parse(raw)
 
-    files = result.get("files") or []
+    if not files and not any(sections.values()):
+        print("the reply matched none of the expected markers.", file=sys.stderr)
+        print("--- reply as received (%d chars) ---" % len(raw), file=sys.stderr)
+        print(raw[:2000], file=sys.stderr)
+        sys.exit(1)
+
+    if finish == "length" or unterminated:
+        print()
+        print("    WARNING : the reply was cut off. %d file(s) arrived incomplete "
+              "and were NOT written: %s" % (len(unterminated), ", ".join(unterminated) or "none"),
+              file=sys.stderr)
+
     print()
     print("--- files ---")
-    for item in files:
-        path = item.get("path", "")
+    for path, content in files:
         target = os.path.abspath(os.path.join(root, path))
-        # A path escaping the repository is a model error, not something to warn
-        # about and continue past.
         if not target.startswith(root + os.sep):
             sys.exit("refusing to write outside the repository: %r" % path)
-        exists = "modify" if os.path.exists(target) else "create"
-        print("  %-6s %-70s %d bytes" % (exists, path, len(item.get("content", ""))))
+        verb = "modify" if os.path.exists(target) else "create"
+        print("  %-6s %-68s %6d bytes" % (verb, path, len(content)))
         if args.write:
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "w", encoding="utf-8", newline="\n") as handle:
-                handle.write(item.get("content", ""))
+                handle.write(content)
 
-    for label in ("notes", "concerns", "followups"):
-        value = result.get(label)
-        if not value:
-            continue
-        print()
-        print("--- %s ---" % label)
-        if isinstance(value, list):
-            for entry in value:
-                print("  * %s" % entry)
-        else:
-            print("  %s" % value)
+    for label in ("NOTES", "CONCERNS", "FOLLOWUPS"):
+        if sections[label]:
+            print()
+            print("--- %s ---" % label.lower())
+            for line in sections[label].splitlines():
+                print("  %s" % line)
 
     if not args.write:
         print()
