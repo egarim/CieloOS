@@ -1033,6 +1033,107 @@ app.MapPost("/api/invites", (CreateInviteRequest? request, HttpContext context, 
     return Results.Ok(new { code, invite.ExpiresAt, slug = target.Slug });
 });
 
+app.MapPost("/api/invites/preview", (InvitePreviewRequest? request, HttpContext context, IInviteStore invites, IRuntimeStore store) =>
+{
+    var now = DateTimeOffset.UtcNow;
+    var source = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var invite = invites.Resolve(request?.Code ?? "", now);
+    if (invite is null)
+    {
+        return Results.Ok(new { state = "expired" });
+    }
+
+    var state = invite.State(now);
+    if (state != "live")
+    {
+        return Results.Ok(new { state });
+    }
+
+    invites.NotePreview(invite.Id, now, source);
+    var user = store.Users.First(candidate => candidate.Id == invite.UserId);
+    var inviter = store.Users.First(candidate => candidate.Id == invite.InvitedByUserId);
+    var organization = store.Organizations.First(candidate => candidate.Slug == user.OrgSlug);
+    return Results.Ok(new
+    {
+        state,
+        user.Slug,
+        user.DisplayName,
+        orgDisplayName = organization.DisplayName,
+        invitedBy = inviter.DisplayName,
+        invite.ExpiresAt,
+    });
+});
+
+app.MapPost("/api/invites/redeem", (InviteRedeemRequest? request, HttpContext context, IInviteStore invites, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions, LoginThrottle throttle) =>
+{
+    // Keep this sequence in lockstep with docs/briefs/02b2-invite-redeem.md.
+    if (!TransportFacts.Confidential(context, tlsTerminatedBy))
+    {
+        return Results.Json(new { error = "Invitation redemption requires a confidential connection." }, statusCode: StatusCodes.Status403Forbidden);
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var source = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var throttleKey = $"invite:{source}";
+    if (throttle.RetryAfter(throttleKey, now) is { } wait)
+    {
+        context.Response.Headers.RetryAfter = ((int)Math.Ceiling(wait.TotalSeconds)).ToString();
+        return Results.Json(new { error = $"Too many failed invitation attempts. Try again in {Math.Ceiling(wait.TotalMinutes)} minute(s)." }, statusCode: StatusCodes.Status429TooManyRequests);
+    }
+
+    var password = request?.Password ?? "";
+    if (password.Length < 10)
+    {
+        throttle.Failed(throttleKey, now);
+        return Results.BadRequest(new { error = "A password needs at least 10 characters." });
+    }
+
+    var invite = invites.Resolve(request?.Code ?? "", now);
+    if (invite is null)
+    {
+        throttle.Failed(throttleKey, now);
+        return Results.BadRequest(new { error = "This invitation cannot be used.", state = "expired" });
+    }
+
+    var user = store.Users.First(candidate => candidate.Id == invite.UserId);
+    var owner = store.Users.First(candidate => candidate.Id == invite.InvitedByUserId);
+    var state = invite.State(now);
+    if (state != "live")
+    {
+        throttle.Failed(throttleKey, now);
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), now, user.Id, null,
+            "invite.redeem", AuditOutcome.Blocked, $"Invitation redemption from {source} was refused: {state}.",
+            Principal: owner.Slug, OnBehalfOf: user.Slug));
+        return Results.BadRequest(new { error = "This invitation cannot be used.", state });
+    }
+
+    if (!invites.Spend(invite.Id, now, source))
+    {
+        throttle.Failed(throttleKey, now);
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), now, user.Id, null,
+            "invite.redeem", AuditOutcome.Blocked, $"Invitation redemption from {source} was refused: no longer live.",
+            Principal: owner.Slug, OnBehalfOf: user.Slug));
+        return Results.BadRequest(new { error = "This invitation cannot be used.", state = "used" });
+    }
+
+    if (!store.SetFirstPasswordHash(user.Id, hasher.Hash(password)))
+    {
+        throttle.Failed(throttleKey, now);
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), now, user.Id, null,
+            "invite.redeem", AuditOutcome.Blocked, $"Invitation redemption from {source} was refused because a password already exists.",
+            Principal: owner.Slug, OnBehalfOf: user.Slug));
+        return Results.BadRequest(new { error = "This invitation cannot be used.", state = "used" });
+    }
+
+    throttle.Succeeded(throttleKey);
+    var (session, secret) = sessions.Create(user.Id, TimeSpan.FromDays(14));
+    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt, tlsTerminatedBy));
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), now, user.Id, null,
+        "invite.redeem", AuditOutcome.Success, $"'{user.Slug}' accepted an invitation from {source}.",
+        Principal: owner.Slug, OnBehalfOf: user.Slug));
+    return Results.Ok(new { user.Slug, user.DisplayName, expiresAt = session.ExpiresAt });
+});
+
 // Every invitation, whatever its state, newest first.
 //
 // Never the code or its hash: those are gone the moment they are issued, and a
@@ -2757,6 +2858,10 @@ public sealed record SetLanguageRequest(string? Language);
 public sealed record SetTokenLimitRequest(string? Scope, string? Subject, long? MonthlyTokens);
 
 public sealed record LoginRequest(string? Slug, string? Password);
+
+public sealed record InvitePreviewRequest(string? Code);
+
+public sealed record InviteRedeemRequest(string? Code, string? Password);
 
 public sealed record SetPasswordRequest(string? CurrentPassword, string? NewPassword);
 

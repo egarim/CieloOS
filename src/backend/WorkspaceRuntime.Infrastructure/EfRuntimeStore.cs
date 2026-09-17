@@ -242,6 +242,12 @@ public sealed class EfRuntimeStore : IRuntimeStore
         EfPasswords.Write(context, userId, hash);
     }
 
+    public bool SetFirstPasswordHash(Guid userId, string hash)
+    {
+        using var context = contextFactory.CreateDbContext();
+        return EfPasswords.WriteFirst(context, userId, hash);
+    }
+
     public void SetLanguage(Guid userId, string language)
     {
         using var context = contextFactory.CreateDbContext();

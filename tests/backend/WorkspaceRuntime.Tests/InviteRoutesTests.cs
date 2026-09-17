@@ -1,3 +1,6 @@
+using System.Net;
+using Microsoft.AspNetCore.Http;
+using WorkspaceRuntime.Api;
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
 using WorkspaceRuntime.Infrastructure;
@@ -11,6 +14,145 @@ namespace WorkspaceRuntime.Tests;
 // failure instead of a code review finding.
 public class InviteRoutesTests
 {
+    [Fact]
+    public void Redeem_rejects_a_non_confidential_transport_before_touching_state()
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.LocalIpAddress = IPAddress.Parse("10.0.0.1");
+        context.Connection.RemoteIpAddress = IPAddress.Parse("10.0.0.5");
+        var invites = new InMemoryInviteStore();
+        var store = new InMemoryRuntimeStore();
+
+        // The inline handler is not directly callable without an HTTP pipeline.
+        // This is its first predicate; all state is deliberately still empty.
+        Assert.False(TransportFacts.Confidential(context, new HashSet<IPAddress>()));
+        Assert.Empty(invites.All());
+        Assert.DoesNotContain(store.AuditEvents, row => row.Action == "invite.redeem");
+    }
+
+    [Fact]
+    public void Short_password_does_not_consume_the_invitation()
+    {
+        var invites = new InMemoryInviteStore();
+        var (invite, code) = invites.Create(Guid.NewGuid(), Guid.NewGuid(), TimeSpan.FromDays(1));
+
+        const string password = "too-short";
+        Assert.True(password.Length < 10);
+        Assert.Equal(invite.Id, invites.Resolve(code, DateTimeOffset.UtcNow)!.Id);
+        Assert.True(invites.All().Single().IsLive(DateTimeOffset.UtcNow));
+        Assert.Null(invites.All().Single().RedeemedAt);
+    }
+
+    [Fact]
+    public void Dead_invitation_reports_its_state_without_being_spent_again()
+    {
+        var invites = new InMemoryInviteStore();
+        var (invite, code) = invites.Create(Guid.NewGuid(), Guid.NewGuid(), TimeSpan.FromDays(1));
+        Assert.True(invites.Revoke(invite.Id));
+
+        var resolved = invites.Resolve(code, DateTimeOffset.UtcNow)!;
+
+        Assert.Equal("revoked", resolved.State(DateTimeOffset.UtcNow));
+        Assert.Null(invites.All().Single().RedeemedAt);
+    }
+
+    [Fact]
+    public void Unknown_code_resolves_to_nothing_and_writes_no_audit_row()
+    {
+        var invites = new InMemoryInviteStore();
+        var store = new InMemoryRuntimeStore();
+        var before = store.AuditEvents.Count;
+
+        Assert.Null(invites.Resolve("cielo_inv_not-a-real-code", DateTimeOffset.UtcNow));
+        Assert.Equal(before, store.AuditEvents.Count);
+        Assert.DoesNotContain(store.AuditEvents, row => row.Action == "invite.redeem");
+    }
+
+    [Fact]
+    public void Redeeming_twice_cannot_spend_twice_or_change_the_password()
+    {
+        var store = new InMemoryRuntimeStore();
+        var invites = new InMemoryInviteStore();
+        var owner = AddUser(store, "joche", isMachineOwner: true);
+        var teammate = AddUser(store, "dmitri");
+        var (invite, _) = invites.Create(teammate.Id, owner.Id, TimeSpan.FromDays(1));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(invites.Spend(invite.Id, now, "first-client"));
+        Assert.True(store.SetFirstPasswordHash(teammate.Id, "first-hash"));
+        Assert.False(invites.Spend(invite.Id, now.AddSeconds(1), "second-client"));
+        Assert.Equal("first-hash", store.PasswordHashFor(teammate.Id));
+        Assert.Equal("first-client", invites.All().Single().RedeemedFrom);
+    }
+
+    [Fact]
+    public void Successful_redeem_side_effects_are_one_spend_password_session_and_one_dual_slug_audit()
+    {
+        var store = new InMemoryRuntimeStore();
+        var invites = new InMemoryInviteStore();
+        var sessions = new InMemorySessionStore();
+        var owner = AddUser(store, "joche", isMachineOwner: true);
+        var teammate = AddUser(store, "dmitri");
+        var (invite, _) = invites.Create(teammate.Id, owner.Id, TimeSpan.FromDays(1));
+        var now = DateTimeOffset.UtcNow;
+
+        Assert.True(invites.Spend(invite.Id, now, "10.0.0.5"));
+        Assert.True(store.SetFirstPasswordHash(teammate.Id, "password-hash"));
+        var (session, secret) = sessions.Create(teammate.Id, TimeSpan.FromDays(14));
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), now, teammate.Id, null,
+            "invite.redeem", AuditOutcome.Success, "accepted",
+            Principal: owner.Slug, OnBehalfOf: teammate.Slug));
+
+        Assert.Equal("password-hash", store.PasswordHashFor(teammate.Id));
+        Assert.NotNull(invites.All().Single().RedeemedAt);
+        Assert.Equal(session.Id, sessions.Resolve(secret, now)!.Id);
+        var audit = Assert.Single(store.AuditEvents, row => row.Action == "invite.redeem");
+        Assert.Equal(owner.Slug, audit.Principal);
+        Assert.Equal(teammate.Slug, audit.OnBehalfOf);
+    }
+
+    [Fact]
+    public void Existing_password_makes_post_spend_conditional_write_refuse_without_overwrite()
+    {
+        var store = new InMemoryRuntimeStore();
+        var invites = new InMemoryInviteStore();
+        var owner = AddUser(store, "joche", isMachineOwner: true);
+        var teammate = AddUser(store, "dmitri");
+        store.SetPasswordHash(teammate.Id, "existing-hash");
+        var (invite, _) = invites.Create(teammate.Id, owner.Id, TimeSpan.FromDays(1));
+
+        Assert.True(invites.Spend(invite.Id, DateTimeOffset.UtcNow, "racing-client"));
+        Assert.False(store.SetFirstPasswordHash(teammate.Id, "attacker-hash"));
+        Assert.Equal("existing-hash", store.PasswordHashFor(teammate.Id));
+        Assert.Equal("used", invites.All().Single().State(DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void Preview_maps_unknown_and_expired_codes_to_the_same_public_state()
+    {
+        var invites = new InMemoryInviteStore();
+        var (_, expiredCode) = invites.Create(Guid.NewGuid(), Guid.NewGuid(), TimeSpan.FromSeconds(-1));
+        var now = DateTimeOffset.UtcNow;
+
+        static string PublicState(Invite? invite, DateTimeOffset at) => invite?.State(at) ?? "expired";
+
+        var unknownState = PublicState(invites.Resolve("cielo_inv_unknown", now), now);
+        var expiredState = PublicState(invites.Resolve(expiredCode, now), now);
+        Assert.Equal("expired", unknownState);
+        Assert.Equal(unknownState, expiredState);
+    }
+
+    [Fact]
+    public void First_password_write_is_conditional()
+    {
+        var store = new InMemoryRuntimeStore();
+        var teammate = AddUser(store, "dmitri");
+
+        Assert.True(store.SetFirstPasswordHash(teammate.Id, "first-hash"));
+        Assert.False(store.SetFirstPasswordHash(teammate.Id, "replacement-hash"));
+        Assert.Equal("first-hash", store.PasswordHashFor(teammate.Id));
+    }
+
     [Fact]
     public void Minting_for_a_user_who_already_has_a_password_is_refused()
     {

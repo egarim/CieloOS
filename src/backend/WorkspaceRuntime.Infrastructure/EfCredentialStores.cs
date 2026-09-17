@@ -396,6 +396,16 @@ public static class EfPasswords
         row.PasswordSetAt = DateTimeOffset.UtcNow;
         context.SaveChanges();
     }
+
+    public static bool WriteFirst(RuntimeDbContext context, Guid userId, string hash)
+    {
+        var now = DateTimeOffset.UtcNow;
+        return context.Users
+            .Where(row => row.Id == userId && row.PasswordHash == "")
+            .ExecuteUpdate(setters => setters
+                .SetProperty(row => row.PasswordHash, hash)
+                .SetProperty(row => row.PasswordSetAt, now)) == 1;
+    }
 }
 
 // The memory-mode versions. Sessions and keys that vanish on restart are the

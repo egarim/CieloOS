@@ -268,6 +268,19 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
 
     public void SetPasswordHash(Guid userId, string hash) => passwords[userId] = hash;
 
+    public bool SetFirstPasswordHash(Guid userId, string hash)
+    {
+        lock (passwords)
+        {
+            if (passwords.ContainsKey(userId) || users.All(user => user.Id != userId))
+            {
+                return false;
+            }
+            passwords[userId] = hash;
+            return true;
+        }
+    }
+
     public void SetLanguage(Guid userId, string language)
     {
         var index = users.FindIndex(user => user.Id == userId);
