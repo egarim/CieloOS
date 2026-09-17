@@ -1,0 +1,68 @@
+/* Xari.io palette, for the CieloOS operator panel.
+ *
+ * Extracted from https://xari.io by computing styles across every element and
+ * counting what is actually PAINTED, not by reading the theme's variables.
+ *
+ * That distinction matters more than it sounds. The site is Elementor, and
+ * Elementor ships named globals that look exactly like a brand palette:
+ *
+ *     --e-global-color-primary: #6EC1E4;   (a light blue)
+ *     --e-global-color-accent:  #61CE70;   (a green)
+ *     --e-global-color-text:    #7A7A7A;
+ *
+ * None of those are Xari's. They are Elementor's factory defaults, still sitting
+ * in the stylesheet, overridden everywhere by the hash-named globals below them.
+ * Anyone extracting "the CSS variables" gets a blue-and-green palette that appears
+ * nowhere on the page. The counts are the evidence: #171C1F is painted 89 times,
+ * #D20086 borders 60 elements and colours 27 pieces of text, and #6EC1E4 is
+ * painted zero times.
+ *
+ * The scheme is one dark surface family, white type, and a single saturated
+ * magenta used sparingly for emphasis, primary action, and rules. It is not a
+ * multi-hue palette; resist adding a second accent.
+ */
+
+:root {
+  /* --- surfaces, darkest to lightest ------------------------------------- */
+  --xari-bg-deepest: #0b0d0f;  /* page behind everything */
+  --xari-bg-base:    #0e1012;  /* section backgrounds */
+  --xari-surface:    #171c1f;  /* cards, panels — the dominant colour (89 uses) */
+  --xari-surface-veil: rgba(23, 28, 31, 0.93); /* sticky header over content */
+  --xari-surface-raised: rgba(255, 255, 255, 0.05); /* hover / subtle lift */
+  --xari-surface-accent: #281722; /* accent-tinted surface, for magenta callouts */
+
+  /* --- the one accent ----------------------------------------------------- */
+  --xari-accent:       #d20086;
+  --xari-accent-ink:   #ffffff;  /* text on a filled accent */
+
+  /* --- type --------------------------------------------------------------- */
+  --xari-text:        #ffffff;
+  --xari-text-strong: #f4f4f4;
+  --xari-text-muted:  #bfbfbf;
+  --xari-text-dim:    #a0aaba;  /* cool grey-blue, for metadata */
+
+  /* --- lines -------------------------------------------------------------- */
+  --xari-border:        #33373d;
+  --xari-border-strong: #ffffff;
+  --xari-border-accent: #d20086;
+  --xari-divider:       #0c0d0e;
+
+  /* --- typeface ----------------------------------------------------------- */
+  /* Roboto throughout. The current panel uses Fraunces + Inter; adopting this
+   * scheme means dropping both, not mixing three families. */
+  --xari-font: Roboto, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* --- states the panel needs and the marketing site does not ----------------
+ *
+ * A landing page has no "degraded", "failed" or "awaiting approval". The operator
+ * panel does, and it must not express them by tinting the accent — magenta is the
+ * brand and the primary action, so a magenta warning reads as a button. These are
+ * chosen to sit on --xari-surface at AA contrast without competing with it.
+ */
+:root {
+  --xari-ok:      #3ecf8e;
+  --xari-warn:    #e8b339;
+  --xari-danger:  #ef5b5b;
+  --xari-info:    #6ec1e4;  /* Elementor's orphan blue, repurposed honestly */
+}
