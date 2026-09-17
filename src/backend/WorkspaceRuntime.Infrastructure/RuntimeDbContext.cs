@@ -54,6 +54,14 @@ public sealed class UserRow
     // they can still sign in with their identity token, and are asked to set one.
     public string PasswordHash { get; set; } = "";
     public DateTimeOffset? PasswordSetAt { get; set; }
+
+    // Set means this person may not authenticate at all, whatever they present. Not
+    // a deletion and not a slug rename: their home volume, token file, audit history
+    // and spreadsheet all stay exactly where they are, and unsuspending is one write.
+    // This is what an owner does at 03:00 when an invitation was spent by the wrong
+    // person, and it is the reason that is a recoverable event rather than a
+    // permanent one.
+    public DateTimeOffset? SuspendedAt { get; set; }
 }
 
 public sealed class WorkspaceRow
@@ -234,6 +242,7 @@ public sealed class RuntimeDbContext : DbContext
     public DbSet<ProjectMemberRow> ProjectMembers => Set<ProjectMemberRow>();
     public DbSet<ProjectTaskRow> ProjectTasks => Set<ProjectTaskRow>();
     public DbSet<ProjectReportRow> ProjectReports => Set<ProjectReportRow>();
+    public DbSet<InviteRow> Invites => Set<InviteRow>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -295,6 +304,15 @@ public sealed class RuntimeDbContext : DbContext
             .HasIndex(row => row.SecretHash).IsUnique();
         modelBuilder.Entity<ApiKeyRow>().ToTable("runtime_api_keys")
             .HasIndex(row => row.SecretHash).IsUnique();
+
+        // Looked up by its hash exactly once in its life. Unique for the same reason
+        // the session and key tables are: a duplicate would mean two invitations
+        // sharing one secret.
+        modelBuilder.Entity<InviteRow>().ToTable("runtime_invites")
+            .HasIndex(row => row.CodeHash).IsUnique();
+        // "Has this person got one outstanding" — asked on every mint, and by the
+        // supersede that precedes it.
+        modelBuilder.Entity<InviteRow>().HasIndex(row => row.UserId);
         modelBuilder.Entity<ThreadRow>().ToTable("runtime_threads")
             .HasIndex(row => row.OwnerSlug);
         modelBuilder.Entity<ThreadMessageRow>().ToTable("runtime_thread_messages")
@@ -379,4 +397,59 @@ public sealed class ApiKeyRow
     public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public DateTimeOffset? LastUsedAt { get; set; }
+}
+
+// An invitation: the ONE thing a person with no password may do, and the only
+// credential this product lets out of the building. Hashed like a session secret
+// and an API key, so a copy of the database is a list of who was invited, not a
+// set of usable links.
+//
+// Nothing here is ever deleted. An invitation that was used, replaced, called off
+// or aged out is a column and a clock — which is also what makes the owner's list
+// worth reading: three rows for Dmitri is the honest record that he lost it twice.
+public sealed class InviteRow
+{
+    public Guid Id { get; set; }
+
+    // The ONE account this can set a password for, bound at mint time.
+    //
+    // This is where organization isolation comes from, and it costs nothing: an
+    // invitation names no organization and creates nobody. The row it points at was
+    // stamped with an OrgSlug by SetupService.AddUser, and redeeming writes exactly
+    // one column, PasswordHash. Moving a person stays what it already is — one
+    // owner-only route, POST /api/users/{slug}/organization. Constraint 4 holds by
+    // construction rather than by a check somebody has to remember.
+    public required Guid UserId { get; set; }
+    public required Guid InvitedByUserId { get; set; }
+
+    public string CodeHash { get; set; } = "";
+
+    public DateTimeOffset CreatedAt { get; set; }
+    public long CreatedAtTicks { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+
+    // Ticks beside every one of these, because the redemption predicate COMPARES
+    // them inside a query and SQLite cannot compare a DateTimeOffset there. The
+    // nullable timestamps are what a person reads; the ticks are what the
+    // compare-and-swap reads, and 0 means "not yet".
+    public long ExpiresAtTicks { get; set; }
+
+    public DateTimeOffset? RedeemedAt { get; set; }
+    public long RedeemedAtTicks { get; set; }
+    public string RedeemedFrom { get; set; } = "";
+
+    // Two columns rather than one VoidedAt plus a reason string, because the
+    // owner's list has to say "replaced by a newer link" and "called off" in
+    // different words, and because RevokedAt is already the spelling on sessions
+    // and API keys.
+    public DateTimeOffset? SupersededAt { get; set; }
+    public long SupersededAtTicks { get; set; }
+    public DateTimeOffset? RevokedAt { get; set; }
+    public long RevokedAtTicks { get; set; }
+
+    // The only signal that exists before a link is spent. Written once, on the
+    // first successful preview of a live code, so a benign second open by the same
+    // person is silent and a stranger's look is not.
+    public DateTimeOffset? FirstPreviewedAt { get; set; }
+    public string FirstPreviewedFrom { get; set; } = "";
 }

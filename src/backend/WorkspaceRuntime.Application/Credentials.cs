@@ -34,6 +34,41 @@ public sealed record ApiKey(
     public bool IsLive(DateTimeOffset now) => RevokedAt is null && (ExpiresAt is null || ExpiresAt > now);
 }
 
+// An invitation: the ONE thing a person with no password may do, and the only
+// credential this product lets out of the building. Hashed like a session secret
+// and an API key, so a copy of the database is a list of who was invited, not a
+// set of usable links.
+//
+// Nothing here is ever deleted. An invitation that was used, replaced, called off
+// or aged out is a column and a clock — which is also what makes the owner's list
+// worth reading: three rows for Dmitri is the honest record that he lost it twice.
+public sealed record Invite(
+    Guid Id,
+    Guid UserId,
+    Guid InvitedByUserId,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset ExpiresAt,
+    DateTimeOffset? RedeemedAt,
+    string RedeemedFrom,
+    DateTimeOffset? SupersededAt,
+    DateTimeOffset? RevokedAt,
+    DateTimeOffset? FirstPreviewedAt,
+    string FirstPreviewedFrom)
+{
+    public bool IsLive(DateTimeOffset now) =>
+        RedeemedAt is null && RevokedAt is null && SupersededAt is null && ExpiresAt > now;
+
+    // Check order is DISPLAY order: report the first true thing, because "it was
+    // replaced" is the sentence that tells the person what to do next. A row can
+    // be both superseded and expired.
+    public string State(DateTimeOffset now) =>
+        RedeemedAt is not null     ? "used"
+        : RevokedAt is not null    ? "revoked"
+        : SupersededAt is not null ? "superseded"
+        : ExpiresAt <= now         ? "expired"
+        : "live";
+}
+
 // Hashing lives behind an interface so the algorithm can move without touching
 // the endpoints — and so a test can use a fast one.
 public interface IPasswordHasher
@@ -82,12 +117,43 @@ public interface IApiKeyStore
     IReadOnlyList<ApiKey> For(Guid ownerUserId);
 }
 
+public interface IInviteStore
+{
+    (Invite Invite, string Code) Create(Guid userId, Guid invitedBy, TimeSpan lifetime);
+
+    // ANY state, deliberately: the handler needs to tell the person "this link
+    // was already used" rather than "no such link", and hiding dead rows behind
+    // null collapses expired and never-existed into one answer at the wrong
+    // layer. Refusing to distinguish them IN THE REPLY is a different decision,
+    // made later, in the handler.
+    Invite? Resolve(string code, DateTimeOffset now);
+
+    // The compare-and-swap. Exactly one caller wins.
+    bool Spend(Guid inviteId, DateTimeOffset now, string from);
+
+    bool NotePreview(Guid inviteId, DateTimeOffset now, string from);
+
+    int SupersedeLiveFor(Guid userId);
+
+    bool Revoke(Guid inviteId);
+
+    IReadOnlyList<Invite> All();
+}
+
 public static class CredentialFormat
 {
     // A visible prefix so a leaked string is identifiable in a log or a paste,
     // and so the auth gate can tell an API key from a legacy identity token
     // without trying both.
     public const string ApiKeyPrefix = "cielo_ak_";
+
+    // Invitations carry a visible prefix for the reason API keys do, plus one:
+    // the auth gate switches on ApiKeyPrefix, and a credential-shaped string
+    // with no prefix is a string somebody will eventually present as a bearer
+    // token. Nothing resolves this one except the redeem and preview handlers —
+    // an invitation is not a way to authenticate, it is a way to obtain a
+    // password.
+    public const string InvitePrefix = "cielo_inv_";
 
     public const string SessionCookie = "cielo_session";
 

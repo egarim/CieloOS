@@ -216,6 +216,160 @@ public sealed class EfApiKeyStore : IApiKeyStore
         new(row.Id, row.OwnerUserId, row.Name, row.CreatedAt, row.ExpiresAt, row.RevokedAt, row.LastUsedAt);
 }
 
+public sealed class EfInviteStore : IInviteStore
+{
+    private readonly IDbContextFactory<RuntimeDbContext> contextFactory;
+
+    public EfInviteStore(IDbContextFactory<RuntimeDbContext> contextFactory)
+    {
+        this.contextFactory = contextFactory;
+    }
+
+    public (Invite Invite, string Code) Create(Guid userId, Guid invitedBy, TimeSpan lifetime)
+    {
+        var code = SecretHash.NewSecret(CredentialFormat.InvitePrefix);
+        var now = DateTimeOffset.UtcNow;
+        var expiresAt = now.Add(lifetime);
+        var row = new InviteRow
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            InvitedByUserId = invitedBy,
+            CodeHash = SecretHash.Of(code),
+            CreatedAt = now,
+            CreatedAtTicks = now.UtcTicks,
+            ExpiresAt = expiresAt,
+            ExpiresAtTicks = expiresAt.UtcTicks
+        };
+
+        using var context = contextFactory.CreateDbContext();
+        context.Invites.Add(row);
+        context.SaveChanges();
+        return (ToInvite(row), code);
+    }
+
+    public Invite? Resolve(string code, DateTimeOffset now)
+    {
+        var hash = SecretHash.Of(code);
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Invites.AsNoTracking().FirstOrDefault(candidate => candidate.CodeHash == hash);
+        return row is null ? null : ToInvite(row);
+    }
+
+    // Read-modify-SaveChanges, matching every other store in this file. ExecuteUpdate
+    // would be a single conditional UPDATE and a stronger guarantee, but it appears
+    // nowhere in src/ today and its behaviour on Npgsql against these migrations is
+    // unproven; a slower correct store beats a faster one whose atomicity nobody
+    // proved. The predicate is the full liveness check, so a row that was redeemed,
+    // revoked or superseded between the read and the write loses the race.
+    // ONE statement, because two is a race and this credential is single-use.
+    //
+    // The first version read the row, checked liveness in C#, then wrote. Eight
+    // threads racing that produced SEVEN winners: every one of them read a live
+    // row before any of them wrote, so every one of them believed it had won, and
+    // an invitation that may be spent exactly once set a password seven times.
+    // That is seven people onto one account.
+    //
+    // Read-modify-SaveChanges is the pattern every other store in this file uses
+    // and it is right for them, because none of them decides who may take over an
+    // account. Here the liveness test and the write have to be the same statement,
+    // so the database does the deciding:
+    //
+    //     UPDATE runtime_invites SET RedeemedAt = ... WHERE Id = ... AND <live>
+    //
+    // Rows-affected is the answer. One winner, and every loser is told no by the
+    // same WHERE clause that the winner passed. This is the one place the design
+    // leans on atomicity, and ExecuteUpdate is how both SQLite and Npgsql give it
+    // to us without a transaction the providers would treat differently.
+    public bool Spend(Guid inviteId, DateTimeOffset now, string from)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var affected = context.Invites
+            .Where(row => row.Id == inviteId
+                && row.RedeemedAt == null
+                && row.RevokedAt == null
+                && row.SupersededAt == null
+                && row.ExpiresAtTicks > now.UtcTicks)
+            .ExecuteUpdate(setters => setters
+                .SetProperty(row => row.RedeemedAt, now)
+                .SetProperty(row => row.RedeemedAtTicks, now.UtcTicks)
+                .SetProperty(row => row.RedeemedFrom, from));
+        return affected == 1;
+    }
+
+    public bool NotePreview(Guid inviteId, DateTimeOffset now, string from)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Invites.FirstOrDefault(candidate => candidate.Id == inviteId);
+        if (row is null
+            || row.FirstPreviewedAt is not null
+            || row.RedeemedAt is not null
+            || row.RevokedAt is not null
+            || row.SupersededAt is not null
+            || row.ExpiresAtTicks <= now.UtcTicks)
+        {
+            return false;
+        }
+
+        row.FirstPreviewedAt = now;
+        row.FirstPreviewedFrom = from;
+        context.SaveChanges();
+        return true;
+    }
+
+    public int SupersedeLiveFor(Guid userId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        using var context = contextFactory.CreateDbContext();
+        var rows = context.Invites
+            .Where(row => row.UserId == userId
+                && row.RedeemedAt == null
+                && row.RevokedAt == null
+                && row.SupersededAt == null
+                && row.ExpiresAtTicks > now.UtcTicks)
+            .ToList();
+        foreach (var row in rows)
+        {
+            row.SupersededAt = now;
+            row.SupersededAtTicks = now.UtcTicks;
+        }
+
+        context.SaveChanges();
+        return rows.Count;
+    }
+
+    public bool Revoke(Guid inviteId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Invites.FirstOrDefault(candidate => candidate.Id == inviteId);
+        if (row is null || row.RevokedAt is not null)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        row.RevokedAt = now;
+        row.RevokedAtTicks = now.UtcTicks;
+        context.SaveChanges();
+        return true;
+    }
+
+    public IReadOnlyList<Invite> All()
+    {
+        using var context = contextFactory.CreateDbContext();
+        return context.Invites.AsNoTracking()
+            .OrderByDescending(row => row.CreatedAtTicks)
+            .AsEnumerable()
+            .Select(ToInvite)
+            .ToList();
+    }
+
+    private static Invite ToInvite(InviteRow row) =>
+        new(row.Id, row.UserId, row.InvitedByUserId, row.CreatedAt, row.ExpiresAt,
+            row.RedeemedAt, row.RedeemedFrom, row.SupersededAt, row.RevokedAt,
+            row.FirstPreviewedAt, row.FirstPreviewedFrom);
+}
+
 // Password storage on the user row, kept here with the other credential code
 // rather than in EfRuntimeStore, so everything that touches a secret is in one
 // file and reviewable as a unit.
@@ -323,6 +477,126 @@ public sealed class InMemorySessionStore : ISessionStore
             return byHash.Values.Where(session => session.UserId == userId)
                 .OrderByDescending(session => session.CreatedAt)
                 .ToList();
+        }
+    }
+}
+
+// The memory-mode twin. A missing twin is a real hole in a real mode, not a test
+// fixture: databaseProvider == "memory" is a shipping configuration.
+public sealed class InMemoryInviteStore : IInviteStore
+{
+    private readonly Dictionary<string, Invite> byHash = new(StringComparer.Ordinal);
+    private readonly object gate = new();
+
+    public (Invite Invite, string Code) Create(Guid userId, Guid invitedBy, TimeSpan lifetime)
+    {
+        var code = SecretHash.NewSecret(CredentialFormat.InvitePrefix);
+        var now = DateTimeOffset.UtcNow;
+        var invite = new Invite(Guid.NewGuid(), userId, invitedBy, now, now.Add(lifetime),
+            null, "", null, null, null, "");
+        lock (gate)
+        {
+            byHash[SecretHash.Of(code)] = invite;
+        }
+        return (invite, code);
+    }
+
+    public Invite? Resolve(string code, DateTimeOffset now)
+    {
+        lock (gate)
+        {
+            return byHash.TryGetValue(SecretHash.Of(code), out var invite) ? invite : null;
+        }
+    }
+
+    // The one place where "it is atomic" is a claim about a lock rather than about
+    // the database. The predicate is the same full liveness check the EF store uses,
+    // so the two stores agree on what "spendable" means.
+    public bool Spend(Guid inviteId, DateTimeOffset now, string from)
+    {
+        lock (gate)
+        {
+            foreach (var (hash, invite) in byHash.ToList())
+            {
+                if (invite.Id != inviteId)
+                {
+                    continue;
+                }
+
+                if (!invite.IsLive(now))
+                {
+                    return false;
+                }
+
+                byHash[hash] = invite with { RedeemedAt = now, RedeemedFrom = from };
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public bool NotePreview(Guid inviteId, DateTimeOffset now, string from)
+    {
+        lock (gate)
+        {
+            foreach (var (hash, invite) in byHash.ToList())
+            {
+                if (invite.Id != inviteId)
+                {
+                    continue;
+                }
+
+                if (invite.FirstPreviewedAt is not null || !invite.IsLive(now))
+                {
+                    return false;
+                }
+
+                byHash[hash] = invite with { FirstPreviewedAt = now, FirstPreviewedFrom = from };
+                return true;
+            }
+            return false;
+        }
+    }
+
+    public int SupersedeLiveFor(Guid userId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (gate)
+        {
+            var superseded = 0;
+            foreach (var (hash, invite) in byHash.ToList())
+            {
+                if (invite.UserId == userId && invite.IsLive(now))
+                {
+                    byHash[hash] = invite with { SupersededAt = now };
+                    superseded++;
+                }
+            }
+            return superseded;
+        }
+    }
+
+    public bool Revoke(Guid inviteId)
+    {
+        lock (gate)
+        {
+            foreach (var (hash, invite) in byHash.ToList())
+            {
+                if (invite.Id == inviteId && invite.RevokedAt is null)
+                {
+                    byHash[hash] = invite with { RevokedAt = DateTimeOffset.UtcNow };
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    public IReadOnlyList<Invite> All()
+    {
+        lock (gate)
+        {
+            return byHash.Values.OrderByDescending(invite => invite.CreatedAt).ToList();
         }
     }
 }
