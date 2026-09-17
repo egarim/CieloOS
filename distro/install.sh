@@ -598,6 +598,23 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$name" ] || usage
 
+# The claim now goes over /run/cielo/admin.sock, which systemd creates 0750
+# cielo:cielo. A plain user cannot traverse that directory, so without this the
+# command fails with a curl connection error and says nothing about why.
+#
+# exec sudo, not a pipe: this prompts for a password on /dev/tty and a pipe would
+# take the terminal away from it. "$0" "$@" preserves the arguments, including a
+# name with spaces in it.
+if [ "$(id -u)" -ne 0 ] && [ "$(id -un)" != "cielo" ]; then
+  if command -v sudo >/dev/null 2>&1; then
+    exec sudo -- "$0" "$@"
+  fi
+  echo "cielo-claim needs to reach /run/cielo/admin.sock, which only root and the" >&2
+  echo "cielo user may open. Run it again as:" >&2
+  echo "    sudo cielo-claim \"$name\"" >&2
+  exit 1
+fi
+
 # Nobody is there to answer in a pipe, a cron job or a provisioning script.
 [ -t 0 ] || want_password=0
 
@@ -617,7 +634,12 @@ try_claim() {
   else
     payload="{\"name\": \"$(json_escape "$name")\"}"
   fi
-  curl -sS -o "$out" -w '%{http_code}' -XPOST "http://127.0.0.1:$PORT/api/setup/claim" \
+  # The admin socket, not TCP loopback. On --mode headless Kestrel binds 0.0.0.0,
+  # so a TCP connection from this box is not "on this machine" by the rule the
+  # claim gate now uses, and the claim would be refused to somebody standing on
+  # the machine. The socket is the transport that says "I am the box".
+  curl -sS --unix-socket /run/cielo/admin.sock -o "$out" -w '%{http_code}' \
+    -XPOST "http://localhost/api/setup/claim" \
     -H 'Content-Type: application/json' -d "$payload"
 }
 
@@ -687,7 +709,7 @@ printf '{"newPassword":"%s"}' "$(json_escape "$p1")" > "$body"
 printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
 unset p1 p2
 
-if curl -fsS -K "$cfg" -XPOST "http://127.0.0.1:$PORT/api/auth/password" \
+if curl -fsS --unix-socket /run/cielo/admin.sock -K "$cfg" -XPOST "http://localhost/api/auth/password" \
      -H 'Content-Type: application/json' --data-binary "@$body" >/dev/null; then
   echo
   echo "  Claimed. You are '$slug'."
@@ -739,7 +761,7 @@ printf '{"currentPassword":"%s","newPassword":"%s"}' "$(json_escape "$cur")" "$(
 printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
 unset cur p1 p2
 
-curl -fsS -K "$cfg" -XPOST "http://127.0.0.1:$PORT/api/auth/password" \
+curl -fsS --unix-socket /run/cielo/admin.sock -K "$cfg" -XPOST "http://localhost/api/auth/password" \
   -H 'Content-Type: application/json' --data-binary "@$body" >/dev/null \
   && echo "  Password set for '$slug'. Every other signed-in session was ended."
 SETPW
@@ -779,7 +801,7 @@ done
 read -rp  "Your desk name: " who
 read -rsp "Your password:  " pass; echo
 jar="\$(mktemp)"; trap 'rm -f "\$jar"' EXIT
-curl -fsS -c "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/auth/login" \
+curl -fsS --unix-socket /run/cielo/admin.sock -c "\$jar" -XPOST "http://localhost/api/auth/login" \
   -H 'Content-Type: application/json' \
   -d "{\"slug\": \"\${who}\", \"password\": \"\${pass}\"}" >/dev/null
 if [ -n "\$username" ]; then
@@ -787,7 +809,7 @@ if [ -n "\$username" ]; then
 else
   payload="{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 fi
-curl -fsS -b "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/users" \
+curl -fsS --unix-socket /run/cielo/admin.sock -b "\$jar" -XPOST "http://localhost/api/users" \
   -H 'Content-Type: application/json' -d "\$payload"
 echo
 EOF
@@ -933,12 +955,12 @@ CHAT_IMAGE="\${CHAT_IMAGE:-ghcr.io/open-webui/open-webui:main}"
 
 owner="\${CHAT_OWNER:-}"
 if [[ -z "\$owner" ]]; then
-  status="\$(curl -fsS "http://127.0.0.1:${PORT}/api/setup/status")" || {
-    echo "runtime not answering on ${PORT} yet" >&2; exit 1; }
+  status="\$(curl -fsS --unix-socket /run/cielo/admin.sock "http://localhost/api/setup/status")" || {
+    echo "the runtime is not answering on /run/cielo/admin.sock yet" >&2; exit 1; }
   owner="\$(printf '%s' "\$status" | sed -n 's/.*"owner":"\\([^"]*\\)".*/\\1/p')"
 fi
 [[ -n "\$owner" ]] || {
-  echo "no owner to act as: claim the box (cielo-claim \"Your Name\"), or if it" >&2
+  echo "no owner to act as: claim the box (sudo cielo-claim \"Your Name\"), or if it" >&2
   echo "already has several users, set CHAT_OWNER in /etc/cielo/chat.env" >&2
   exit 1; }
 token_file="/opt/cielo/.data/secrets/\${owner}.token"
@@ -949,7 +971,7 @@ token_file="/opt/cielo/.data/secrets/\${owner}.token"
 # from the panel and this chat stops working without touching anything else.
 key_file="${CIELO_HOME}/chat-api-key"
 if [[ ! -s "\$key_file" ]]; then
-  minted="\$(curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/keys" \\
+  minted="\$(curl -fsS --unix-socket /run/cielo/admin.sock -XPOST "http://localhost/api/keys" \\
     -H "Authorization: Bearer \$(cat "\$token_file")" \\
     -H 'Content-Type: application/json' \\
     -d '{"name": "cielo-chat"}' 2>/dev/null | sed -n 's/.*"secret":"\\([^"]*\\)".*/\\1/p')"
@@ -1094,7 +1116,7 @@ if [[ "$LIVE" -eq 1 && "$CI" -eq 0 && "$OFFLINE" -eq 0 ]] && exec 3<>/dev/tty 2>
 
   if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/setup/status" 2>/dev/null | grep -q '"claimed":false'; then
     echo "This machine has no owner yet. Let us make you one — or press Enter to skip"
-    echo "and run 'cielo-claim \"Your Name\"' later."
+    echo "and run 'sudo cielo-claim \"Your Name\"' later."
     echo
     read -rp "Your name: " CLAIM_NAME </dev/tty || CLAIM_NAME=""
     if [[ -n "${CLAIM_NAME// }" ]]; then
@@ -1107,7 +1129,7 @@ if [[ "$LIVE" -eq 1 && "$CI" -eq 0 && "$OFFLINE" -eq 0 ]] && exec 3<>/dev/tty 2>
       else
         echo
         echo "  The claim did not complete. Nothing is lost — run it again:" >&2
-        echo "    cielo-claim \"Your Name\"" >&2
+        echo "    sudo cielo-claim \"Your Name\"" >&2
       fi
     else
       echo "  Skipped."
@@ -1119,11 +1141,11 @@ fi
 if [[ "$CLAIMED_HERE" -eq 0 ]]; then
   echo "First-owner claim (loopback-only — do it on this box):"
   if [[ "$MODE" == "headless" ]]; then
-    echo "  ssh in and run:   cielo-claim \"Your Name\""
+    echo "  ssh in and run:   sudo cielo-claim \"Your Name\""
     echo "  it asks you to choose a password, then prints the addresses to sign in at"
   else
     echo "  a local/kiosk browser at http://127.0.0.1:${PORT}/ shows the claim wizard"
-    echo "  or run:  cielo-claim \"Your Name\""
+    echo "  or run:  sudo cielo-claim \"Your Name\""
   fi
   echo
 fi

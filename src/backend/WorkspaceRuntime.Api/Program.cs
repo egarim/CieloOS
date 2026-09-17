@@ -559,12 +559,21 @@ app.MapGet("/api/branding", (IConfiguration configuration) =>
 app.MapGet("/api/setup/status", (HttpContext context, ISetupService setup) => Results.Ok(new
 {
     claimed = setup.IsClaimed(),
-    owner = IsLoopback(context.Connection.RemoteIpAddress) ? setup.OwnerSlug() : null
+    owner = TransportFacts.OnThisMachine(context, tlsTerminatedBy) ? setup.OwnerSlug() : null
 }));
 
 app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup, ISessionBackend sessions) =>
 {
-    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress), request?.DeskProfile,
+    // The refusal is a three-way fact, not a bool: the caller is on the box, is
+    // somewhere else, or is a proxy the operator named. The last case gets its
+    // own sentence, because "from the machine itself" reads as a bug to somebody
+    // whose proxy is forwarding them.
+    var refusal = TransportFacts.OnThisMachine(context, tlsTerminatedBy)
+        ? ClaimOrigin.OnMachine
+        : TransportFacts.IsNamedTerminator(context, tlsTerminatedBy)
+            ? ClaimOrigin.NamedTerminator
+            : ClaimOrigin.OffMachine;
+    var result = setup.Claim(request?.Name, refusal, request?.DeskProfile,
         username: request?.Username);
     if (result.Outcome == ClaimOutcome.Ok)
     {
@@ -723,7 +732,7 @@ app.MapPost("/api/usage/limits", (SetTokenLimitRequest? request, HttpContext con
     {
         // Machine-wide policy is set ON the machine, the same rule the first-owner
         // claim uses — there is no administrator role to check against yet (#9).
-        if (!IsLoopback(context.Connection.RemoteIpAddress))
+        if (!TransportFacts.OnThisMachine(context, tlsTerminatedBy))
         {
             return Results.Json(
                 new { error = "A machine-wide budget can only be set from the machine itself (localhost or your SSH tunnel)." },
@@ -874,10 +883,10 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
             return Results.Json(new { error = "The current password does not match." }, statusCode: StatusCodes.Status403Forbidden);
         }
     }
-    else if (!IsLoopback(context.Connection.RemoteIpAddress))
+    else if (!TransportFacts.OnThisMachine(context, tlsTerminatedBy))
     {
         // Upgrading an install: the owner has no password yet and cannot prove one.
-        // Setting the first one is therefore loopback-only, the same gate the
+        // Setting the first one is therefore on-machine-only, the same gate the
         // first-owner claim uses — otherwise anyone holding the (permanent, and
         // possibly leaked) identity token could set it from anywhere.
         return Results.Json(

@@ -72,7 +72,7 @@ public sealed class FirstRunSetupTests
             var setup = new SetupService(store, auth);
             Assert.False(setup.IsClaimed());
 
-            var result = setup.Claim("Ada Lovelace", fromLoopback: true);
+            var result = setup.Claim("Ada Lovelace", origin: ClaimOrigin.OnMachine);
 
             Assert.Equal(ClaimOutcome.Ok, result.Outcome);
             Assert.Equal("ada-lovelace", result.Slug);
@@ -100,7 +100,7 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            var result = setup.Claim("Grace", fromLoopback: false);
+            var result = setup.Claim("Grace", origin: ClaimOrigin.OffMachine);
 
             Assert.Equal(ClaimOutcome.Forbidden, result.Outcome);
             Assert.False(setup.IsClaimed());
@@ -114,8 +114,8 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            Assert.Equal(ClaimOutcome.Invalid, setup.Claim("   ", fromLoopback: true).Outcome);
-            Assert.Equal(ClaimOutcome.Invalid, setup.Claim("!!!", fromLoopback: true).Outcome); // slugs to nothing
+            Assert.Equal(ClaimOutcome.Invalid, setup.Claim("   ", origin: ClaimOrigin.OnMachine).Outcome);
+            Assert.Equal(ClaimOutcome.Invalid, setup.Claim("!!!", origin: ClaimOrigin.OnMachine).Outcome); // slugs to nothing
             Assert.False(setup.IsClaimed());
         });
     }
@@ -126,9 +126,9 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            Assert.Equal(ClaimOutcome.Ok, setup.Claim("First Owner", fromLoopback: true).Outcome);
+            Assert.Equal(ClaimOutcome.Ok, setup.Claim("First Owner", origin: ClaimOrigin.OnMachine).Outcome);
 
-            var second = setup.Claim("Second Owner", fromLoopback: true);
+            var second = setup.Claim("Second Owner", origin: ClaimOrigin.OnMachine);
             Assert.Equal(ClaimOutcome.AlreadyClaimed, second.Outcome);
             Assert.Single(store.Users);
             Assert.Equal("first-owner", store.Users[0].Slug);
@@ -144,7 +144,7 @@ public sealed class FirstRunSetupTests
             var results = new ClaimResult[16];
 
             Parallel.For(0, results.Length, index =>
-                results[index] = setup.Claim($"Owner {index}", fromLoopback: true));
+                results[index] = setup.Claim($"Owner {index}", origin: ClaimOrigin.OnMachine));
 
             Assert.Single(results, r => r.Outcome == ClaimOutcome.Ok);
             Assert.Equal(results.Length - 1, results.Count(r => r.Outcome == ClaimOutcome.AlreadyClaimed));
@@ -159,7 +159,7 @@ public sealed class FirstRunSetupTests
         {
             var setup = new SetupService(store, auth);
             Assert.True(setup.IsClaimed());
-            Assert.Equal(ClaimOutcome.AlreadyClaimed, setup.Claim("Interloper", fromLoopback: true).Outcome);
+            Assert.Equal(ClaimOutcome.AlreadyClaimed, setup.Claim("Interloper", origin: ClaimOrigin.OnMachine).Outcome);
         }, seedDemo: true);
     }
 
@@ -171,7 +171,7 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            setup.Claim("Owner One", fromLoopback: true);
+            setup.Claim("Owner One", origin: ClaimOrigin.OnMachine);
 
             var result = setup.AddUser("Grace Hopper", null, Organizations.FoundingSlug);
 
@@ -193,7 +193,7 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            setup.Claim("Grace Hopper", fromLoopback: true);
+            setup.Claim("Grace Hopper", origin: ClaimOrigin.OnMachine);
 
             // The owner claimed as "Grace Hopper" and kept the BARE slug
             // "grace-hopper", so a teammate of the same name mints as
@@ -216,7 +216,7 @@ public sealed class FirstRunSetupTests
         Run((store, auth) =>
         {
             var setup = new SetupService(store, auth);
-            setup.Claim("Owner", fromLoopback: true);
+            setup.Claim("Owner", origin: ClaimOrigin.OnMachine);
             Assert.Equal(AddUserOutcome.Invalid, setup.AddUser("   ", null, Organizations.FoundingSlug).Outcome);
         });
     }

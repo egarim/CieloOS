@@ -154,7 +154,7 @@ public class ProjectBriefingTests
     {
         var store = new InMemoryRuntimeStore(seedDemo: false);
         var setup = new SetupService(store, new StubAuthenticator());
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         setup.AddUser("Yulia", null, "acme");
         setup.AddUser("Ana", null, "acme");

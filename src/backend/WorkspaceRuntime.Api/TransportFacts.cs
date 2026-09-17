@@ -126,9 +126,21 @@ public static class TransportFacts
         return IPAddress.IsLoopback(remote) && IPAddress.IsLoopback(local ?? IPAddress.None);
     }
 
-    // The four gates in Program.cs call this today. It is exposed here so the
-    // test that pins its behaviour for part one of 01b can reach it without
-    // duplicating the implementation; the gates themselves are unchanged.
+    // True when the peer is an address the operator named as their own TLS
+    // terminator. Exposed so the claim endpoint can tell the two refusals apart:
+    // "you are not on the box" and "your proxy is forwarding you" are different
+    // sentences to the person reading them, and only the second one names a knob
+    // they can turn.
+    public static bool IsNamedTerminator(HttpContext context, IReadOnlySet<IPAddress> namedTerminators)
+    {
+        var peer = Normalize(context.Connection.RemoteIpAddress);
+        return peer is not null && namedTerminators.Contains(peer);
+    }
+
+    // The login throttle still reads the raw peer through this, deliberately: a
+    // named terminator forwarding a brute-force attempt should be throttled on
+    // the address the attempts actually come from, not on the proxy's address.
+    // The four gates in Program.cs no longer call this; they call OnThisMachine.
     public static bool IsLoopback(IPAddress? address) =>
         IPAddress.IsLoopback(Normalize(address) ?? IPAddress.None);
 

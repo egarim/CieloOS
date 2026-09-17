@@ -130,8 +130,27 @@ public enum ClaimOutcome
 {
     Ok,             // owner created; Slug + Token are set
     AlreadyClaimed, // an owner already exists (409)
-    Forbidden,      // not from loopback (403)
+    Forbidden,      // not from the machine itself (403)
     Invalid         // empty/unusable name (400)
+}
+
+// Why a claim was refused, when it was refused for being off-machine. Two
+// explanations, not two independent facts: the caller is either not on the box,
+// or is a proxy the operator named as their own TLS terminator. A pair of bools
+// would let a call site pass (false, false) or (true, true) and mean nothing;
+// this makes the illegal states unrepresentable and makes the call site read as
+// a decision rather than a pair of flags.
+//
+// The distinction matters to the person reading the origin. "Setup can only be
+// claimed from the machine itself" is actively misleading to an operator whose
+// proxy is forwarding them, because they believe they are on the machine and in
+// a sense they are. docs/tls-and-proxies.md §8 requires the named-terminator
+// case to say so.
+public enum ClaimOrigin
+{
+    OnMachine,        // the caller is the box; the claim proceeds
+    OffMachine,       // the caller is somewhere else
+    NamedTerminator   // the caller is a proxy the operator named in Network__TlsTerminatedBy
 }
 
 public sealed record ClaimResult(ClaimOutcome Outcome, string? Slug = null, string? Token = null, string? Error = null);
@@ -191,11 +210,12 @@ public static class UsernameChoice
 }
 
 // First-run setup: is this machine claimed, and (if not) claim it for the first
-// owner. Claiming is allowed ONLY from loopback while unclaimed — the structural
-// replacement for a setup token: only someone on the box (a local browser, the
-// SSH tunnel the panel already uses, or the CLI) can create the owner. A single
-// in-process lock makes concurrent claims single-winner; the runtime is one
-// process, so that lock plus the store's at-most-one-owner recheck is authoritative.
+// owner. Claiming is allowed ONLY from the machine itself while unclaimed — the
+// structural replacement for a setup token: only someone on the box (a local
+// browser, the SSH tunnel the panel already uses, or the CLI) can create the
+// owner. A single in-process lock makes concurrent claims single-winner; the
+// runtime is one process, so that lock plus the store's at-most-one-owner recheck
+// is authoritative.
 public enum AddUserOutcome
 {
     Ok,       // user created; Slug + Token are set
@@ -216,7 +236,7 @@ public interface ISetupService
     // username is what the person will type to sign in. Omitted, it is derived
     // from the display name — which is fine for a Latin name and impossible for a
     // script nothing here folds, so it has to be sayable.
-    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null, string? username = null);
+    ClaimResult Claim(string? name, ClaimOrigin origin, string? deskProfile = null, string? organizationName = null, string? username = null);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
     // the identity + agent + token. Single-owner today; this is the multi-user seam.
@@ -252,12 +272,22 @@ public sealed class SetupService : ISetupService
     // belongs with the login work in #9.
     public string? OwnerSlug() => store.Users.Count == 1 ? store.Users[0].Slug : null;
 
-    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null, string? username = null)
+    public ClaimResult Claim(string? name, ClaimOrigin origin, string? deskProfile = null, string? organizationName = null, string? username = null)
     {
-        if (!fromLoopback)
+        if (origin != ClaimOrigin.OnMachine)
         {
-            return new ClaimResult(ClaimOutcome.Forbidden,
-                Error: "Setup can only be claimed from the machine itself (localhost). Open the panel on the box or over an SSH tunnel.");
+            // The named-terminator case gets its own sentence. An operator whose
+            // proxy is forwarding them believes they are on the machine and in a
+            // sense they are, so "from the machine itself" reads as a bug in the
+            // product rather than a rule they can act on. Naming the terminator
+            // tells them which knob to turn.
+            var error = origin == ClaimOrigin.NamedTerminator
+                ? "Setup cannot be claimed through a TLS terminator. The address you are coming from is named in "
+                  + "Network__TlsTerminatedBy, so this request was forwarded by a proxy rather than made on the "
+                  + "machine. Run 'sudo cielo-claim \"Your Name\"' on the box, or remove that address from "
+                  + "/etc/cielo/network.env if it is not your proxy."
+                : "Setup can only be claimed from the machine itself (localhost). Open the panel on the box or over an SSH tunnel.";
+            return new ClaimResult(ClaimOutcome.Forbidden, Error: error);
         }
 
         var displayName = (name ?? "").Trim();

@@ -53,7 +53,7 @@ public class DeskProfileTests
         var store = new InMemoryRuntimeStore(seedDemo: false);
         var setup = new SetupService(store, new StubAuthenticator());
 
-        var claimed = setup.Claim("Joche", fromLoopback: true, deskProfile: "dotnet");
+        var claimed = setup.Claim("Joche", origin: ClaimOrigin.OnMachine, deskProfile: "dotnet");
         Assert.Equal(ClaimOutcome.Ok, claimed.Outcome);
 
         var owner = store.Users.Single(user => user.Slug == "joche");

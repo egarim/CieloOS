@@ -20,7 +20,7 @@ public class OrganizationTests
     public void Two_organizations_can_each_have_a_maria()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         store.AddOrganization(new Organization(Guid.NewGuid(), "nova", "Nova", DateTimeOffset.UtcNow));
 
@@ -42,7 +42,7 @@ public class OrganizationTests
     public void One_organizations_person_cannot_reach_anothers_home()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         store.AddOrganization(new Organization(Guid.NewGuid(), "nova", "Nova", DateTimeOffset.UtcNow));
         setup.AddUser("Maria", null, "acme");
@@ -63,7 +63,7 @@ public class OrganizationTests
     public void People_and_messaging_agree_about_who_exists()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         store.AddOrganization(new Organization(Guid.NewGuid(), "nova", "Nova", DateTimeOffset.UtcNow));
         setup.AddUser("Maria", null, "acme");
@@ -94,7 +94,7 @@ public class OrganizationTests
     public void The_machine_owner_sees_everyone_and_can_message_them()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         setup.AddUser("Maria", null, "acme");
 
@@ -111,7 +111,7 @@ public class OrganizationTests
     public void Moving_a_person_changes_the_column_and_not_their_slug()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "acme", "Acme", DateTimeOffset.UtcNow));
         store.AddOrganization(new Organization(Guid.NewGuid(), "nova", "Nova", DateTimeOffset.UtcNow));
         setup.AddUser("Maria", null, "acme");
@@ -134,7 +134,7 @@ public class OrganizationTests
     public void A_name_that_would_not_fit_is_refused_rather_than_truncated()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
         store.AddOrganization(new Organization(Guid.NewGuid(), "engineering", "Engineering", DateTimeOffset.UtcNow));
 
         var result = setup.AddUser("Alexandra Konstantinovna", null, "engineering");
@@ -150,7 +150,7 @@ public class OrganizationTests
     public void A_user_cannot_be_minted_into_an_organization_that_does_not_exist()
     {
         var (setup, store) = Machine();
-        setup.Claim("Joche", fromLoopback: true);
+        setup.Claim("Joche", origin: ClaimOrigin.OnMachine);
 
         var result = setup.AddUser("Maria", null, "ghost");
 
