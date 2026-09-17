@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using WorkspaceRuntime.Domain;
 
@@ -32,20 +33,70 @@ public static class OwnerDefaults
     };
 }
 
-// A conservative slug: lowercase, ASCII alphanumerics kept, every other run
-// collapsed to a single '-', edges trimmed. "José Peña" -> "jos-pe-a". Shared by
+// A slug a person can actually type: lowercase, accents folded onto the letter
+// they sit on, every other run collapsed to a single '-', edges trimmed. Shared by
 // identity creation and the provider store so ids are formed one way.
+//
+// This used to keep only ASCII a-z0-9 and collapse everything else, which did not
+// transliterate an accented letter — it DELETED it and left a dash in the hole:
+//
+//     "José Ojeda"  ->  "jos-ojeda"          (not "jose-ojeda")
+//     "Ángel Ruiz"  ->  "ngel-ruiz"          (the first letter simply gone)
+//     "Søren"       ->  "s-ren"
+//
+// and the slug is the username, so that is what the person then had to type to
+// sign in. The old comment documented "José Peña" -> "jos-pe-a" as if it were a
+// design decision rather than a name being mangled.
 public static class Slug
 {
+    // Letters whose mark is part of the glyph rather than a combining character,
+    // so NFD leaves them whole and stripping marks does not reach them.
+    private static readonly Dictionary<char, string> LatinFolds = new()
+    {
+        ['ø'] = "o", ['ł'] = "l", ['ß'] = "ss", ['æ'] = "ae", ['œ'] = "oe",
+        ['đ'] = "d", ['ð'] = "d", ['þ'] = "th", ['ħ'] = "h", ['ı'] = "i",
+    };
+
     public static string Of(string value)
     {
+        // Decompose first, so an accent becomes a separate combining mark we can
+        // drop while KEEPING the letter it sat on. Malformed UTF-16 makes
+        // Normalize throw, and a name typed into a claim form is user input, so
+        // fall back to the raw string rather than turning a bad name into a 500.
+        string decomposed;
+        try
+        {
+            decomposed = value.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        }
+        catch (ArgumentException)
+        {
+            decomposed = value.ToLowerInvariant();
+        }
+
         var builder = new StringBuilder(value.Length);
         var lastWasDash = false;
-        foreach (var character in value.ToLowerInvariant())
+        foreach (var character in decomposed)
         {
-            if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+            // The accent itself, now detached. Drop it without starting a dash:
+            // its letter is already in the builder.
+            if (CharUnicodeInfo.GetUnicodeCategory(character) == UnicodeCategory.NonSpacingMark)
             {
-                builder.Append(character);
+                continue;
+            }
+
+            string? kept = null;
+            if (LatinFolds.TryGetValue(character, out var folded))
+            {
+                kept = folded;
+            }
+            else if (character is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                kept = character.ToString();
+            }
+
+            if (kept is not null)
+            {
+                builder.Append(kept);
                 lastWasDash = false;
             }
             else if (!lastWasDash && builder.Length > 0)
@@ -55,6 +106,9 @@ public static class Slug
             }
         }
 
+        // A script we cannot fold comes back EMPTY, never as a row of dashes.
+        // Empty is what callers check to say "that name will not do"; "----" is a
+        // username nobody can guess and a collision between two different people.
         return builder.ToString().Trim('-');
     }
 }
