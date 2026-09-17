@@ -93,10 +93,16 @@ Hash the code the way sessions and API keys already are (`SecretHash`,
 `EfCredentialStores.cs:13-23`), so a copy of the database is a list of **who was
 invited**, not a set of usable links.
 
-One migration named `Invites`, purely additive.
+**Do not write the migration.** `dotnet ef` is available here and will be run
+against your model to generate `Invites`, its designer and the snapshot — 1,345
+lines of generated file that would otherwise eat your entire output budget and
+arrive subtly wrong. Write the row class and the `OnModelCreating` configuration
+so the generated migration matches §8's schema, and say in NOTES if you expect it
+to differ.
+
 `DatabaseUpgradeTests.The_model_and_the_migrations_have_not_drifted_apart` calls
-`HasPendingModelChanges()`, so a row class without a migration fails in seconds —
-do not skip it.
+`HasPendingModelChanges()`, so the model and the migration are checked against
+each other automatically once it is generated.
 
 §8 also adds `SuspendedAt` to `runtime_users`. **Include the column in the
 migration and the row class; wire nothing to it.** Suspension is 02c.
@@ -142,6 +148,4 @@ correct store beats a faster one whose atomicity nobody proved.
 enough for FILE blocks — but check the sizes in the context below before deciding,
 and use EDIT blocks for anything over ~500 lines.
 
-Generate the migration by hand in the style of the two already in
-`src/backend/WorkspaceRuntime.Infrastructure/Migrations/`; you cannot run
-`dotnet ef`. The snapshot file must be updated too or the drift test fails.
+No migration files. They are generated here from your model.
