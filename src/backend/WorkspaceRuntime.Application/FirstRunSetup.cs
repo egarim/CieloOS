@@ -111,6 +111,19 @@ public static class Slug
         // username nobody can guess and a collision between two different people.
         return builder.ToString().Trim('-');
     }
+
+    // May a caller hand us this as a username? Only if it already IS a slug.
+    //
+    // Anything Slug.Of would change is refused rather than quietly corrected: if
+    // we stored Of(value) while the caller believed they chose value, the id in
+    // the database and the id they were told are different strings, and every
+    // later lookup — the home volume, the agent name, the token file — is a coin
+    // toss between the two.
+    public static bool IsWellFormed(string? value)
+    {
+        var candidate = value ?? "";
+        return candidate.Length > 0 && Of(candidate) == candidate;
+    }
 }
 
 public enum ClaimOutcome
@@ -122,6 +135,60 @@ public enum ClaimOutcome
 }
 
 public sealed record ClaimResult(ClaimOutcome Outcome, string? Slug = null, string? Token = null, string? Error = null);
+
+// Turning "what they typed" into "the username we will store", for the claim and
+// for adding a teammate, which must not drift apart: they mint the same kind of
+// identity and a difference between them is a difference nobody would look for.
+public static class UsernameChoice
+{
+    public const string Rule =
+        "A username may use lowercase letters, digits and single dashes, and cannot start or end with one.";
+
+    // Returns the slug to use, or null with a reason. `derivedFrom` is the display
+    // name to fall back to when no username was chosen.
+    public static string? Resolve(string? chosen, string derivedFrom, int maxLength, out string? error)
+    {
+        var requested = (chosen ?? "").Trim();
+        string slug;
+
+        if (requested.Length > 0)
+        {
+            if (!Slug.IsWellFormed(requested))
+            {
+                var suggestion = Slug.Of(requested);
+                error = suggestion.Length > 0
+                    ? $"'{requested}' is not a usable username. {Rule} Did you mean '{suggestion}'?"
+                    : $"'{requested}' is not a usable username. {Rule}";
+                return null;
+            }
+
+            slug = requested;
+        }
+        else
+        {
+            slug = Slug.Of(derivedFrom);
+            if (slug.Length == 0)
+            {
+                // A name written in a script nothing here folds. Say what to do
+                // rather than "the name must contain a letter or digit", which is
+                // false — it is full of them, we just cannot spell them.
+                error = $"A username could not be made from '{derivedFrom}'. Choose one instead. {Rule}";
+                return null;
+            }
+        }
+
+        if (slug.Length > maxLength)
+        {
+            // Refused, never truncated: a truncated slug is a permanently wrong
+            // home volume, and two people can truncate to the same one.
+            error = $"'{slug}' is {slug.Length} characters and the limit is {maxLength}. Choose a shorter username.";
+            return null;
+        }
+
+        error = null;
+        return slug;
+    }
+}
 
 // First-run setup: is this machine claimed, and (if not) claim it for the first
 // owner. Claiming is allowed ONLY from loopback while unclaimed — the structural
@@ -146,14 +213,17 @@ public interface ISetupService
     // (the chat UI) need it to find whose token to act as; it is never returned
     // to a remote caller.
     string? OwnerSlug();
-    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null);
+    // username is what the person will type to sign in. Omitted, it is derived
+    // from the display name — which is fine for a Latin name and impossible for a
+    // script nothing here folds, so it has to be sayable.
+    ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null, string? username = null);
     // Add a further user AFTER the first owner (an existing owner invites a
     // teammate). Authorization is at the endpoint (human principal); this creates
     // the identity + agent + token. Single-owner today; this is the multi-user seam.
     // orgSlug names an EXISTING organization, and has no default: a user with no
     // organization is not a user in none of them, it is a user in whichever one
     // the empty string happens to be.
-    AddUserResult AddUser(string? name, string? deskProfile, string orgSlug);
+    AddUserResult AddUser(string? name, string? deskProfile, string orgSlug, string? username = null);
 }
 
 public sealed class SetupService : ISetupService
@@ -182,7 +252,7 @@ public sealed class SetupService : ISetupService
     // belongs with the login work in #9.
     public string? OwnerSlug() => store.Users.Count == 1 ? store.Users[0].Slug : null;
 
-    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null)
+    public ClaimResult Claim(string? name, bool fromLoopback, string? deskProfile = null, string? organizationName = null, string? username = null)
     {
         if (!fromLoopback)
         {
@@ -196,10 +266,14 @@ public sealed class SetupService : ISetupService
             return new ClaimResult(ClaimOutcome.Invalid, Error: "A non-empty owner name is required.");
         }
 
-        var slug = Slug.Of(displayName);
-        if (slug.Length == 0)
+        // The owner keeps a BARE slug (no organization prefix), so the whole
+        // budget is theirs. This was not length-checked at all until now: AddUser
+        // refused an over-long slug with a comment about permanently wrong home
+        // volumes, and the owner — the one account every machine has — was exempt.
+        var slug = UsernameChoice.Resolve(username, displayName, Organizations.MaxUserSlug, out var slugError);
+        if (slug is null)
         {
-            return new ClaimResult(ClaimOutcome.Invalid, Error: "The name must contain at least one letter or digit.");
+            return new ClaimResult(ClaimOutcome.Invalid, Error: slugError);
         }
 
         lock (gate)
@@ -240,7 +314,7 @@ public sealed class SetupService : ISetupService
         }
     }
 
-    public AddUserResult AddUser(string? name, string? deskProfile, string orgSlug)
+    public AddUserResult AddUser(string? name, string? deskProfile, string orgSlug, string? username = null)
     {
         var displayName = (name ?? "").Trim();
         if (displayName.Length == 0)
@@ -248,10 +322,13 @@ public sealed class SetupService : ISetupService
             return new AddUserResult(AddUserOutcome.Invalid, Error: "A non-empty name is required.");
         }
 
-        var personSlug = Slug.Of(displayName);
-        if (personSlug.Length == 0)
+        // The org prefix is added below, so the person-half is what has room for
+        // it: the budget here is the total minus "<org>-".
+        var personBudget = Organizations.MaxUserSlug - orgSlug.Length - 1;
+        var personSlug = UsernameChoice.Resolve(username, displayName, Math.Max(personBudget, 1), out var slugError);
+        if (personSlug is null)
         {
-            return new AddUserResult(AddUserOutcome.Invalid, Error: "The name must contain at least one letter or digit.");
+            return new AddUserResult(AddUserOutcome.Invalid, Error: slugError);
         }
 
         if (store.FindOrganization(orgSlug) is null)
