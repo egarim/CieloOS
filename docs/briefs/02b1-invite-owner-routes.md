@@ -109,3 +109,18 @@ the row records it was ever dead.
 Route handlers in `Program.cs` are top-level `app.MapPost(...)` lambdas — match the
 surrounding style, including the named-argument `AppendAudit` shape the newer call
 sites use.
+
+## One more rule, learned the hard way
+
+**OLD text for an EDIT block comes from the excerpt file, never from
+`docs/invites.md`.** That document quotes source code, and its quotes are
+historical — it shows `Secure = context.Request.IsHttps` in §5, which was replaced
+by a `Confidential()` predicate earlier today. A previous attempt at this brief
+anchored five of six edits on the document's code and matched nothing.
+
+The document is the specification for *behaviour*. The excerpt is the source of
+truth for *text*.
+
+Nothing in this brief requires touching `SessionCookieOptions`, the logout
+handlers, or the login handler. If you find yourself editing those, you are
+following §5's prose about what redeem will eventually do, which is 02b-2.

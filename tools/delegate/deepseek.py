@@ -101,7 +101,15 @@ what it becomes
 The OLD text must appear EXACTLY ONCE in the current file; include enough \
 surrounding lines to make it unique. Repeat EDIT blocks for several changes to \
 one file. An edit whose OLD text is missing, or found more than once, is rejected \
-and nothing in that file changes."""
+and nothing in that file changes.
+
+OLD text comes from SOURCE FILES ONLY — the files and excerpts given to you as \
+repository context. Design documents, specifications and briefs also contain code, \
+and that code is HISTORICAL: it records what the file said when the document was \
+written, which may be months ago and may have been changed by the very work that \
+led to this task. Quoting it produces an edit that matches nothing. If a \
+specification shows you code and no source file confirms it, say so under CONCERNS \
+and do not write the edit."""
 
 FILE_OPEN = re.compile(r"^===FILE\s+(.+?)===\s*$", re.MULTILINE)
 FILE_CLOSE = "===END FILE==="
