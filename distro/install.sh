@@ -644,8 +644,14 @@ where_to_sign_in() {
   for a in $(hostname -I 2>/dev/null); do echo "      http://$a:$PORT/"; done
   echo "      http://127.0.0.1:$PORT/   (on this machine)"
   echo
-  echo "  Behind a router or a port forward, use that address instead — it is the"
-  echo "  one thing about itself this machine cannot know."
+  # The machine really cannot know this. A DNAT rewrites the destination before
+  # the packet arrives, so even SSH_CONNECTION reports the address AFTER
+  # translation, not the one that was typed. So say the useful thing instead of
+  # pretending: the person on the other end already knows it, because they used it
+  # to get here.
+  echo "  Reached this machine over SSH? Then the address you typed to do that is"
+  echo "  the one to open — a router or port forward in front of it is the one thing"
+  echo "  this machine cannot see from the inside."
 }
 
 if [ "$want_password" -eq 0 ]; then
@@ -1057,15 +1063,64 @@ fi
 echo
 echo "Verify anytime with:  cielo-selftest            (non-destructive)"
 echo "                      cielo-selftest --claim    (throwaway machine only)"
-echo "First-owner claim (loopback-only — do it on this box):"
-if [[ "$MODE" == "headless" ]]; then
-  echo "  ssh in and run:   cielo-claim \"Your Name\""
-  echo "  it asks you to choose a password, then prints the addresses to sign in at"
-else
-  echo "  a local/kiosk browser at http://127.0.0.1:${PORT}/ shows the claim wizard"
-  echo "  or run:  cielo-claim \"Your Name\""
+# Claim it now, while somebody is standing here.
+#
+# The prompt was put in cielo-claim and left out of the installer on the grounds
+# that `curl ... | sudo bash` makes stdin the script, so a read here would eat the
+# script's own remaining lines. The first half of that is true and the conclusion
+# was too strong: /dev/tty is the terminal, not stdin, and it is open precisely
+# when a person is there to answer. Whether it opens is the test.
+#
+# It matters because an unclaimed machine is not a neutral state. The panel
+# answers on every interface and shows a sign-in form for accounts that do not
+# exist yet, so the first thing a new operator sees is a login they cannot pass —
+# and the claim is loopback-only, so they cannot fix it from the browser they are
+# looking at.
+CLAIMED_HERE=0
+if [[ "$LIVE" -eq 1 && "$CI" -eq 0 && "$OFFLINE" -eq 0 ]] && exec 3<>/dev/tty 2>/dev/null; then
+  exec 3>&-
+
+  # Give the runtime the moment it needs; it was started seconds ago.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/setup/status" >/dev/null 2>&1 && break
+    sleep 1
+  done
+
+  if curl -fsS --max-time 5 "http://127.0.0.1:${PORT}/api/setup/status" 2>/dev/null | grep -q '"claimed":false'; then
+    echo "This machine has no owner yet. Let us make you one — or press Enter to skip"
+    echo "and run 'cielo-claim \"Your Name\"' later."
+    echo
+    read -rp "Your name: " CLAIM_NAME </dev/tty || CLAIM_NAME=""
+    if [[ -n "${CLAIM_NAME// }" ]]; then
+      echo
+      # cielo-claim asks for the username when the name yields none, and for the
+      # password itself. It is the same command the operator would type, so there
+      # is one code path and one thing to fix when it is wrong.
+      if cielo-claim "$CLAIM_NAME"; then
+        CLAIMED_HERE=1
+      else
+        echo
+        echo "  The claim did not complete. Nothing is lost — run it again:" >&2
+        echo "    cielo-claim \"Your Name\"" >&2
+      fi
+    else
+      echo "  Skipped."
+    fi
+    echo
+  fi
 fi
-echo
+
+if [[ "$CLAIMED_HERE" -eq 0 ]]; then
+  echo "First-owner claim (loopback-only — do it on this box):"
+  if [[ "$MODE" == "headless" ]]; then
+    echo "  ssh in and run:   cielo-claim \"Your Name\""
+    echo "  it asks you to choose a password, then prints the addresses to sign in at"
+  else
+    echo "  a local/kiosk browser at http://127.0.0.1:${PORT}/ shows the claim wizard"
+    echo "  or run:  cielo-claim \"Your Name\""
+  fi
+  echo
+fi
 echo "Sessions (console/desktop) need their podman images. They do NOT build on demand:"
 echo "until the image exists, creating a session is refused. cielo-session-images.service"
 echo "builds them at boot, or run: sudo cielo-build-session-images"

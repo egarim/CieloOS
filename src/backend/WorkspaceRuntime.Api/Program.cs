@@ -344,7 +344,45 @@ if (panelServed)
 {
     var panelFiles = new PhysicalFileProvider(Path.GetFullPath(panelPath));
     app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = panelFiles });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = panelFiles });
+    app.UseStaticFiles(new StaticFileOptions
+    {
+        FileProvider = panelFiles,
+        // Nothing here sent Cache-Control at all, so browsers fell back to
+        // HEURISTIC caching: with no explicit policy they may reuse a response for
+        // a fraction of its age without asking. That is survivable for an asset
+        // whose name contains its content hash, and broken for index.html, because
+        // index.html is the file that NAMES those hashes.
+        //
+        // Upgrading an installed machine replaced main-<hash>.js with a new hash
+        // and deleted the old one. A browser holding a cached index.html then
+        // asked for a script that no longer exists, got a 404, and rendered an
+        // empty page — the panel "not loading" after an upgrade that was, on the
+        // machine itself, entirely healthy: 200 on every asset, a live socket and
+        // a happy runtime. The one place the fault was visible was a browser that
+        // had been there before.
+        OnPrepareResponse = context =>
+        {
+            var headers = context.Context.Response.Headers;
+
+            // A content-hashed asset never changes: a new build means a new name.
+            // These are the ones worth caching hard, and they are safe to because
+            // the hash IS the cache key.
+            var immutable = context.Context.Request.Path.StartsWithSegments("/assets");
+
+            if (immutable)
+            {
+                headers.CacheControl = "public, max-age=31536000, immutable";
+            }
+            else
+            {
+                // Everything else — index.html, portal.html — must ask. no-cache
+                // does not mean "do not store": the browser keeps it and
+                // revalidates, so the ETag above turns the check into a 304 and
+                // costs one round trip, not one download.
+                headers.CacheControl = "no-cache, must-revalidate";
+            }
+        }
+    });
     app.Logger.LogInformation("Serving panel from {PanelPath}.", panelPath);
 }
 
