@@ -543,15 +543,141 @@ else
 fi
 
 # On-box claim + add-user helpers (curl to loopback — no extra binary needed).
-cat > /usr/local/bin/cielo-claim <<EOF
-#!/usr/bin/env bash
-# Claim the first owner on THIS machine (loopback-only). Usage: cielo-claim "Your Name"
+# cielo-claim and cielo-set-password keep their bodies in QUOTED heredocs and take
+# the port as a prelude. An unquoted heredoc eats backslashes, and these two are
+# full of them: the JSON escaper below is exactly the kind of line that comes out
+# subtly wrong and then mangles somebody's password.
+{
+echo '#!/usr/bin/env bash'
+echo "PORT=${PORT}"
+cat <<'CLAIM'
+# Claim the first owner on THIS machine and give them a password.
+#
+#   cielo-claim "Your Name"                 ask for a password (the usual way)
+#   cielo-claim "Your Name" --no-password   just print the token (automation)
+#
+# The claim used to end at a token: sixty-four characters of hex the operator was
+# told to paste into a browser. The only documented way to turn that into an
+# account was a hand-rolled curl quoting a path under /opt/cielo/.data/secrets. An
+# install should finish with something you can log in to, not a secret you have to
+# look after.
+#
+# The prompt lives HERE and not in install.sh, which runs as
+#     curl ... | sudo bash
+# where stdin IS the script: a read would eat the script's own remaining lines or
+# hit EOF. Reading /dev/tty instead works at a terminal and then breaks every
+# unattended install — cloud-init, Ansible, any provisioning run. cielo-claim is
+# already something a person types at a prompt, so it is the honest place to ask.
 set -euo pipefail
-name="\${1:?Usage: cielo-claim \"Your Name\"}"
-curl -fsS -XPOST "http://127.0.0.1:${PORT}/api/setup/claim" \
-  -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\"}"
+name="${1:?Usage: cielo-claim \"Your Name\" [--no-password]}"
+
+want_password=1
+[ "${2:-}" = "--no-password" ] && want_password=0
+# Nobody is there to answer in a pipe, a cron job or a provisioning script.
+[ -t 0 ] || want_password=0
+
+# Escape a string for a JSON string literal: backslash first, then quote.
+json_escape() { printf '%s' "$1" | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+resp="$(curl -fsS -XPOST "http://127.0.0.1:$PORT/api/setup/claim" \
+  -H 'Content-Type: application/json' -d "{\"name\": \"$(json_escape "$name")\"}")"
+slug="$(printf '%s' "$resp" | sed -n 's/.*"slug"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+token="$(printf '%s' "$resp" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+[ -n "$slug" ] || { echo "$resp"; exit 1; }
+
+where_to_sign_in() {
+  echo "  Sign in with that name and the password you just set:"
+  for a in $(hostname -I 2>/dev/null); do echo "      http://$a:$PORT/"; done
+  echo "      http://127.0.0.1:$PORT/   (on this machine)"
+  echo
+  echo "  Behind a router or a port forward, use that address instead — it is the"
+  echo "  one thing about itself this machine cannot know."
+}
+
+if [ "$want_password" -eq 0 ]; then
+  echo "$resp"
+  echo "# No password set. Add one with:  sudo cielo-set-password $slug" >&2
+  exit 0
+fi
+
 echo
-EOF
+while :; do
+  read -rsp "Choose a password for '$slug' (10 characters or more): " p1 </dev/tty; echo
+  read -rsp "Type it again: " p2 </dev/tty; echo
+  if [ "$p1" != "$p2" ]; then echo "  Those two do not match. Again."; continue; fi
+  if [ "${#p1}" -lt 10 ]; then echo "  Too short - ten characters or more."; continue; fi
+  case "$p1" in *[[:cntrl:]]*) echo "  No control characters, please."; continue;; esac
+  break
+done
+
+# Neither the password nor the token becomes an argument. Both would be visible in
+# ps to every user on the box for as long as curl runs, and an argument is what
+# lands in .bash_history when somebody repeats a command. A file we can make 0600
+# and delete; argv we cannot.
+body="$(mktemp)"; cfg="$(mktemp)"
+chmod 600 "$body" "$cfg"
+trap 'rm -f "$body" "$cfg"' EXIT
+printf '{"newPassword":"%s"}' "$(json_escape "$p1")" > "$body"
+printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
+unset p1 p2
+
+if curl -fsS -K "$cfg" -XPOST "http://127.0.0.1:$PORT/api/auth/password" \
+     -H 'Content-Type: application/json' --data-binary "@$body" >/dev/null; then
+  echo
+  echo "  Claimed. You are '$slug'."
+  where_to_sign_in
+else
+  echo "  Claimed as '$slug', but the password did not stick." >&2
+  echo "  The token below still works; try:  sudo cielo-set-password $slug" >&2
+  echo "$resp"
+  exit 1
+fi
+CLAIM
+} > /usr/local/bin/cielo-claim
+
+# The companion --no-password needs, and the way to change one later. Without it
+# the fallback path would still end at "write your own curl", which is the thing
+# this replaces.
+{
+echo '#!/usr/bin/env bash'
+echo "PORT=${PORT}"
+cat <<'SETPW'
+# Set or change a desk's password. Usage: cielo-set-password <desk-slug>
+#
+# A FIRST password is loopback-only and proved with that desk's identity token,
+# which lives under /opt/cielo/.data/secrets — readable by root and by cielo, which
+# is why this wants sudo. Changing an EXISTING one asks for the current password
+# instead: holding the token should not be enough to take an account over.
+set -euo pipefail
+slug="${1:?Usage: cielo-set-password <desk-slug>}"
+tok="/opt/cielo/.data/secrets/${slug}.token"
+[ -r "$tok" ] || { echo "No token for '$slug' at $tok (try sudo)." >&2; exit 2; }
+token="$(cat "$tok")"
+
+json_escape() { printf '%s' "$1" | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
+
+read -rsp "Current password (leave blank if this is the first one): " cur </dev/tty; echo
+while :; do
+  read -rsp "New password (10 characters or more): " p1 </dev/tty; echo
+  read -rsp "Type it again: " p2 </dev/tty; echo
+  if [ "$p1" != "$p2" ]; then echo "  Those two do not match. Again."; continue; fi
+  if [ "${#p1}" -lt 10 ]; then echo "  Too short - ten characters or more."; continue; fi
+  case "$p1" in *[[:cntrl:]]*) echo "  No control characters, please."; continue;; esac
+  break
+done
+
+body="$(mktemp)"; cfg="$(mktemp)"
+chmod 600 "$body" "$cfg"
+trap 'rm -f "$body" "$cfg"' EXIT
+printf '{"currentPassword":"%s","newPassword":"%s"}' "$(json_escape "$cur")" "$(json_escape "$p1")" > "$body"
+printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
+unset cur p1 p2
+
+curl -fsS -K "$cfg" -XPOST "http://127.0.0.1:$PORT/api/auth/password" \
+  -H 'Content-Type: application/json' --data-binary "@$body" >/dev/null \
+  && echo "  Password set for '$slug'. Every other signed-in session was ended."
+SETPW
+} > /usr/local/bin/cielo-set-password
 cat > /usr/local/bin/cielo-add-user <<EOF
 #!/usr/bin/env bash
 # Add a teammate. Usage: cielo-add-user "Their Name" [desk-profile]
@@ -566,9 +692,7 @@ cat > /usr/local/bin/cielo-add-user <<EOF
 #
 # If you have not set a password yet, do that first — on this box, because a
 # first password is loopback-only:
-#   curl -fsS -XPOST http://127.0.0.1:${PORT}/api/auth/password \
-#     -H "Authorization: Bearer \$(cat /opt/cielo/.data/secrets/<you>.token)" \
-#     -H 'Content-Type: application/json' -d '{"newPassword":"..."}'
+#   sudo cielo-set-password <your-desk-slug>
 set -euo pipefail
 name="\${1:?Usage: cielo-add-user \"Name\" [desk-profile]}"
 desk="\${2:-office}"
@@ -656,7 +780,8 @@ if [ -d "$root/console" ]; then
 fi
 EOF
 } > /usr/local/bin/cielo-build-desk-image
-chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image
+chmod +x /usr/local/bin/cielo-claim /usr/local/bin/cielo-set-password \
+  /usr/local/bin/cielo-add-user /usr/local/bin/cielo-build-desk-image
 install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
 echo "==> [8/9] Chat UI (Open WebUI against /v1/agent)"
@@ -862,7 +987,7 @@ echo "                      cielo-selftest --claim    (throwaway machine only)"
 echo "First-owner claim (loopback-only — do it on this box):"
 if [[ "$MODE" == "headless" ]]; then
   echo "  ssh in and run:   cielo-claim \"Your Name\""
-  echo "  then from your laptop open:  http://<this-host-ip>:${PORT}/  and log in with the printed token"
+  echo "  it asks you to choose a password, then prints the addresses to sign in at"
 else
   echo "  a local/kiosk browser at http://127.0.0.1:${PORT}/ shows the claim wizard"
   echo "  or run:  cielo-claim \"Your Name\""
