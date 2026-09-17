@@ -4,6 +4,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using WorkspaceRuntime.Api;
 using WorkspaceRuntime.Application;
 using WorkspaceRuntime.Domain;
 using WorkspaceRuntime.Infrastructure;
@@ -40,6 +41,10 @@ static bool IsTruthy(string? value) =>
         || value.Equals("yes", StringComparison.OrdinalIgnoreCase)
         || value.Equals("on", StringComparison.OrdinalIgnoreCase));
 var demoEnabled = IsTruthy(builder.Configuration["Runtime:SeedDemo"] ?? Environment.GetEnvironmentVariable("LUNOS_DEMO"));
+
+// Parsed once at startup so a malformed entry fails here, loudly, rather than
+// on the first request that happens to need it. See TlsTerminatedBy.Parse.
+var tlsTerminatedBy = TlsTerminatedBy.Parse(builder.Configuration);
 
 var databaseProvider = (builder.Configuration["Database:Provider"] ?? "sqlite").ToLowerInvariant();
 switch (databaseProvider)
@@ -312,6 +317,21 @@ builder.Services.AddSingleton<ILocalInferenceRegistry>(_ =>
 });
 
 var app = builder.Build();
+
+// The unnamed-terminator warning lives here rather than in SessionCookieOptions
+// because that function is a static local: it captures nothing, so it could not
+// see a logger, and a cookie-options factory has no business logging anyway. It
+// also only ran on sign-in, which is the one request where the operator is
+// already watching. Middleware sees every request, and ILoggerFactory is
+// resolvable from RequestServices without threading a parameter through every
+// caller. WarnOnUnnamedForwardedProto deduplicates per address per process, so
+// the per-request cost after the first hit is one dictionary lookup.
+app.Use(async (context, next) =>
+{
+    var loggerFactory = context.RequestServices.GetRequiredService<ILoggerFactory>();
+    TransportFacts.WarnOnUnnamedForwardedProto(context, tlsTerminatedBy, loggerFactory.CreateLogger("WorkspaceRuntime.Api.TransportFacts"));
+    await next();
+});
 
 // Eager bootstrap: run migrations and seed identities FIRST, then mint their
 // tokens, then load surface manifests (fail fast on a malformed contract) —
@@ -802,7 +822,7 @@ app.MapPost("/api/auth/login", (LoginRequest? request, HttpContext context, IRun
     throttle.Succeeded(throttleKey);
 
     var (session, secret) = sessions.Create(user.Id, TimeSpan.FromDays(14));
-    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt));
+    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt, tlsTerminatedBy));
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, user.Id, null,
         "auth.login", AuditOutcome.Success, $"'{user.Slug}' signed in."));
 
@@ -818,7 +838,7 @@ app.MapPost("/api/auth/logout", (HttpContext context, ISessionStore sessions, IR
         sessions.Revoke(sessionId);
     }
 
-    context.Response.Cookies.Delete(CredentialFormat.SessionCookie);
+    context.Response.Cookies.Delete(CredentialFormat.SessionCookie, SessionCookieDeleteOptions(context, tlsTerminatedBy));
     var caller = Caller(context);
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
         "auth.logout", AuditOutcome.Success, $"'{caller.Slug}' signed out."));
@@ -829,7 +849,7 @@ app.MapPost("/api/auth/logout-all", (HttpContext context, ISessionStore sessions
 {
     var caller = Caller(context);
     var count = sessions.RevokeAllFor(caller.Subject);
-    context.Response.Cookies.Delete(CredentialFormat.SessionCookie);
+    context.Response.Cookies.Delete(CredentialFormat.SessionCookie, SessionCookieDeleteOptions(context, tlsTerminatedBy));
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
         "auth.logout-all", AuditOutcome.Success, $"'{caller.Slug}' ended {count} session(s)."));
     return Results.Ok(new { endedSessions = count });
@@ -871,7 +891,7 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
     // it to do after losing a laptop.
     var ended = sessions.RevokeAllFor(caller.Subject);
     var (session, secret) = sessions.Create(caller.Subject, TimeSpan.FromDays(14));
-    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt));
+    context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt, tlsTerminatedBy));
 
     store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
         "auth.password", AuditOutcome.Success,
@@ -2390,15 +2410,37 @@ static string SpreadsheetOwner(RuntimePrincipal principal, IRuntimeStore store) 
 
 // HttpOnly so a script in the panel's origin cannot read it — the flaw the token
 // in localStorage had. Strict so it does not ride along on a cross-site request.
-// Secure only under HTTPS, because the default deployment is plain HTTP on
-// loopback and a Secure cookie would simply never be sent there.
-static CookieOptions SessionCookieOptions(HttpContext context, DateTimeOffset expires) => new()
+//
+// Secure asks whether this connection can be proven confidential from facts the
+// kernel and Kestrel already hold, not whether this hop happens to be HTTPS.
+// The old `context.Request.IsHttps` was false behind a TLS-terminating proxy,
+// so a 14-day session cookie shipped without Secure over a connection the
+// browser drew a padlock on. It was also false on plain-HTTP loopback, where
+// browsers do send Secure cookies — the comment that justified the conditional
+// was wrong on its own terms.
+static CookieOptions SessionCookieOptions(HttpContext context, DateTimeOffset expires, IReadOnlySet<IPAddress> namedTerminators)
+{
+    return new CookieOptions
+    {
+        HttpOnly = true,
+        SameSite = SameSiteMode.Strict,
+        Secure = TransportFacts.Confidential(context, namedTerminators),
+        Path = "/",
+        Expires = expires
+    };
+}
+
+// Cookies.Delete matches on name, path, domain AND flags. Passing no options
+// was harmless while Secure was almost always false; once it is usually true,
+// a delete whose flags do not match the original leaves a server-revoked but
+// browser-resident cookie after sign-out. Same flags as SessionCookieOptions,
+// minus Expires — a delete has no expiry.
+static CookieOptions SessionCookieDeleteOptions(HttpContext context, IReadOnlySet<IPAddress> namedTerminators) => new()
 {
     HttpOnly = true,
     SameSite = SameSiteMode.Strict,
-    Secure = context.Request.IsHttps,
-    Path = "/",
-    Expires = expires
+    Secure = TransportFacts.Confidential(context, namedTerminators),
+    Path = "/"
 };
 
 // The image a profile really uses: profiles with their own toolchain keep their
