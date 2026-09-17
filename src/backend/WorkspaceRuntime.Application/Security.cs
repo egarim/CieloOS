@@ -130,6 +130,31 @@ public static class AccessPolicy
             return AccessLevel.OwnerOnly;
         }
 
+        // Invitations are the machine owner's alone, on every verb including the
+        // read. An invitation is a credential: minting one hands out a way to set
+        // a first password, and listing them is an inventory of who was invited
+        // and who has not yet accepted. An agent that could mint one could create
+        // a teammate; an agent that could list them could enumerate the people
+        // here, which the message-directory rule above already argues it must not
+        // be able to do.
+        //
+        // Listed as exact matches and one prefix rather than a blanket
+        // `/api/invites` prefix rule, because the fall-through at the end of this
+        // function is AnyPrincipal: a route added under this prefix in six months
+        // would otherwise be agent-reachable by omission, and nothing would fail
+        // to say so. The prefix rule for `/revoke` is the one exception, and it is
+        // narrow on purpose.
+        if (path == "/api/invites")
+        {
+            return AccessLevel.OwnerOnly;
+        }
+        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
+            && path.StartsWith("/api/invites/", StringComparison.Ordinal)
+            && path.EndsWith("/revoke", StringComparison.Ordinal))
+        {
+            return AccessLevel.OwnerOnly;
+        }
+
         // Who else lives on this machine is not something an agent needs.
         //
         // This read was AnyPrincipal, and GET /api/users takes no HttpContext and

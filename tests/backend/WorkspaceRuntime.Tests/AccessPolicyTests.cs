@@ -49,6 +49,18 @@ public class AccessPolicyTests
     [InlineData("/api/examples/02-drive-the-desktop/run", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/approvals/00000000-0000-0000-0000-000000000001/approve", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/approvals/00000000-0000-0000-0000-000000000001/reject", "POST", AccessLevel.HumanOnly)]
+    // Minting a credential that sets somebody's first password IS the power to
+    // create a person, and the list of desks with no password yet is a map of the
+    // weakest accounts on the machine. Both are the owner's alone.
+    //
+    // Tabled here rather than left to review because Required() falls through to
+    // AnyPrincipal: an invitation route that nobody listed would be agent-mintable
+    // by omission, and the only thing that would notice is a person reading this
+    // file on purpose. /api/version/{id}/restore is the proof that nobody does —
+    // it matches no rule today.
+    [InlineData("/api/invites", "POST", AccessLevel.OwnerOnly)]
+    [InlineData("/api/invites", "GET", AccessLevel.OwnerOnly)]
+    [InlineData("/api/invites/00000000-0000-0000-0000-000000000001/revoke", "POST", AccessLevel.OwnerOnly)]
     [InlineData("/v1/chat/completions", "POST", AccessLevel.AnyPrincipal)]
     public void Route_access_levels_are_as_declared(string path, string method, AccessLevel expected)
     {

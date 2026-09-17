@@ -210,8 +210,20 @@ def parse(raw):
             continue
         files.append((path, raw[start:end].lstrip("\n").rstrip() + "\n"))
 
-    edits = [(m.group(1).strip(), m.group(2).strip("\n"), m.group(3).strip("\n"))
-             for m in EDIT_BLOCK.finditer(raw)]
+    edits = []
+    for m in EDIT_BLOCK.finditer(raw):
+        path, old, new = m.group(1).strip(), m.group(2).strip("\n"), m.group(3).strip("\n")
+        # A marker inside the content means the block is malformed — usually two
+        # edits run together, where the second one's >>>OLD/<<<NEW ended up inside
+        # the first one's NEW. The non-greedy match then writes those markers into
+        # the source file, and the result is a C# file containing the literal text
+        # ">>>OLD", which fails to compile in a way that points nowhere near the
+        # cause. Cheap to detect, so detect it.
+        if any(marker in new or marker in old
+               for marker in ("<<<OLD", ">>>OLD", "<<<NEW", ">>>NEW", "===EDIT", "===END EDIT")):
+            unterminated.append("%s (malformed: block markers inside the content)" % path)
+            continue
+        edits.append((path, old, new))
     return sections, files, edits, unterminated
 
 

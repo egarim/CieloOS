@@ -864,7 +864,7 @@ app.MapPost("/api/auth/logout-all", (HttpContext context, ISessionStore sessions
     return Results.Ok(new { endedSessions = count });
 });
 
-app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions) =>
+app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions, IInviteStore invites) =>
 {
     var caller = Caller(context);
     var next = request?.NewPassword ?? "";
@@ -895,6 +895,16 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
     }
 
     store.SetPasswordHash(caller.Subject, hasher.Hash(next));
+
+    // Once they have a password, any live invitation is meaningless and must not
+    // outlive it. This is the first-password branch only: a password CHANGE is
+    // not a reason to kill an invitation the owner may have issued to somebody
+    // else, and the caller here is the person themselves, so the only invitation
+    // this can reach is one issued to them.
+    if (existing is null)
+    {
+        invites.SupersedeLiveFor(caller.Subject);
+    }
 
     // Changing a password ends every other session: that is what a person expects
     // it to do after losing a laptop.
@@ -963,6 +973,128 @@ app.MapPost("/api/keys", (CreateApiKeyRequest? request, HttpContext context, IAp
 
     // The secret is returned exactly once and never stored — only its hash is.
     return Results.Ok(new { key.Id, key.Name, key.ExpiresAt, secret });
+});
+
+// Invite a person to set a first password.
+//
+// Returns the CODE, not a link. The machine cannot know its own public URL: a
+// DNAT rewrites the destination before the packet arrives, so even
+// SSH_CONNECTION reports the post-translation address, and Request.Host is
+// attacker-controlled unless AllowedHosts says otherwise — composing a link from
+// it is password-reset poisoning, and a credential-bearing URL aimed at an
+// attacker's origin means their JavaScript reads the fragment. The panel
+// composes the link from window.location.origin, which is correct by
+// construction because the owner is looking at the panel through an address that
+// works. Do not "fix" this by returning a URL.
+app.MapPost("/api/invites", (CreateInviteRequest? request, HttpContext context, IInviteStore invites, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var slug = (request?.Slug ?? "").Trim();
+    if (slug.Length == 0)
+    {
+        return Results.BadRequest(new { error = "Name the desk to invite." });
+    }
+
+    var target = store.Users.FirstOrDefault(user => user.Slug == slug);
+    if (target is null)
+    {
+        return Results.NotFound(new { error = "No such person on this machine." });
+    }
+
+    // An invitation sets a FIRST password and never a reset. Without this check
+    // the owner could mint themselves into a teammate's account, which is the
+    // invariant the whole design rests on. Checked again at redeem, because a
+    // password can be set between minting and redeeming.
+    if (store.PasswordHashFor(target.Id) is not null)
+    {
+        return Results.BadRequest(new { error = "That person already has a password. An invitation sets a first password, not a reset." });
+    }
+
+    // The machine owner is the one person who must never be reachable by an
+    // invitation: they already have a password, and if they did not, an
+    // invitation to them would be a way to take the machine.
+    if (target.IsMachineOwner)
+    {
+        return Results.BadRequest(new { error = "The owner of this machine cannot be invited." });
+    }
+
+    // Supersede BEFORE creating, so re-issuing kills the old link rather than
+    // leaving two live. The other order leaves a window in which both are live,
+    // and a person who clicks the older one lands in a state the owner did not
+    // intend.
+    invites.SupersedeLiveFor(target.Id);
+
+    var (invite, code) = invites.Create(target.Id, caller.Subject, TimeSpan.FromHours(72));
+
+    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+        "invite.create", AuditOutcome.Success,
+        $"'{caller.Slug}' invited '{target.Slug}'."));
+
+    return Results.Ok(new { code, invite.ExpiresAt, slug = target.Slug });
+});
+
+// Every invitation, whatever its state, newest first.
+//
+// Never the code or its hash: those are gone the moment they are issued, and a
+// list endpoint that could return one would undo the hashing. Three rows for one
+// person is the point, not a bug — it is the honest record that they lost the
+// link twice.
+app.MapGet("/api/invites", (HttpContext context, IInviteStore invites, IRuntimeStore store) =>
+{
+    var now = DateTimeOffset.UtcNow;
+    var rows = invites.All()
+        .OrderByDescending(invite => invite.CreatedAt)
+        .Select(invite =>
+        {
+            // No finder on IRuntimeStore: Users is the collection and GetUser
+            // throws for an id that is not there, so this is the lookup every
+            // other handler in this file does.
+            var user = store.Users.FirstOrDefault(candidate => candidate.Id == invite.UserId);
+            return new
+            {
+                invite.Id,
+                Slug = user?.Slug ?? "",
+                invite.CreatedAt,
+                invite.ExpiresAt,
+                invite.RedeemedAt,
+                invite.SupersededAt,
+                invite.RevokedAt,
+                State = invite.State(now),
+            };
+        })
+        .ToList();
+
+    return Results.Ok(rows);
+});
+
+// Call off an invitation.
+//
+// Idempotent: revoking a dead invitation is not an error, it is a no-op with the
+// same answer. The owner who clicks revoke twice, or whose panel retries, should
+// not be told they did something wrong.
+app.MapPost("/api/invites/{id}/revoke", (Guid id, HttpContext context, IInviteStore invites, IRuntimeStore store) =>
+{
+    var caller = Caller(context);
+    var invite = invites.All().FirstOrDefault(candidate => candidate.Id == id);
+    if (invite is null)
+    {
+        return Results.NotFound(new { error = "No such invitation." });
+    }
+
+    // Revoke() is the store's compare-and-swap; a second call on an already-dead
+    // row returns false and leaves RevokedAt where it was. The handler treats
+    // that as success, because the answer the caller wants is "it is not live",
+    // and it is not.
+    var changed = invites.Revoke(id);
+
+    if (changed)
+    {
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+            "invite.revoke", AuditOutcome.Success,
+            $"'{caller.Slug}' revoked an invitation."));
+    }
+
+    return Results.Ok(new { id, revoked = true });
 });
 
 app.MapDelete("/api/keys/{id}", (Guid id, HttpContext context, IApiKeyStore keys, IRuntimeStore store) =>
@@ -1076,7 +1208,7 @@ app.MapPost("/api/organizations", (CreateOrganizationRequest? request, HttpConte
 // Possible only because a slug prefix is a minting rule and not a structure: their
 // slug, home volume, token file, audit history and spreadsheet are all keyed on the
 // slug and none of them move. One column changes, and with it who they can see.
-app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? request, HttpContext context, IRuntimeStore store) =>
+app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? request, HttpContext context, IRuntimeStore store, IInviteStore invites) =>
 {
     var target = (request?.OrgSlug ?? "").Trim();
     if (store.FindOrganization(target) is null)
@@ -1087,6 +1219,16 @@ app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? req
     if (!store.SetUserOrganization(slug, target))
     {
         return Results.NotFound(new { error = "No such person on this machine." });
+    }
+
+    // A move is exactly when the owner should be told the old link is dead: the
+    // invitation was issued for a desk in the old organization, and the person
+    // who redeems it would land somewhere they were not invited to. The audit row
+    // for the move is written one layer down, in SetUserOrganization; this call
+    // is not audited separately, because "moved" and "superseded" are one event.
+    if (store.Users.FirstOrDefault(user => user.Slug == slug) is { } moved)
+    {
+        invites.SupersedeLiveFor(moved.Id);
     }
 
     return Results.Ok(new { slug, orgSlug = target });
@@ -2635,6 +2777,13 @@ public sealed record AddUserRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("orgSlug")] string? OrgSlug = null,
     // As on the claim: omitted, it is derived from the name.
     [property: System.Text.Json.Serialization.JsonPropertyName("username")] string? Username = null);
+
+public sealed record CreateInviteRequest(
+    // The slug of the person being invited, not the inviter. Nullable and
+    // defaulted so that a body with no slug reaches the handler's own length
+    // check and gets the sentence written for it, rather than a 400 from the
+    // model binder that says nothing about what to send.
+    [property: System.Text.Json.Serialization.JsonPropertyName("slug")] string? Slug = null);
 
 public sealed record CreateOrganizationRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);
