@@ -1,4 +1,5 @@
 using WorkspaceRuntime.Application;
+using WorkspaceRuntime.Domain;
 using WorkspaceRuntime.Infrastructure;
 
 namespace WorkspaceRuntime.Tests;
@@ -137,5 +138,12 @@ public sealed class ChosenUsernameTests
     public void IsWellFormed_accepts_exactly_what_survives_a_round_trip(string value, bool expected)
     {
         Assert.Equal(expected, Slug.IsWellFormed(value));
+    }
+
+    private sealed class StubAuthenticator : ITokenAuthenticator
+    {
+        public RuntimePrincipal? Authenticate(string bearerToken) => null;
+        public string Mint(string slug) => $"{slug}:test";
+        public string IssueToken(string slug) => Mint(slug);
     }
 }
