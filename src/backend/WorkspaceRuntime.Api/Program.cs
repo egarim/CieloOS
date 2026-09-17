@@ -2321,6 +2321,47 @@ app.MapPost("/api/approvals/{approvalId:guid}/approve", (Guid approvalId, Resolv
 app.MapPost("/api/approvals/{approvalId:guid}/reject", (Guid approvalId, ResolveApprovalRequest request, HttpContext context, AgentRuntime runtime, IRuntimeStore store, IRuntimeEventStream events, CancellationToken cancellationToken) =>
     ResolveAsync(approvalId, approved: false, request, context, runtime, store, events, cancellationToken));
 
+// Tighten the admin socket the moment Kestrel has created it.
+//
+// Kestrel creates a unix socket with whatever the process umask allows, which on
+// this service is 0755 — and a socket whose mode reads `srwxr-xr-x` is one that
+// LOOKS open to everyone. On a shipped box it is not: systemd makes /run/cielo
+// 0750 cielo:cielo, so nothing outside the group can traverse to it, which is why
+// a non-cielo user is refused today.
+//
+// But the argument for putting an authority in the filesystem at all is that an
+// operator can read it with `ls -l`. An `ls -l` that says world-writable, backed
+// by a directory mode they have to think to check, is the opposite of that. So
+// the socket is made to say what it means.
+//
+// Registered on ApplicationStarted because the socket does not exist until
+// Kestrel binds it, which happens inside Run().
+app.Lifetime.ApplicationStarted.Register(() =>
+{
+    if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+    {
+        return;
+    }
+
+    foreach (var url in (app.Urls.Count > 0 ? app.Urls : []).Where(u => u.Contains("://unix:", StringComparison.Ordinal)))
+    {
+        var path = url[(url.IndexOf("://unix:", StringComparison.Ordinal) + "://unix:".Length)..];
+        try
+        {
+            File.SetUnixFileMode(path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite |
+                UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
+        }
+        catch (Exception exception)
+        {
+            // Not fatal: the directory is the real boundary and it is already
+            // correct. Say so rather than dying, and say which socket.
+            app.Logger.LogWarning(exception,
+                "Could not set 0660 on the admin socket {Path}. The directory mode still restricts it.", path);
+        }
+    }
+});
+
 app.Run();
 
 static async Task<IResult> ResolveAsync(
