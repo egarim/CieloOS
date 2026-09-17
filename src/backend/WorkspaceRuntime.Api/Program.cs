@@ -506,7 +506,8 @@ app.MapGet("/api/setup/status", (HttpContext context, ISetupService setup) => Re
 
 app.MapPost("/api/setup/claim", (ClaimRequest? request, HttpContext context, ISetupService setup, ISessionBackend sessions) =>
 {
-    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress), request?.DeskProfile);
+    var result = setup.Claim(request?.Name, IsLoopback(context.Connection.RemoteIpAddress), request?.DeskProfile,
+        username: request?.Username);
     if (result.Outcome == ClaimOutcome.Ok)
     {
         // "Built on first use" has to mean it: choosing a developer desk in the
@@ -1029,7 +1030,8 @@ app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? req
 // hand over; the token file is also written 0600 on the box.
 app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions) =>
 {
-    var result = setup.AddUser(request?.Name, request?.DeskProfile, request?.OrgSlug ?? Organizations.FoundingSlug);
+    var result = setup.AddUser(request?.Name, request?.DeskProfile, request?.OrgSlug ?? Organizations.FoundingSlug,
+        username: request?.Username);
     if (result.Outcome == AddUserOutcome.Ok)
     {
         // Same as the claim: a desk created is a desk that should become usable
@@ -2492,7 +2494,9 @@ public sealed record CreateApiKeyRequest(string? Name, int? ExpiresInDays);
 
 public sealed record ClaimRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
-    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null);
+    [property: System.Text.Json.Serialization.JsonPropertyName("deskProfile")] string? DeskProfile = null,
+    // What they will type to sign in. Omitted, it is derived from the name.
+    [property: System.Text.Json.Serialization.JsonPropertyName("username")] string? Username = null);
 
 public sealed record AddUserRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name,
@@ -2500,7 +2504,9 @@ public sealed record AddUserRequest(
     // Which organization to mint them into. Defaulted at the call site rather than
     // here, so that an older admin panel that does not send it still creates a
     // usable user rather than one in an organization that does not exist.
-    [property: System.Text.Json.Serialization.JsonPropertyName("orgSlug")] string? OrgSlug = null);
+    [property: System.Text.Json.Serialization.JsonPropertyName("orgSlug")] string? OrgSlug = null,
+    // As on the claim: omitted, it is derived from the name.
+    [property: System.Text.Json.Serialization.JsonPropertyName("username")] string? Username = null);
 
 public sealed record CreateOrganizationRequest(
     [property: System.Text.Json.Serialization.JsonPropertyName("name")] string? Name);

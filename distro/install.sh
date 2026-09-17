@@ -553,8 +553,9 @@ echo "PORT=${PORT}"
 cat <<'CLAIM'
 # Claim the first owner on THIS machine and give them a password.
 #
-#   cielo-claim "Your Name"                 ask for a password (the usual way)
-#   cielo-claim "Your Name" --no-password   just print the token (automation)
+#   cielo-claim "Your Name"                    ask for a password (the usual way)
+#   cielo-claim "Your Name" --user joche       choose what you sign in as
+#   cielo-claim "Your Name" --no-password      just print the token (automation)
 #
 # The claim used to end at a token: sixty-four characters of hex the operator was
 # told to paste into a browser. The only documented way to turn that into an
@@ -569,18 +570,71 @@ cat <<'CLAIM'
 # unattended install — cloud-init, Ansible, any provisioning run. cielo-claim is
 # already something a person types at a prompt, so it is the honest place to ask.
 set -euo pipefail
-name="${1:?Usage: cielo-claim \"Your Name\" [--no-password]}"
 
+usage() {
+  echo 'Usage: cielo-claim "Your Name" [--user <username>] [--no-password]' >&2
+  exit 2
+}
+
+name=""
+username=""
 want_password=1
-[ "${2:-}" = "--no-password" ] && want_password=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-password) want_password=0 ;;
+    --user)        shift; username="${1:-}"; [ -n "$username" ] || usage ;;
+    --user=*)      username="${1#--user=}" ;;
+    -h|--help)     usage ;;
+    -*)            echo "cielo-claim: unknown option '$1'" >&2; usage ;;
+    *)             if [ -z "$name" ]; then name="$1"; else echo "cielo-claim: unexpected argument '$1'" >&2; usage; fi ;;
+  esac
+  shift
+done
+[ -n "$name" ] || usage
+
 # Nobody is there to answer in a pipe, a cron job or a provisioning script.
 [ -t 0 ] || want_password=0
 
 # Escape a string for a JSON string literal: backslash first, then quote.
 json_escape() { printf '%s' "$1" | LC_ALL=C sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 
-resp="$(curl -fsS -XPOST "http://127.0.0.1:$PORT/api/setup/claim" \
-  -H 'Content-Type: application/json' -d "{\"name\": \"$(json_escape "$name")\"}")"
+out="$(mktemp)"
+trap 'rm -f "$out"' EXIT
+
+# -fsS would collapse every 4xx into "the server said no". The body is the whole
+# point here: it is what tells you the name gave no username and you should choose
+# one, which is the difference between a fixable message and a dead end.
+try_claim() {
+  local payload
+  if [ -n "$1" ]; then
+    payload="{\"name\": \"$(json_escape "$name")\", \"username\": \"$(json_escape "$1")\"}"
+  else
+    payload="{\"name\": \"$(json_escape "$name")\"}"
+  fi
+  curl -sS -o "$out" -w '%{http_code}' -XPOST "http://127.0.0.1:$PORT/api/setup/claim" \
+    -H 'Content-Type: application/json' -d "$payload"
+}
+
+error_of() { sed -n 's/.*"error"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$out"; }
+
+code="$(try_claim "$username")"
+# A name written in a script nothing here folds — Cyrillic, CJK — derives no
+# username at all, and until you could choose one that was simply the end of the
+# road on your own machine. Ask, rather than printing the rule and quitting.
+while [ "$code" = "400" ] && [ -z "$username" ] && [ -t 0 ]; do
+  echo "  $(error_of)" >&2
+  read -rp "Username to sign in with: " username </dev/tty
+  [ -n "$username" ] || { echo "  Nothing chosen; stopping." >&2; exit 1; }
+  code="$(try_claim "$username")"
+done
+
+if [ "$code" != "200" ]; then
+  err="$(error_of)"
+  echo "  ${err:-$(cat "$out")}" >&2
+  exit 1
+fi
+
+resp="$(cat "$out")"
 slug="$(printf '%s' "$resp" | sed -n 's/.*"slug"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 token="$(printf '%s' "$resp" | sed -n 's/.*"token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
 [ -n "$slug" ] || { echo "$resp"; exit 1; }
@@ -616,7 +670,7 @@ done
 # and delete; argv we cannot.
 body="$(mktemp)"; cfg="$(mktemp)"
 chmod 600 "$body" "$cfg"
-trap 'rm -f "$body" "$cfg"' EXIT
+trap 'rm -f "$body" "$cfg" "$out"' EXIT
 printf '{"newPassword":"%s"}' "$(json_escape "$p1")" > "$body"
 printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
 unset p1 p2
@@ -680,7 +734,11 @@ SETPW
 } > /usr/local/bin/cielo-set-password
 cat > /usr/local/bin/cielo-add-user <<EOF
 #!/usr/bin/env bash
-# Add a teammate. Usage: cielo-add-user "Their Name" [desk-profile]
+# Add a teammate. Usage: cielo-add-user "Their Name" [desk-profile] [--user <name>]
+#
+# --user is what they will sign in as, minus the organization prefix. Without it
+# the username is derived from their name, which derives nothing at all from a
+# name written in a script this does not fold.
 # The desk profile decides their toolchain (office, dotnet, marketing); omitted
 # means office, which is the desk everyone had before profiles existed.
 #
@@ -694,16 +752,31 @@ cat > /usr/local/bin/cielo-add-user <<EOF
 # first password is loopback-only:
 #   sudo cielo-set-password <your-desk-slug>
 set -euo pipefail
-name="\${1:?Usage: cielo-add-user \"Name\" [desk-profile]}"
-desk="\${2:-office}"
+name="\${1:?Usage: cielo-add-user \"Name\" [desk-profile] [--user <name>]}"
+shift
+desk="office"
+username=""
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --user)   shift; username="\${1:-}" ;;
+    --user=*) username="\${1#--user=}" ;;
+    *)        desk="\$1" ;;
+  esac
+  shift
+done
 read -rp  "Your desk name: " who
 read -rsp "Your password:  " pass; echo
 jar="\$(mktemp)"; trap 'rm -f "\$jar"' EXIT
 curl -fsS -c "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/auth/login" \
   -H 'Content-Type: application/json' \
   -d "{\"slug\": \"\${who}\", \"password\": \"\${pass}\"}" >/dev/null
+if [ -n "\$username" ]; then
+  payload="{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\", \"username\": \"\${username}\"}"
+else
+  payload="{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
+fi
 curl -fsS -b "\$jar" -XPOST "http://127.0.0.1:${PORT}/api/users" \
-  -H 'Content-Type: application/json' -d "{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
+  -H 'Content-Type: application/json' -d "\$payload"
 echo
 EOF
 # The two values this script needs from install time are written as a prelude rather
