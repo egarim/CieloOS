@@ -81,13 +81,40 @@ the entire file content, verbatim, with no escaping of any kind
 ...
 ===END FILE===
 
-Repeat FILE blocks as needed. Every file must be COMPLETE: the content you give \
+Repeat FILE blocks as needed. Every FILE must be COMPLETE: the content you give \
 REPLACES the file entirely, so never emit a fragment, a diff, or an ellipsis \
-standing in for unchanged code. If a file is too large to reproduce in full, say \
-so under CONCERNS and omit it rather than truncating it."""
+standing in for unchanged code.
+
+For a file too large to reproduce in full — anything over roughly 500 lines — do \
+NOT use a FILE block. Use an EDIT block, which replaces one exact span and leaves \
+the rest of the file untouched:
+
+===EDIT path/to/large.cs===
+<<<OLD
+the exact existing text, copied character for character from the context
+>>>OLD
+<<<NEW
+what it becomes
+>>>NEW
+===END EDIT===
+
+The OLD text must appear EXACTLY ONCE in the current file; include enough \
+surrounding lines to make it unique. Repeat EDIT blocks for several changes to \
+one file. An edit whose OLD text is missing, or found more than once, is rejected \
+and nothing in that file changes."""
 
 FILE_OPEN = re.compile(r"^===FILE\s+(.+?)===\s*$", re.MULTILINE)
 FILE_CLOSE = "===END FILE==="
+EDIT_BLOCK = re.compile(
+    r"^===EDIT\s+(.+?)===\s*$\s*<<<OLD\s*$(.*?)^>>>OLD\s*$\s*<<<NEW\s*$(.*?)^>>>NEW\s*$\s*^===END EDIT===",
+    re.MULTILINE | re.DOTALL)
+
+# A whole-file reply that is a fraction of the file it claims to replace is not a
+# rewrite, it is a truncation — and the contract cannot prevent it, because the
+# receiving end has no way to tell "I rewrote this smaller" from "I stopped
+# early". The first real task returned 7,997 bytes for a 142,293-byte Program.cs;
+# writing it would have replaced 2,867 lines of API with a stub.
+SHRINK_FLOOR = 0.5
 
 
 def read_key():
@@ -174,7 +201,35 @@ def parse(raw):
             unterminated.append(path)
             continue
         files.append((path, raw[start:end].lstrip("\n").rstrip() + "\n"))
-    return sections, files, unterminated
+
+    edits = [(m.group(1).strip(), m.group(2).strip("\n"), m.group(3).strip("\n"))
+             for m in EDIT_BLOCK.finditer(raw)]
+    return sections, files, edits, unterminated
+
+
+def apply_edits(edits, root, write):
+    """Replace exact spans. An edit that does not match uniquely changes nothing."""
+    results = []
+    for path, old, new in edits:
+        target = os.path.abspath(os.path.join(root, path))
+        if not target.startswith(root + os.sep):
+            sys.exit("refusing to edit outside the repository: %r" % path)
+        if not os.path.isfile(target):
+            results.append((path, "FAILED", "no such file")); continue
+        body = open(target, encoding="utf-8", newline="").read()
+        normalised = body.replace("\r\n", "\n")
+        hits = normalised.count(old)
+        if hits != 1:
+            # Ambiguity is the dangerous case, not absence: replacing the first of
+            # three matches silently edits a place nobody looked at.
+            results.append((path, "FAILED",
+                            "old text found %d times, needs exactly 1" % hits))
+            continue
+        if write:
+            with open(target, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(normalised.replace(old, new, 1))
+        results.append((path, "ok", "%d -> %d chars" % (len(old), len(new))))
+    return results
 
 
 def main():
@@ -188,6 +243,8 @@ def main():
     parser.add_argument("--write", action="store_true",
                         help="actually write the returned files (default: manifest only)")
     parser.add_argument("--transcript", default=None, help="save the raw reply here")
+    parser.add_argument("--allow-shrink", action="store_true",
+                        help="permit a whole-file reply much smaller than the file it replaces")
     args = parser.parse_args()
 
     root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -228,9 +285,9 @@ def main():
             handle.write(raw)
         print("    saved   : %s" % target)
 
-    sections, files, unterminated = parse(raw)
+    sections, files, edits, unterminated = parse(raw)
 
-    if not files and not any(sections.values()):
+    if not files and not edits and not any(sections.values()):
         print("the reply matched none of the expected markers.", file=sys.stderr)
         print("--- reply as received (%d chars) ---" % len(raw), file=sys.stderr)
         print(raw[:2000], file=sys.stderr)
@@ -242,18 +299,40 @@ def main():
               "and were NOT written: %s" % (len(unterminated), ", ".join(unterminated) or "none"),
               file=sys.stderr)
 
-    print()
-    print("--- files ---")
+    refused = 0
+    if files:
+        print()
+        print("--- files ---")
     for path, content in files:
         target = os.path.abspath(os.path.join(root, path))
         if not target.startswith(root + os.sep):
             sys.exit("refusing to write outside the repository: %r" % path)
-        verb = "modify" if os.path.exists(target) else "create"
+
+        existing = os.path.getsize(target) if os.path.exists(target) else 0
+        if existing and len(content) < existing * SHRINK_FLOOR and not args.allow_shrink:
+            print("  REFUSE %-68s %6d bytes replacing %d" % (path, len(content), existing))
+            print("         a whole-file reply this much smaller is a truncation, not a",
+                  file=sys.stderr)
+            print("         rewrite. Use an EDIT block, or pass --allow-shrink if the",
+                  file=sys.stderr)
+            print("         file really did shrink.", file=sys.stderr)
+            refused += 1
+            continue
+
+        verb = "modify" if existing else "create"
         print("  %-6s %-68s %6d bytes" % (verb, path, len(content)))
         if args.write:
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write(content)
+
+    if edits:
+        print()
+        print("--- edits ---")
+        for path, status, detail in apply_edits(edits, root, args.write):
+            print("  %-6s %-60s %s" % (status, path, detail))
+            if status == "FAILED":
+                refused += 1
 
     for label in ("NOTES", "CONCERNS", "FOLLOWUPS"):
         if sections[label]:
@@ -265,6 +344,10 @@ def main():
     if not args.write:
         print()
         print("(nothing written — pass --write to apply)")
+    if refused:
+        print()
+        print("%d change(s) were refused. Nothing partial was applied." % refused, file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":
