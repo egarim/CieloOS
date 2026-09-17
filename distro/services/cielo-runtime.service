@@ -9,6 +9,13 @@ User=cielo
 Group=cielo
 WorkingDirectory=/opt/cielo
 EnvironmentFile=/etc/cielo/cielo.env
+# The admin unix socket lives at /run/cielo/admin.sock, and install.sh appends
+# it to ASPNETCORE_URLS. systemd creates the directory owned by User=/Group=
+# (both cielo) before ExecStart and removes it on stop, so the runtime never
+# has to create it and never has to be root to do so. Mode 0750: the directory
+# is traversable by the cielo group and by root, and by nobody else.
+RuntimeDirectory=cielo
+RuntimeDirectoryMode=0750
 ExecStart=/opt/cielo/bin/WorkspaceRuntime.Api
 Restart=on-failure
 RestartSec=3

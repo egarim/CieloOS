@@ -80,6 +80,58 @@ public static class TransportFacts
         return peer is not null && namedTerminators.Contains(peer);
     }
 
+    // True when the caller is standing on this machine. Narrower than
+    // Confidential on purpose: Confidential asks "is this channel private",
+    // which a co-located TLS terminator can answer yes to on behalf of an
+    // off-box caller. OnThisMachine asks "is this caller the box", which a
+    // terminator cannot answer yes to, because a proxy is not the box.
+    //
+    // The four gates in Program.cs still call IsLoopback. This predicate is
+    // built here and switched in 01b-2, once it has been proven on a real VM.
+    // Do not wire it in from this commit.
+    public static bool OnThisMachine(HttpContext context, IReadOnlySet<IPAddress> namedTerminators)
+    {
+        var remote = Normalize(context.Connection.RemoteIpAddress);
+        var local = Normalize(context.Connection.LocalIpAddress);
+
+        // The admin unix socket. Kestrel's unix transport leaves both halves
+        // null because there is no IP endpoint to report, and the TCP
+        // transport always populates at least the local half once a connection
+        // is accepted. So "both null" means unix socket — but only because
+        // this process listens on TCP and unix sockets and nothing else. A
+        // future transport that also leaves both null (a named pipe, an
+        // in-process test transport) would be misclassified as on-machine
+        // here, and this branch is where that would have to be revisited.
+        if (remote is null && local is null)
+        {
+            return true;
+        }
+
+        // A named terminator is never on this machine, even from loopback. The
+        // operator has told us that address is a proxy, and a proxy is not the
+        // box. This is the one place OnThisMachine is narrower than
+        // Confidential on a loopback peer, and it is deliberate.
+        if (remote is null || namedTerminators.Contains(remote))
+        {
+            return false;
+        }
+
+        // Both halves loopback. The remote half alone is not enough: a
+        // co-located proxy forwarding the internet looks exactly like an
+        // on-box caller from the remote half alone, and the local half is what
+        // distinguishes them. The local half alone is not enough either: a
+        // loopback local endpoint with a non-loopback peer is a forwarded
+        // connection, which is the case Confidential's Fact 2 accepts and this
+        // predicate must not.
+        return IPAddress.IsLoopback(remote) && IPAddress.IsLoopback(local ?? IPAddress.None);
+    }
+
+    // The four gates in Program.cs call this today. It is exposed here so the
+    // test that pins its behaviour for part one of 01b can reach it without
+    // duplicating the implementation; the gates themselves are unchanged.
+    public static bool IsLoopback(IPAddress? address) =>
+        IPAddress.IsLoopback(Normalize(address) ?? IPAddress.None);
+
     // IPv4-mapped IPv6 (::ffff:127.0.0.1) is unwrapped so a mapped loopback
     // still counts, matching the existing IsLoopback helper in Program.cs.
     private static IPAddress? Normalize(IPAddress? address) =>

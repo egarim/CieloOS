@@ -2506,16 +2506,14 @@ static string VsCodeDebForThisMachine() =>
 // Loopback = the request originates on the box itself (a local browser, the SSH
 // tunnel the panel uses, or the CLI). IPv4-mapped IPv6 (::ffff:127.0.0.1) is
 // unwrapped first so a mapped loopback still counts.
-static bool IsLoopback(IPAddress? address)
-{
-    if (address is null)
-    {
-        return false;
-    }
-
-    var normalized = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
-    return IPAddress.IsLoopback(normalized);
-}
+// One implementation, not two.
+//
+// 01b part one added TransportFacts.IsLoopback so a test could pin "the gates
+// still behave as they did" — but the gates call THIS one, so the test was
+// pinning a copy. Two identical functions that are asserted to agree only by
+// having been written from the same description is exactly the drift a
+// regression test is supposed to catch, with the test on the wrong side of it.
+static bool IsLoopback(IPAddress? address) => TransportFacts.IsLoopback(address);
 
 // The user/agent a request acts as, derived from the authenticated identity:
 // an agent acts as itself; a human acts through an agent it owns (the one it

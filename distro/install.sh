@@ -505,8 +505,14 @@ chown -R cielo:cielo /opt/cielo
 
 echo "==> [6/9] Environment ($MODE, $BIND)"
 install -d /etc/cielo
+# The admin unix socket is appended to the bind address. It is what lets
+# cielo-claim reach the runtime without going through the network stack, which
+# is what makes the OnThisMachine narrowing in 01b-2 safe for a headless
+# install: without it, a headless box has no onboarding path at all. The
+# directory is created by systemd (RuntimeDirectory=cielo in the unit file),
+# not here, so this line only has to name the path.
 sed -e "s#UID_PLACEHOLDER#${CIELO_UID}#" \
-    -e "s#^ASPNETCORE_URLS=.*#ASPNETCORE_URLS=${BIND}#" \
+    -e "s#^ASPNETCORE_URLS=.*#ASPNETCORE_URLS=${BIND};http://unix:/run/cielo/admin.sock#" \
     "$BUNDLE/cielo.env.example" > /etc/cielo/cielo.env
 # The panel reads Chat:Url at startup, so it has to be in the file BEFORE stage 7
 # starts the runtime — appending it later would leave the panel without a chat
