@@ -10,10 +10,15 @@ import { Button } from "./ui/button";
 import { Shell } from "./Shell";
 import { SignIn } from "./SignIn";
 import { PermissionApprovals } from "./PermissionApprovals";
+import { RedeemInvite } from "./RedeemInvite";
 
 type PortalStatus = "checking" | "signed-out" | "signed-in" | "error";
 
 export default function Portal() {
+  const [inviteCode, setInviteCode] = React.useState<string | null>(() => {
+    const code = new URLSearchParams(window.location.hash.slice(1)).get("invite");
+    return code?.trim() || null;
+  });
   const [status, setStatus] = React.useState<PortalStatus>("checking");
   const [whoami, setWhoami] = React.useState<Whoami | null>(null);
   const [language, setLanguage] = React.useState<Language>(() =>
@@ -29,6 +34,9 @@ export default function Portal() {
   }, [language]);
 
   React.useEffect(() => {
+    // Invitations take precedence over every identity gate. In particular, do
+    // not let a bearer token left on a shared browser silently sign in first.
+    if (inviteCode) return;
     let alive = true;
 
     async function checkSession() {
@@ -48,9 +56,10 @@ export default function Portal() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [inviteCode]);
 
   const handleSignedIn = React.useCallback((user: Whoami) => {
+    setInviteCode(null);
     setWhoami(user);
     setStatus("signed-in");
     setLanguage(resolveLanguage(user.language));
@@ -98,14 +107,14 @@ export default function Portal() {
 
   return (
     <LanguageProvider language={language}>
-      <PortalContent
+      {inviteCode ? <RedeemInvite code={inviteCode} onSignedIn={handleSignedIn} /> : <PortalContent
         status={status}
         whoami={whoami}
         language={language}
         onSignedIn={handleSignedIn}
         onSignOut={handleSignOut}
         onLanguageChange={handleLanguageChange}
-      />
+      />}
     </LanguageProvider>
   );
 }

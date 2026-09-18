@@ -64,6 +64,10 @@ export function clearToken(): void {
   memoryToken = null;
   try {
     window.localStorage.removeItem(TOKEN_KEY);
+    // The operator panel predates this shared client and stores the same kind of
+    // permanent identity credential under its original key. Invitation redeem
+    // is an account hand-off on a possibly shared browser, so clear that too.
+    window.localStorage.removeItem("runtime.token");
   } catch {
     // Nothing was stored, so nothing needs clearing.
   }

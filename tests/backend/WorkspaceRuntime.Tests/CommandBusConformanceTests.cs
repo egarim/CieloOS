@@ -78,6 +78,10 @@ public class CommandBusConformanceTests
                                        // it — main.tsx has no i18n at all — so the portal is the
                                        // first code to exercise an endpoint that has existed for
                                        // a while. The guard was right to stop and ask.
+        "/api/invites/preview",        // public onboarding control plane: preview only records that
+        "/api/invites/redeem",         // a link was seen; redeem sets the first password and session.
+                                       // Neither changes anything in a user's workspace, and neither can
+                                       // be emitted by an agent because both are Public entry points.
         "/api/keys",                   // mint a revocable credential, human-only
         "/api/desk-profiles/*/build"   // build a desk image: provisioning this machine, human-only,
                                        // not a surface mutation (nothing in the workspace changes)
