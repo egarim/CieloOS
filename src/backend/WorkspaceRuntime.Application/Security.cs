@@ -244,6 +244,16 @@ public static class AccessPolicy
         {
             return AccessLevel.AnyPrincipal;
         }
+
+        // Version history describes a person's undo points, and restoring one
+        // replaces a home with earlier state. Both are human judgement: an agent
+        // may create recoverable work, but it may neither inspect the owner's
+        // history nor decide to roll that work back.
+        if (path == "/api/version/history"
+            || path.StartsWith("/api/version/", StringComparison.OrdinalIgnoreCase))
+        {
+            return AccessLevel.HumanOnly;
+        }
         return AccessLevel.AnyPrincipal;
     }
 }

@@ -32,7 +32,7 @@ public class VersioningTests
     }
 
     [Fact]
-    public async Task Versioning_relaxes_non_reversible_to_allow_and_snapshots_before_it_runs()
+    public async Task Agent_action_snapshots_the_agents_home_before_it_runs()
     {
         var store = new InMemoryRuntimeStore();
         var versionStore = new InMemoryVersionStore();
@@ -47,8 +47,9 @@ public class VersioningTests
             TestRepository.AgentPrincipal(store), CancellationToken.None);
 
         Assert.Equal(PolicyDecision.Allow, result.Decision);
-        var snapshots = await versionStore.ListAsync(user.Slug, CancellationToken.None);
-        Assert.Contains(snapshots, s => s.Action == "spreadsheet.clear" && s.OwnerSlug == user.Slug);
+        var snapshots = await versionStore.ListAsync(agent.Slug, CancellationToken.None);
+        Assert.Contains(snapshots, s => s.Action == "spreadsheet.clear" && s.OwnerSlug == agent.Slug);
+        Assert.Empty(await versionStore.ListAsync(user.Slug, CancellationToken.None));
     }
 
     [Fact]

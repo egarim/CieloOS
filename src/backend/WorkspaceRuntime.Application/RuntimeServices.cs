@@ -318,14 +318,14 @@ public sealed class AgentRuntime
                     try
                     {
                         // The version boundary of the OS is the agent action.
-                        // Snapshot the owner's home immediately before a
+                        // Snapshot the acting agent's home immediately before a
                         // NON-reversible action so its consequences can be
                         // undone; a reversible one needs no checkpoint.
                         var commandSpec = surfaces.Find(request.ToolName)?.Commands.GetValueOrDefault(request.Operation);
                         if (versionStore is not null && UndoPolicy.ShouldSnapshot(commandSpec))
                         {
                             await versionStore.RecordBeforeAsync(
-                                store.GetUser(request.UserId).Slug, request.Id,
+                                store.GetAgent(request.AgentId).Slug, request.Id,
                                 $"{request.ToolName}.{request.Operation}", cancellationToken);
                         }
 

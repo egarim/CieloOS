@@ -40,6 +40,8 @@ public class AccessPolicyTests
     // through another, and this row is why nobody noticed.
     [InlineData("/api/users", "GET", AccessLevel.HumanOnly)]
     [InlineData("/api/audit-events", "GET", AccessLevel.AnyPrincipal)]
+    [InlineData("/api/version/history", "GET", AccessLevel.HumanOnly)]
+    [InlineData("/api/version/00000000-0000-0000-0000-000000000001/restore", "POST", AccessLevel.HumanOnly)]
     [InlineData("/api/surfaces/spreadsheet/state", "GET", AccessLevel.AnyPrincipal)]
     [InlineData("/api/surfaces/spreadsheet/commands/set-cell", "POST", AccessLevel.AnyPrincipal)]
     [InlineData("/api/tool-requests", "POST", AccessLevel.AnyPrincipal)]
@@ -59,7 +61,7 @@ public class AccessPolicyTests
     // AnyPrincipal: an invitation route that nobody listed would be agent-mintable
     // by omission, and the only thing that would notice is a person reading this
     // file on purpose. /api/version/{id}/restore is the proof that nobody does —
-    // it matches no rule today.
+    // it matched no rule until the version routes above were tabled explicitly.
     [InlineData("/api/invites", "POST", AccessLevel.OwnerOnly)]
     [InlineData("/api/invites", "GET", AccessLevel.OwnerOnly)]
     [InlineData("/api/invites/00000000-0000-0000-0000-000000000001/revoke", "POST", AccessLevel.OwnerOnly)]
