@@ -114,6 +114,8 @@ public interface IApiKeyStore
 
     bool Revoke(Guid keyId, Guid ownerUserId);
 
+    int RevokeAllFor(Guid userId);
+
     IReadOnlyList<ApiKey> For(Guid ownerUserId);
 }
 

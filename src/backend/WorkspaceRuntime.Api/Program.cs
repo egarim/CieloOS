@@ -475,6 +475,13 @@ app.Use(async (context, next) =>
             return;
         }
 
+        if (Suspension.IsSuspended(store, principal))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsJsonAsync(new { error = Suspension.RefusalMessage });
+            return;
+        }
+
         // The decision itself lives in PrincipalGate (Security.cs) so it can be
         // tested; this is only the part that needs an HttpContext. It was four
         // inline `if` blocks, and while they sat here no test in the suite could
@@ -864,7 +871,7 @@ app.MapPost("/api/auth/logout-all", (HttpContext context, ISessionStore sessions
     return Results.Ok(new { endedSessions = count });
 });
 
-app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions, IInviteStore invites) =>
+app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext context, IRuntimeStore store, IPasswordHasher hasher, ISessionStore sessions, IApiKeyStore keys, IInviteStore invites) =>
 {
     var caller = Caller(context);
     var next = request?.NewPassword ?? "";
@@ -906,9 +913,9 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
         invites.SupersedeLiveFor(caller.Subject);
     }
 
-    // Changing a password ends every other session: that is what a person expects
-    // it to do after losing a laptop.
-    var ended = sessions.RevokeAllFor(caller.Subject);
+    // Password recovery after losing a device must invalidate every bearer
+    // credential the device may hold, not only its browser cookie.
+    var (ended, revokedKeys) = PasswordCredentialRotation.RevokeAll(caller.Subject, sessions, keys);
     var (session, secret) = sessions.Create(caller.Subject, TimeSpan.FromDays(14));
     context.Response.Cookies.Append(CredentialFormat.SessionCookie, secret, SessionCookieOptions(context, session.ExpiresAt, tlsTerminatedBy));
 
@@ -916,14 +923,14 @@ app.MapPost("/api/auth/password", (SetPasswordRequest? request, HttpContext cont
         "auth.password", AuditOutcome.Success,
         existing is null
             ? $"'{caller.Slug}' set a password for the first time."
-            : $"'{caller.Slug}' changed their password, ending {ended} session(s)."));
+            : $"'{caller.Slug}' changed their password, ending {ended} session(s) and revoking {revokedKeys} API key(s)."));
 
     // "Other" sessions means other than the one being used — and there only IS a
     // current session when the caller came in on a cookie. Called with a legacy
     // identity token, every revoked session was somebody's browser, so subtracting
     // one would under-report it (and say zero when a browser really was signed out).
     var endedOthers = context.Items.ContainsKey("session") ? Math.Max(0, ended - 1) : ended;
-    return Results.Ok(new { passwordSet = true, endedSessions = endedOthers });
+    return Results.Ok(new { passwordSet = true, endedSessions = endedOthers, revokedApiKeys = revokedKeys });
 });
 
 // Named, revocable credentials for programs — the fix for an integration having
@@ -1236,6 +1243,25 @@ app.MapGet("/api/users", (HttpContext context, IRuntimeStore store) =>
         user.Language,
         user.IsMachineOwner
     }));
+});
+
+app.MapPost("/api/users/{slug}/suspend", (string slug, HttpContext context, IRuntimeStore store, ISessionStore sessions, IApiKeyStore keys, IInviteStore invites) =>
+{
+    var result = Suspension.Suspend(slug, store, sessions, keys, invites, Caller(context).Subject);
+    return result switch
+    {
+        SuspensionResult.Success => Results.Ok(new { slug, suspended = true }),
+        SuspensionResult.MachineOwner => Results.BadRequest(new { error = "The machine owner cannot be suspended." }),
+        _ => Results.NotFound(new { error = "No such person on this machine." })
+    };
+});
+
+app.MapPost("/api/users/{slug}/unsuspend", (string slug, HttpContext context, IRuntimeStore store) =>
+{
+    var result = Suspension.Unsuspend(slug, store, Caller(context).Subject);
+    return result == SuspensionResult.Success
+        ? Results.Ok(new { slug, suspended = false })
+        : Results.NotFound(new { error = "No such person on this machine." });
 });
 
 // The organizations on this machine. Human-only to read (a menu of who else exists

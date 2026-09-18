@@ -290,6 +290,17 @@ public sealed class InMemoryRuntimeStore : IRuntimeStore
         }
     }
 
+    public bool SetSuspendedAt(Guid userId, DateTimeOffset? suspendedAt)
+    {
+        var index = users.FindIndex(user => user.Id == userId);
+        if (index < 0)
+        {
+            return false;
+        }
+        users[index] = users[index] with { SuspendedAt = suspendedAt };
+        return true;
+    }
+
     public PlatformUser GetUser(Guid id) => users.Single(user => user.Id == id);
 
     public AgentProfile GetAgent(Guid id) => agents.Single(agent => agent.Id == id);

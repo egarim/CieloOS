@@ -131,6 +131,14 @@ public static class AccessPolicy
             return AccessLevel.OwnerOnly;
         }
 
+        if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
+            && path.StartsWith("/api/users/", StringComparison.Ordinal)
+            && (path.EndsWith("/suspend", StringComparison.Ordinal)
+                || path.EndsWith("/unsuspend", StringComparison.Ordinal)))
+        {
+            return AccessLevel.OwnerOnly;
+        }
+
         // Invitations are the machine owner's alone, on every verb including the
         // read. An invitation is a credential: minting one hands out a way to set
         // a first password, and listing them is an inventory of who was invited

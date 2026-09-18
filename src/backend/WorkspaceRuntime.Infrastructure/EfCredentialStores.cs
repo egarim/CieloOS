@@ -201,6 +201,19 @@ public sealed class EfApiKeyStore : IApiKeyStore
         return true;
     }
 
+    public int RevokeAllFor(Guid userId)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var rows = context.ApiKeys.Where(row => row.OwnerUserId == userId && row.RevokedAt == null).ToList();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in rows)
+        {
+            row.RevokedAt = now;
+        }
+        context.SaveChanges();
+        return rows.Count;
+    }
+
     public IReadOnlyList<ApiKey> For(Guid ownerUserId)
     {
         using var context = contextFactory.CreateDbContext();
@@ -664,6 +677,24 @@ public sealed class InMemoryApiKeyStore : IApiKeyStore
                 }
             }
             return false;
+        }
+    }
+
+    public int RevokeAllFor(Guid userId)
+    {
+        lock (gate)
+        {
+            var revoked = 0;
+            var now = DateTimeOffset.UtcNow;
+            foreach (var (hash, key) in byHash.ToList())
+            {
+                if (key.OwnerUserId == userId && key.RevokedAt is null)
+                {
+                    byHash[hash] = key with { RevokedAt = now };
+                    revoked++;
+                }
+            }
+            return revoked;
         }
     }
 

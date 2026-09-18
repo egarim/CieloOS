@@ -42,6 +42,7 @@ public interface IRuntimeStore
     // hash, rather than a whole-user upsert, so nothing else about the person can
     // be overwritten by a request that only meant to change one thing.
     void SetLanguage(Guid userId, string language);
+    bool SetSuspendedAt(Guid userId, DateTimeOffset? suspendedAt);
     AgentProfile GetAgent(Guid id);
     void UpsertApproval(ApprovalRecord approval);
     ApprovalRecord GetApproval(Guid id);

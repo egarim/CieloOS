@@ -60,7 +60,8 @@ public sealed record PlatformUser(
     string OrgSlug,
     bool IsMachineOwner,
     string DeskProfile = "office",
-    string Language = "en");
+    string Language = "en",
+    DateTimeOffset? SuspendedAt = null);
 
 // A project: records about work, never a place where work is stored.
 //

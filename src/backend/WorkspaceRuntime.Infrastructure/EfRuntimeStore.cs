@@ -176,7 +176,7 @@ public sealed class EfRuntimeStore : IRuntimeStore
         get
         {
             using var context = contextFactory.CreateDbContext();
-            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language)).ToList();
+            return context.Users.AsNoTracking().Select(row => new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language, row.SuspendedAt)).ToList();
         }
     }
 
@@ -260,12 +260,25 @@ public sealed class EfRuntimeStore : IRuntimeStore
         context.SaveChanges();
     }
 
+    public bool SetSuspendedAt(Guid userId, DateTimeOffset? suspendedAt)
+    {
+        using var context = contextFactory.CreateDbContext();
+        var row = context.Users.FirstOrDefault(user => user.Id == userId);
+        if (row is null)
+        {
+            return false;
+        }
+        row.SuspendedAt = suspendedAt;
+        context.SaveChanges();
+        return true;
+    }
+
 
     public PlatformUser GetUser(Guid id)
     {
         using var context = contextFactory.CreateDbContext();
         var row = context.Users.AsNoTracking().Single(user => user.Id == id);
-        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language);
+        return new PlatformUser(row.Id, row.DisplayName, row.Email, row.Slug, row.OrgSlug, row.IsMachineOwner, row.DeskProfile, row.Language, row.SuspendedAt);
     }
 
     public AgentProfile GetAgent(Guid id)
