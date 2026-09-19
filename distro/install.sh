@@ -809,9 +809,13 @@ if [ -n "\$username" ]; then
 else
   payload="{\"name\": \"\${name}\", \"deskProfile\": \"\${desk}\"}"
 fi
-curl -fsS --unix-socket /run/cielo/admin.sock -b "\$jar" -XPOST "http://localhost/api/users" \
-  -H 'Content-Type: application/json' -d "\$payload"
-echo
+response="\$(curl -fsS --unix-socket /run/cielo/admin.sock -b "\$jar" -XPOST "http://localhost/api/users" \
+  -H 'Content-Type: application/json' -d "\$payload")"
+code="\$(printf '%s' "\$response" | sed -n 's/.*"code":"\([^"]*\)".*/\1/p')"
+expires="\$(printf '%s' "\$response" | sed -n 's/.*"expiresAt":"\([^"]*\)".*/\1/p')"
+printf '  Invitation code: %s\n  Expires: %s\n' "\$code" "\$expires"
+echo '  Send them a link made from your panel address:'
+echo '  <your panel address>/portal.html#invite=<code>'
 EOF
 # The two values this script needs from install time are written as a prelude rather
 # than interpolated into the body. The heredoc below is QUOTED, and it has to stay

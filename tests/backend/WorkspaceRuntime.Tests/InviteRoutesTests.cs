@@ -15,6 +15,48 @@ namespace WorkspaceRuntime.Tests;
 public class InviteRoutesTests
 {
     [Fact]
+    public void User_creation_invitation_contract_has_code_expiry_and_no_token_field()
+    {
+        var store = new InMemoryRuntimeStore();
+        var invites = new InMemoryInviteStore();
+        var owner = AddUser(store, "joche", isMachineOwner: true);
+        var teammate = AddUser(store, "dmitri");
+        var caller = new RuntimePrincipal(PrincipalKind.Human, owner.Id, owner.Slug, owner.DisplayName);
+
+        var issued = InvitationIssuance.Mint(teammate, caller, invites, store);
+        var body = System.Text.Json.JsonSerializer.Serialize(issued,
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        using var json = System.Text.Json.JsonDocument.Parse(body);
+
+        Assert.Equal(teammate.Slug, json.RootElement.GetProperty("slug").GetString());
+        Assert.StartsWith(CredentialFormat.InvitePrefix, json.RootElement.GetProperty("code").GetString());
+        Assert.True(json.RootElement.TryGetProperty("expiresAt", out _));
+        Assert.False(json.RootElement.TryGetProperty("token", out _));
+    }
+
+    [Fact]
+    public void User_creation_invitation_code_redeems_and_a_second_creation_supersedes_it()
+    {
+        var store = new InMemoryRuntimeStore();
+        var invites = new InMemoryInviteStore();
+        var owner = AddUser(store, "joche", isMachineOwner: true);
+        var teammate = AddUser(store, "dmitri");
+        var caller = new RuntimePrincipal(PrincipalKind.Human, owner.Id, owner.Slug, owner.DisplayName);
+
+        var first = InvitationIssuance.Mint(teammate, caller, invites, store);
+        var firstRow = invites.Resolve(first.Code, DateTimeOffset.UtcNow)!;
+        var second = InvitationIssuance.Mint(teammate, caller, invites, store);
+
+        Assert.Equal("superseded", invites.Resolve(first.Code, DateTimeOffset.UtcNow)!.State(DateTimeOffset.UtcNow));
+        var secondRow = invites.Resolve(second.Code, DateTimeOffset.UtcNow)!;
+        Assert.True(invites.Spend(secondRow.Id, DateTimeOffset.UtcNow, "test-client"));
+        Assert.True(store.SetFirstPasswordHash(teammate.Id, "redeemed-password-hash"));
+        Assert.Equal("used", invites.Resolve(second.Code, DateTimeOffset.UtcNow)!.State(DateTimeOffset.UtcNow));
+        Assert.Equal("redeemed-password-hash", store.PasswordHashFor(teammate.Id));
+        Assert.NotEqual(firstRow.Id, secondRow.Id);
+    }
+
+    [Fact]
     public void Redeem_rejects_a_non_confidential_transport_before_touching_state()
     {
         var context = new DefaultHttpContext();

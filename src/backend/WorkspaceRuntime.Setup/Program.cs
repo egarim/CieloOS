@@ -169,8 +169,10 @@ static int AddUser(string name, string token, string url)
     {
         using var document = JsonDocument.Parse(body);
         var slug = document.RootElement.GetProperty("slug").GetString();
-        var issued = document.RootElement.GetProperty("token").GetString();
-        Console.WriteLine(JsonSerializer.Serialize(new { user = slug, token = issued }, new JsonSerializerOptions { WriteIndented = true }));
+        var code = document.RootElement.GetProperty("code").GetString();
+        var expiresAt = document.RootElement.GetProperty("expiresAt").GetString();
+        Console.WriteLine(JsonSerializer.Serialize(new { user = slug, code, expiresAt }, new JsonSerializerOptions { WriteIndented = true }));
+        Console.WriteLine("Send them a link made from your panel address: <your panel address>/portal.html#invite=<code>");
         return 0;
     }
 

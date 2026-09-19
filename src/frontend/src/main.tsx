@@ -218,7 +218,7 @@ function App() {
   const [passwordNew, setPasswordNew] = React.useState("");
   const [securityMessage, setSecurityMessage] = React.useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [teammateProfile, setTeammateProfile] = React.useState("office");
-  const [teammateResult, setTeammateResult] = React.useState<{ slug: string; token: string } | null>(null);
+  const [teammateResult, setTeammateResult] = React.useState<{ slug: string; code: string; expiresAt: string } | null>(null);
   const [teammateError, setTeammateError] = React.useState<string | null>(null);
   const [teammateBusy, setTeammateBusy] = React.useState(false);
   const [filesOwner, setFilesOwner] = React.useState<string>("");
@@ -624,8 +624,8 @@ function App() {
     }
   }
 
-  // Invite a teammate. The runtime returns their bearer token for you to hand
-  // over (it is also written to a 0600 file on the box).
+  // Invite a teammate. The permanent identity token stays in its 0600 file on
+  // the box; the runtime returns only the one-time invitation.
   // A profile image is built in the background: this starts it and the desk-profile
   // list reports progress, rather than a request that hangs for several minutes.
   async function buildDeskImage(id: string) {
@@ -740,7 +740,7 @@ function App() {
     setTeammateBusy(true);
     setTeammateError(null);
     try {
-      const result = await api<{ slug: string; token: string }>("/api/users", {
+      const result = await api<{ slug: string; code: string; expiresAt: string }>("/api/users", {
         method: "POST",
         body: JSON.stringify({ name, deskProfile: teammateProfile })
       });
@@ -1226,7 +1226,7 @@ function App() {
               </button>
               {teammateOpen && (
                 <div className="teammateForm">
-                  <p className="muted small">Create another user on this machine — you'll get a token to hand them.</p>
+                  <p className="muted small">Create another user on this machine and get a one-time invitation.</p>
                   <label className="profileChoice">
                     Desk
                     <select
@@ -1275,8 +1275,9 @@ function App() {
                   {teammateError && <p className="decision deny small">{teammateError}</p>}
                   {teammateResult && (
                     <div className="teammateToken" data-automation-id="teammate-result">
-                      <p className="muted small">Created <strong>{teammateResult.slug}</strong>. Share this token with them:</p>
-                      <code className="tokenValue" data-automation-id="teammate-token">{teammateResult.token}</code>
+                      <p className="muted small">Created <strong>{teammateResult.slug}</strong>. Send them <code>&lt;your panel address&gt;/portal.html#invite=&lt;code&gt;</code> with this code:</p>
+                      <code className="tokenValue" data-automation-id="teammate-invite-code">{teammateResult.code}</code>
+                      <p className="muted small">Expires {new Date(teammateResult.expiresAt).toLocaleString()}.</p>
                     </div>
                   )}
                 </div>
@@ -1716,7 +1717,7 @@ function ModelsView({
           <button data-automation-id="password-set" onClick={setPassword}>Set password</button>
         </div>
         <p className="muted small">
-          Setting your first password must be done on the machine itself. Changing it ends every other session.
+          Your first password is set on the machine itself, or through an invitation link. Changing it ends every other session.
         </p>
         {securityMessage && (
           <p className={`decision ${securityMessage.kind === "ok" ? "allow" : "deny"} small`}>{securityMessage.text}</p>
@@ -2080,7 +2081,7 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
   const [org, setOrg] = React.useState("");
   const [orgName, setOrgName] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [result, setResult] = React.useState<{ slug: string; token: string } | null>(null);
+  const [result, setResult] = React.useState<{ slug: string; code: string; expiresAt: string } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   async function load() {
@@ -2126,7 +2127,7 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
     setBusy(true);
     setError(null);
     try {
-      const created = await api<{ slug: string; token: string }>("/api/users", {
+      const created = await api<{ slug: string; code: string; expiresAt: string }>("/api/users", {
         method: "POST",
         body: JSON.stringify({ name: trimmed, deskProfile: profile, orgSlug: org })
       });
@@ -2267,8 +2268,9 @@ function PeopleView({ deskProfiles, onChanged }: { deskProfiles: DeskProfileView
         {error && <p className="decision deny small">{error}</p>}
         {result && (
           <div className="teammateToken" data-automation-id="people-result">
-            <p className="muted small">Created <strong>{result.slug}</strong>. Share this with them — it&rsquo;s how they sign in:</p>
-            <code className="tokenValue">{result.token}</code>
+            <p className="muted small">Created <strong>{result.slug}</strong>. Send them <code>&lt;your panel address&gt;/portal.html#invite=&lt;code&gt;</code> with this code:</p>
+            <code className="tokenValue">{result.code}</code>
+            <p className="muted small">Expires {new Date(result.expiresAt).toLocaleString()}.</p>
           </div>
         )}
       </div>

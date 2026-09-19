@@ -1025,19 +1025,7 @@ app.MapPost("/api/invites", (CreateInviteRequest? request, HttpContext context, 
         return Results.BadRequest(new { error = "The owner of this machine cannot be invited." });
     }
 
-    // Supersede BEFORE creating, so re-issuing kills the old link rather than
-    // leaving two live. The other order leaves a window in which both are live,
-    // and a person who clicks the older one lands in a state the owner did not
-    // intend.
-    invites.SupersedeLiveFor(target.Id);
-
-    var (invite, code) = invites.Create(target.Id, caller.Subject, TimeSpan.FromHours(72));
-
-    store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
-        "invite.create", AuditOutcome.Success,
-        $"'{caller.Slug}' invited '{target.Slug}'."));
-
-    return Results.Ok(new { code, invite.ExpiresAt, slug = target.Slug });
+    return Results.Ok(InvitationIssuance.Mint(target, caller, invites, store));
 });
 
 app.MapPost("/api/invites/preview", (InvitePreviewRequest? request, HttpContext context, IInviteStore invites, IRuntimeStore store) =>
@@ -1361,13 +1349,15 @@ app.MapPost("/api/users/{slug}/organization", (string slug, MoveUserRequest? req
     return Results.Ok(new { slug, orgSlug = target });
 });
 
-// Add a teammate (an existing owner invites another user). Human-only (enforced
-// in AccessPolicy). Returns the new user's slug + bearer token for the owner to
-// hand over; the token file is also written 0600 on the box.
-app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions) =>
+// Add a teammate (an existing owner invites another user). Owner-only (enforced
+// in AccessPolicy). Setup still mints the identity token and writes its 0600 file
+// on the box because the agent and CLI need it; only the HTTP response changes,
+// so that permanent credential never travels to the owner or invitee.
+app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupService setup, IRuntimeStore store, ISessionBackend sessions, IInviteStore invites) =>
 {
     var result = setup.AddUser(request?.Name, request?.DeskProfile, request?.OrgSlug ?? Organizations.FoundingSlug,
         username: request?.Username);
+    IssuedInvitation? issued = null;
     if (result.Outcome == AddUserOutcome.Ok)
     {
         // Same as the claim: a desk created is a desk that should become usable
@@ -1380,11 +1370,14 @@ app.MapPost("/api/users", (AddUserRequest? request, HttpContext context, ISetupS
         var caller = Caller(context);
         store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
             "user.add", AuditOutcome.Success, $"Added '{result.Slug}' as a {profile.Label} desk."));
+
+        var target = store.Users.Single(user => user.Slug == result.Slug);
+        issued = InvitationIssuance.Mint(target, caller, invites, store);
     }
 
     return result.Outcome switch
     {
-        AddUserOutcome.Ok => Results.Ok(new { result.Slug, result.Token }),
+        AddUserOutcome.Ok => Results.Ok(issued),
         AddUserOutcome.Conflict => Results.Json(new { error = result.Error }, statusCode: StatusCodes.Status409Conflict),
         _ => Results.BadRequest(new { error = result.Error })
     };
@@ -3124,6 +3117,23 @@ static async Task<ApprovalStatus> WaitForApprovalAsync(IRuntimeStore store, Guid
 
 static string Shorten(string value, int limit) =>
     string.IsNullOrEmpty(value) ? "" : value.Length <= limit ? value : value[..limit] + "…";
+}
+
+public sealed record IssuedInvitation(string Slug, string Code, DateTimeOffset ExpiresAt);
+
+public static class InvitationIssuance
+{
+    public static IssuedInvitation Mint(PlatformUser target, RuntimePrincipal caller, IInviteStore invites, IRuntimeStore store)
+    {
+        // Supersede BEFORE creating, so both minting routes share the ordering and
+        // a re-issue never leaves two live secrets in two different messages.
+        invites.SupersedeLiveFor(target.Id);
+        var (invite, code) = invites.Create(target.Id, caller.Subject, TimeSpan.FromHours(72));
+        store.AppendAudit(new AuditEvent(Guid.NewGuid(), DateTimeOffset.UtcNow, caller.Subject, null,
+            "invite.create", AuditOutcome.Success,
+            $"'{caller.Slug}' invited '{target.Slug}'."));
+        return new IssuedInvitation(target.Slug, code, invite.ExpiresAt);
+    }
 }
 
 public sealed record CreateThreadRequest(string? Title, string? Message);

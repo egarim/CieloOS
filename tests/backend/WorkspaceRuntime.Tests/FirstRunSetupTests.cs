@@ -168,7 +168,7 @@ public sealed class FirstRunSetupTests
     [Fact]
     public void AddUser_creates_a_second_identity_with_its_own_token()
     {
-        Run((store, auth) =>
+        Run((store, auth, secretsDir) =>
         {
             var setup = new SetupService(store, auth);
             setup.Claim("Owner One", origin: ClaimOrigin.OnMachine);
@@ -184,6 +184,9 @@ public sealed class FirstRunSetupTests
             // home volume and its own token file, both named after it.
             Assert.Contains(store.Agents, agent => agent.Slug == "main-grace-hopper-agent");
             Assert.Equal("main-grace-hopper", auth.Authenticate(result.Token!)!.Slug);
+            var tokenPath = Path.Combine(secretsDir, "main-grace-hopper.token");
+            Assert.True(File.Exists(tokenPath));
+            Assert.Equal(result.Token, File.ReadAllText(tokenPath).Trim());
         });
     }
 
@@ -236,13 +239,16 @@ public sealed class FirstRunSetupTests
 
     // Runs the body against a fresh secrets dir + real authenticator, cleaning up.
     private static void Run(Action<IRuntimeStore, IdentityTokenAuthenticator> body, bool seedDemo = false)
+        => Run((store, auth, _) => body(store, auth), seedDemo);
+
+    private static void Run(Action<IRuntimeStore, IdentityTokenAuthenticator, string> body, bool seedDemo = false)
     {
         var secretsDir = Path.Combine(Path.GetTempPath(), $"lunos-firstrun-secrets-{Guid.NewGuid():N}");
         try
         {
             var store = new InMemoryRuntimeStore(seedDemo);
             var auth = new IdentityTokenAuthenticator(secretsDir, store);
-            body(store, auth);
+            body(store, auth, secretsDir);
         }
         finally
         {
