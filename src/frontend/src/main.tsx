@@ -1549,9 +1549,14 @@ function App() {
                   // No chat deployed: say how to get one rather than linking nowhere.
                   <div data-automation-id="chat-unconfigured">
                     <p className="muted small">
-                      No chat UI is configured on this machine. CieloOS serves an OpenAI-compatible
-                      API for one at <code>/v1/agent</code>; point a client at it and set
-                      <code> Chat__Url</code> to that client's address to link it here.
+                      No chat UI is configured on this machine — that is the default. Reinstall
+                      with <code>--chat</code> to add the bundled one, which is loopback-only
+                      because it has no login of its own: anyone who opens it acts as you.
+                    </p>
+                    <p className="muted small">
+                      Or bring your own: CieloOS serves an OpenAI-compatible API at
+                      <code> /v1/agent</code>; point a client at it and set <code>Chat__Url</code>
+                      to that client's address to link it here.
                     </p>
                   </div>
                 )}
