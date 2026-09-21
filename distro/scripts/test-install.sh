@@ -81,19 +81,11 @@ echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
   grep -q "^Chat__Url=" /etc/cielo/cielo.env \
     && { echo "a default install advertised a chat it did not install"; exit 1; } || true
 
-  # --chat still works, and still binds to loopback.
-  bash ./install.sh --ci --mode headless --chat >/dev/null 2>&1
-  test -x /usr/local/bin/cielo-chat-run || { echo "--chat installed no chat runner"; exit 1; }
-  grep -q "^CHAT_HOST=127.0.0.1" /etc/cielo/chat.env || { echo "chat is not loopback-bound"; exit 1; }
-  grep -q "^Chat__Url=http://localhost:8080/$" /etc/cielo/cielo.env || { echo "panel would show no chat link"; exit 1; }
-  grep -q "WEBUI_AUTH=False" /usr/local/bin/cielo-chat-run || { echo "chat auth expectation changed"; exit 1; }
-
-  # And a plain reinstall of a box that has one takes it away again — the upgrade
-  # path for every machine installed while chat was the default.
-  bash ./install.sh --ci --mode headless >/dev/null 2>&1
-  test ! -e /usr/local/bin/cielo-chat-run || { echo "reinstall left the chat runner behind"; exit 1; }
-  grep -q "^Chat__Url=" /etc/cielo/cielo.env \
-    && { echo "reinstall left the panel advertising a chat that is gone"; exit 1; } || true
+  # --chat, and the reinstall-takes-it-away cycle, are asserted in the --offline
+  # block below. NOT here: the runtime is running out of /opt/cielo by this point,
+  # and a reinstall copies over the binary it is executing. That is how this first
+  # failed — install.sh exited non-zero into a `>/dev/null 2>&1` and set -e killed
+  # the container script with no output at all, one line after a clean install.
 
   set +e
   cielo-selftest --claim

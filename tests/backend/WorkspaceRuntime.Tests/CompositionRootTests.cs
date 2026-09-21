@@ -20,11 +20,9 @@ namespace WorkspaceRuntime.Tests;
 //
 // So these tests start the REAL composition root — the one systemd starts — and
 // assert things that can only be true of it.
-public class CompositionRootTests : IClassFixture<CompositionRootTests.Host>
+public abstract class CompositionRootTests
 {
-    private readonly Host host;
-
-    public CompositionRootTests(Host host) => this.host = host;
+    protected abstract CompositionHost Host { get; }
 
     // The direct test of the defect. Enumerating the endpoints is exactly what the
     // routing middleware does on first request, so this throws for the same reason
@@ -33,17 +31,20 @@ public class CompositionRootTests : IClassFixture<CompositionRootTests.Host>
     [Fact]
     public void Every_endpoint_can_resolve_its_services()
     {
-        var endpoints = host.Services.GetRequiredService<EndpointDataSource>().Endpoints;
+        var endpoints = Host.Services.GetRequiredService<EndpointDataSource>().Endpoints;
         Assert.NotEmpty(endpoints);
     }
 
     // And the symptom, from the outside, over HTTP. This is the request the panel
-    // makes before it renders anything and the one cielo-claim polls after install,
-    // so it is the single request whose failure means "the machine is dead".
+    // makes before it renders anything and the one the install-time claim polls, so
+    // it is the single request whose failure means "the machine is dead". It also
+    // walks the auth middleware, which resolves several services by hand out of
+    // RequestServices rather than as endpoint parameters — those cannot be caught by
+    // enumerating endpoints, and are covered only because something makes a request.
     [Fact]
     public async Task Setup_status_answers()
     {
-        using var client = host.CreateClient();
+        using var client = Host.CreateClient();
 
         var response = await client.GetAsync("/api/setup/status");
 
@@ -54,22 +55,68 @@ public class CompositionRootTests : IClassFixture<CompositionRootTests.Host>
             + "but a success here is a box that never comes up.");
     }
 
-    public sealed class Host : WebApplicationFactory<Program>
+    public abstract class CompositionHost : WebApplicationFactory<Program>
     {
+        protected abstract IEnumerable<KeyValuePair<string, string?>> Settings { get; }
+
         protected override IHost CreateHost(IHostBuilder builder)
         {
-            // The memory provider so the test needs no database, no /var/lib/cielo and
-            // no migration. It is a real configuration of the real Program: both
-            // branches of every store registration are reachable this way, and a
-            // service missing from BOTH — which is what happened — fails either way.
             builder.UseEnvironment("Development");
             builder.ConfigureHostConfiguration(config => config.AddInMemoryCollection(
-                new Dictionary<string, string?>
-                {
-                    ["Database:Provider"] = "memory",
-                    ["Runtime:SeedDemo"] = "false"
-                }));
+                Settings.Append(new KeyValuePair<string, string?>("Runtime:SeedDemo", "false"))));
             return base.CreateHost(builder);
+        }
+    }
+}
+
+// The provider a developer runs and the fast one. Needs no database, no
+// /var/lib/cielo and no migration.
+public sealed class MemoryCompositionRootTests
+    : CompositionRootTests, IClassFixture<MemoryCompositionRootTests.MemoryHost>
+{
+    public MemoryCompositionRootTests(MemoryHost host) => Host = host;
+
+    protected override CompositionHost Host { get; }
+
+    public sealed class MemoryHost : CompositionHost
+    {
+        protected override IEnumerable<KeyValuePair<string, string?>> Settings =>
+            [new("Database:Provider", "memory")];
+    }
+}
+
+// The provider install.sh actually configures. Running only the memory one would
+// leave a service registered in a single branch of that switch undetectable — the
+// bug that prompted these tests was missing from both branches and so would have
+// been caught either way, but the next one need not be.
+public sealed class SqliteCompositionRootTests
+    : CompositionRootTests, IClassFixture<SqliteCompositionRootTests.SqliteHost>
+{
+    public SqliteCompositionRootTests(SqliteHost host) => Host = host;
+
+    protected override CompositionHost Host { get; }
+
+    public sealed class SqliteHost : CompositionHost
+    {
+        // A file, not :memory:, because EF opens and closes connections per context
+        // and an in-memory SQLite database dies with the first one.
+        private readonly string databasePath =
+            Path.Combine(Path.GetTempPath(), $"cielo-composition-{Guid.NewGuid():N}.db");
+
+        protected override IEnumerable<KeyValuePair<string, string?>> Settings =>
+        [
+            new("Database:Provider", "sqlite"),
+            new("Database:SqlitePath", databasePath),
+            // Migrations are the installed box's job; this test is about whether the
+            // services resolve, so let EF create the schema and keep it hermetic.
+            new("Database:EnsureCreated", "true")
+        ];
+
+        protected override void Dispose(bool disposing)
+        {
+            base.Dispose(disposing);
+            if (!disposing) return;
+            try { File.Delete(databasePath); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         }
     }
 }
