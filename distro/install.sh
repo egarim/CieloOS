@@ -6,7 +6,7 @@
 #   sudo ./install.sh --mode app             # your own machine, localhost only
 #   sudo ./install.sh --mode kiosk           # boot into a fullscreen panel browser
 #
-# Options: --mode <headless|app|kiosk>  --port <5148>  --no-chat
+# Options: --mode <headless|app|kiosk>  --port <5148>  --chat
 #
 # The three modes differ ONLY in bind address and whether a kiosk browser is
 # installed — the runtime is identical. The first-owner claim is loopback-only, so
@@ -22,7 +22,19 @@ PORT="5148"
 CI=0        # --ci: container-safe install (no systemd/linger, minimal deps) for automated tests
 SKIP_IMAGES=0 # --skip-images: do not build the session images (faster install; sessions
             # will not start until someone builds them)
-NO_CHAT=0   # --no-chat: do not install the Open WebUI chat service or link it from the panel
+# The Open WebUI chat service is OFF by default, and --chat opts back in.
+#
+# It was installed by default because the agent endpoint had no client and the
+# runtime had no login: WEBUI_AUTH=False made whoever opened the page the owner,
+# which is why it is pinned to loopback. That second half is no longer true. The
+# runtime now has a claim, passwords, sessions, revocable keys, invitations and
+# suspension — so a default install no longer has any reason to stand up an
+# unauthenticated page holding a live API key, plus the ~1 GB image behind it.
+#
+# --no-chat still parses. It is the documented flag in older READMEs and in the
+# shell history of anyone who already installed this, and a hard error there would
+# be a worse answer than a no-op that was already what they asked for.
+NO_CHAT=1   # --chat: install the Open WebUI chat service and link it from the panel
 OFFLINE=0   # --offline: install into a not-yet-running system (autoinstall in-target/chroot):
             # enable units + linger via files, never start/daemon-reload — first boot activates.
 while [[ $# -gt 0 ]]; do
@@ -32,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --ci) CI=1; shift ;;
     --offline) OFFLINE=1; shift ;;
     --skip-images) SKIP_IMAGES=1; shift ;;
+    --chat) NO_CHAT=0; shift ;;
     --no-chat) NO_CHAT=1; shift ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
@@ -897,23 +910,36 @@ install -m 0755 "$BUNDLE/cielo-selftest.sh" /usr/local/bin/cielo-selftest
 
 echo "==> [8/9] Chat UI (Open WebUI against /v1/agent)"
 # The agent endpoint has existed since V0.6 and nothing ever started a client for
-# it, so the best chat in the product was invisible (issue #8). This installs one.
+# it, so the best chat in the product was invisible (issue #8). This installs one
+# when asked for with --chat.
 #
 # Loopback only, deliberately. WEBUI_AUTH=False makes whoever opens the page the
-# owner, because the runtime has no login yet (issue #9) — so it must not be
-# reachable from the network. Change CHAT_HOST in /etc/cielo/chat.env only once
-# that is no longer true; on a headless box, tunnel instead:
+# owner — it has no login of its own, so it must not be reachable from the
+# network. Change CHAT_HOST in /etc/cielo/chat.env only once that is no longer
+# true; on a headless box, tunnel instead:
 #   ssh -N -L 8080:127.0.0.1:8080 you@box
 if [[ "$NO_CHAT" -eq 1 ]]; then
-  # Opting out has to UNDO a previous install, not merely skip this one: a running
-  # cielo-chat is an unauthenticated page holding the owner's token, and leaving it
-  # up on a machine whose operator just said "no chat" would be the worst outcome.
+  # This runs on a default install, so it is also the UPGRADE path: a box that was
+  # installed back when chat was the default has a running cielo-chat, and leaving
+  # it up would mean the flip silently did nothing on every machine that already
+  # had the thing we are turning off. Skipping is not the same as undoing.
+  #
+  # Everything here is a no-op on a machine that never had a chat. Establish which
+  # of the two this is BEFORE tearing anything down, so the install can say
+  # "removed the chat you had" rather than making an operator guess.
+  # An if, not `[[ ... ]] && had_chat=1`: under `set -e` that one-liner aborts the
+  # whole install on a fresh box, because a false test is the last command of the
+  # list. The two existing uses in this file are only safe for their `|| true`.
+  had_chat=0
+  if [[ -e /etc/systemd/system/cielo-chat.service || -e /usr/local/bin/cielo-chat-run ]]; then
+    had_chat=1
+  fi
   if [[ "$LIVE" -eq 1 ]]; then
     systemctl disable --now cielo-chat.service >/dev/null 2>&1 || true
     # as_cielo, not a bare runuser: this one is || true, so a "cannot chdir" would
     # not stop the install - it would leave the container running and report the
-    # opt-out as done. An unauthenticated page holding the owner's token, still up,
-    # on a machine whose operator just asked for it to be gone.
+    # removal as done. An unauthenticated page holding the owner's token, still up,
+    # on a machine that just asked for it to be gone.
     as_cielo podman rm -f cielo-chat >/dev/null 2>&1 || true
   fi
   rm -f /etc/systemd/system/cielo-chat.service \
@@ -922,8 +948,13 @@ if [[ "$NO_CHAT" -eq 1 ]]; then
   # The panel must stop advertising a chat that is no longer there.
   sed -i '/^Chat__Url=/d' /etc/cielo/cielo.env 2>/dev/null || true
   [[ "$LIVE" -eq 1 ]] && systemctl daemon-reload || true
-  echo "    (--no-chat: not installed; any previous chat service removed)"
-  echo "    (its data volume, cielo-chat-data, is left alone — remove it yourself if you mean to)"
+  if [[ "$had_chat" -eq 1 ]]; then
+    echo "    removed the chat this box was running (it is off by default now)"
+    echo "    its data volume, cielo-chat-data, is left alone — remove it yourself if you mean to"
+    echo "    to keep it, reinstall with --chat"
+  else
+    echo "    (not installed — pass --chat if you want it: ~1 GB image, no login of its own)"
+  fi
 else
   install -d /etc/cielo
   if [[ ! -f /etc/cielo/chat.env ]]; then

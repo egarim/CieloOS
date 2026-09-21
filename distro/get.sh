@@ -13,11 +13,15 @@
 #   CIELO_VERSION=v0.1.10           (default: the latest release)
 #   CIELO_URL=https://.../x.tar.gz  (a specific bundle; skips the release lookup)
 #   CIELO_PORT=5148
+#   CIELO_CHAT=1                    (also install the Open WebUI chat; off by default)
 set -euo pipefail
 
 REPO="${CIELO_REPO:-egarim/CieloOS}"
 MODE="${CIELO_MODE:-headless}"
 PORT="${CIELO_PORT:-5148}"
+# This script forwarded exactly --mode and --port, so install.sh's chat flag was
+# unreachable from the one-line install — the only path the README documents.
+CHAT="${CIELO_CHAT:-0}"
 
 die() { echo "cielo: $*" >&2; exit 1; }
 
@@ -76,7 +80,18 @@ echo "==> Unpacking"
 tar xzf "$WORK/cielo.tar.gz" -C "$WORK" || die "the download is not a readable tarball."
 [ -x "$WORK/cielo/install.sh" ] || { KEEP=1; die "this bundle has no install.sh — left it in $WORK"; }
 
-echo "==> Installing (--mode $MODE --port $PORT)"
+CHAT_ARGS=""
+case "$CHAT" in
+  1|true|yes|on) CHAT_ARGS="--chat" ;;
+  0|false|no|off|"") ;;
+  *) die "CIELO_CHAT must be 1 or 0, got: $CHAT" ;;
+esac
+
+echo "==> Installing (--mode $MODE --port $PORT $CHAT_ARGS)"
 KEEP=1
-"$WORK/cielo/install.sh" --mode "$MODE" --port "$PORT"
+# Unquoted on purpose: quoted, an empty CHAT_ARGS becomes an empty argument and
+# install.sh exits 2 on "Unknown option: ". The value is one of the fixed strings
+# the case above allows, so there is nothing here to word-split badly.
+# shellcheck disable=SC2086
+"$WORK/cielo/install.sh" --mode "$MODE" --port "$PORT" $CHAT_ARGS
 rm -rf "$WORK"

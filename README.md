@@ -61,7 +61,8 @@ Human / Agent ─▶ SubmitAsync ─▶ ownership + policy + input-grant ─▶ 
 - **Input grant** — a human leases input on a session for N minutes; while live, the agent **types autonomously**; revocable, time-boxed, audited (the V0.6 consent model).
 
 **Chat**
-- **Open WebUI**, installed and started by `install.sh` against the OpenAI-compatible `/v1/agent` endpoint and authenticated as the owner: every message runs the console loop, so the agent uses its tools and operates the OS, and the reply streams back as it works. Loopback-only until there is a login (issue #9) — tunnel to reach it from elsewhere.
+- **Open WebUI**, optional — `install.sh --chat`, or `CIELO_CHAT=1` on the one-liner. It runs against the OpenAI-compatible `/v1/agent` endpoint authenticated as the owner: every message runs the console loop, so the agent uses its tools and operates the OS, and the reply streams back as it works.
+- It is **off by default**, and a plain reinstall removes it from a box that has one. It has no login of its own — `WEBUI_AUTH=False` makes whoever opens the page the owner — so it is pinned to loopback and you tunnel to reach it. That was a reasonable default when the runtime had no accounts; now that it has claim, passwords, sessions, revocable keys and invitations, standing up an unauthenticated page holding a live API key is a choice to make deliberately rather than one to inherit.
 
 **Model spend — metered and capped**
 - Every model call is recorded with the tokens it used, attributed the way actions are: a human, acting through an agent. The panel's Models tab shows spend for the desk and the machine this month, with recent calls.

@@ -58,6 +58,13 @@ model story is provider-free (add your own key in the Models tab, no restart).
   Still unverified: the service actually starting on a real first boot (the image
   pull happens there), and a full chat round-trip through Open WebUI's own UI —
   the wiring was verified against `/v1/agent/models` with the same token instead.
+  **Superseded 2026-09-21: the chat no longer ships with the installer.** It is
+  `--chat` / `CIELO_CHAT=1`, and a default install removes it from a box that has
+  one. It shipped by default because the runtime had no login and an
+  unauthenticated page was the only chat there could be; claim, passwords,
+  sessions, revocable keys and invitations landed since, so that premise is gone
+  and an unauthenticated page holding a live API key is now an opt-in. Everything
+  verified above still stands for a box installed with `--chat`.
 - ✅ **The desktop looks like CieloOS (2026-08-24).** The session image seeds a
   light, macOS-adjacent look from Ubuntu packages only (Orchis-Light, Papirus-Light,
   Breeze_Light, Inter, Plank) plus a vector wallpaper rasterised at build. Verified

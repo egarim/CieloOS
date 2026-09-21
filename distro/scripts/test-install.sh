@@ -73,13 +73,27 @@ echo "==> install.sh --ci + self-test in ubuntu:24.04 ($PLATFORM)"
   done
   if [ "$ok" != "1" ]; then echo "RUNTIME NEVER BECAME READY:"; tail -40 /tmp/runtime.log; exit 1; fi
 
-  # The chat service is what makes /v1/agent reachable by a human, and every part
-  # of it is invisible until first boot — so assert the pieces exist and that the
-  # chat is bound to loopback, since it has no login of its own yet.
-  test -x /usr/local/bin/cielo-chat-run || { echo "no chat runner installed"; exit 1; }
+  # A default install ships no chat. It has no login of its own — whoever opens
+  # the page is the owner — and the runtime now has real accounts, so standing one
+  # up uninvited is not a neutral default. Assert the absence, not just the flag:
+  # the way this regresses is a default that quietly comes back.
+  test ! -e /usr/local/bin/cielo-chat-run || { echo "a default install stood up a chat"; exit 1; }
+  grep -q "^Chat__Url=" /etc/cielo/cielo.env \
+    && { echo "a default install advertised a chat it did not install"; exit 1; } || true
+
+  # --chat still works, and still binds to loopback.
+  bash ./install.sh --ci --mode headless --chat >/dev/null 2>&1
+  test -x /usr/local/bin/cielo-chat-run || { echo "--chat installed no chat runner"; exit 1; }
   grep -q "^CHAT_HOST=127.0.0.1" /etc/cielo/chat.env || { echo "chat is not loopback-bound"; exit 1; }
   grep -q "^Chat__Url=http://localhost:8080/$" /etc/cielo/cielo.env || { echo "panel would show no chat link"; exit 1; }
   grep -q "WEBUI_AUTH=False" /usr/local/bin/cielo-chat-run || { echo "chat auth expectation changed"; exit 1; }
+
+  # And a plain reinstall of a box that has one takes it away again — the upgrade
+  # path for every machine installed while chat was the default.
+  bash ./install.sh --ci --mode headless >/dev/null 2>&1
+  test ! -e /usr/local/bin/cielo-chat-run || { echo "reinstall left the chat runner behind"; exit 1; }
+  grep -q "^Chat__Url=" /etc/cielo/cielo.env \
+    && { echo "reinstall left the panel advertising a chat that is gone"; exit 1; } || true
 
   set +e
   cielo-selftest --claim
@@ -141,30 +155,40 @@ echo "==> install.sh --offline leaves a bootable system ($PLATFORM)"
   test -L /var/lib/cielo/.config/systemd/user/default.target.wants/podman-restart.service \
     || { echo "podman-restart not enabled for cielo: sessions would not survive a reboot"; exit 1; }
   test -f /var/lib/systemd/linger/cielo || { echo "no linger marker"; exit 1; }
-  test -L /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
-    || { echo "chat not enabled for first boot"; exit 1; }
+  test ! -e /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
+    || { echo "a default offline install enabled a chat for first boot"; exit 1; }
 
   # The ONLYOFFICE package must match the target, not the Containerfile default.
   want=amd64; [ "$(dpkg --print-architecture)" = arm64 ] && want=arm64
   grep -q "onlyoffice-desktopeditors_${want}.deb" /usr/local/bin/cielo-build-session-images \
     || { echo "image builder would install the wrong ONLYOFFICE architecture"; exit 1; }
 
-  # A box whose chat was moved must be advertised where it actually listens, or
-  # the panel links somewhere nothing is serving.
+  # --chat enables it for first boot, and a box whose chat was moved must be
+  # advertised where it actually listens, or the panel links somewhere nothing is
+  # serving.
+  bash ./install.sh --offline --mode headless --chat >/dev/null 2>&1
+  test -L /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
+    || { echo "--chat did not enable the chat for first boot"; exit 1; }
   sed -i "s/^CHAT_PORT=.*/CHAT_PORT=9099/" /etc/cielo/chat.env
-  bash ./install.sh --offline --mode headless >/dev/null 2>&1
+  bash ./install.sh --offline --mode headless --chat >/dev/null 2>&1
   grep -q "^Chat__Url=http://localhost:9099/$" /etc/cielo/cielo.env \
     || { echo "reinstall advertised the wrong chat address: $(grep '^Chat__Url=' /etc/cielo/cielo.env)"; exit 1; }
 
-  # Opting out must UNDO, not just skip: this box already has the chat installed.
-  bash ./install.sh --offline --mode headless --no-chat >/dev/null 2>&1
-  test ! -e /usr/local/bin/cielo-chat-run || { echo "--no-chat left the chat runner behind"; exit 1; }
+  # Dropping the flag must UNDO, not just skip: this box already has the chat
+  # installed, and that is every machine installed while chat was the default.
+  bash ./install.sh --offline --mode headless >/dev/null 2>&1
+  test ! -e /usr/local/bin/cielo-chat-run || { echo "reinstall left the chat runner behind"; exit 1; }
   test ! -e /etc/systemd/system/multi-user.target.wants/cielo-chat.service \
-    || { echo "--no-chat left the chat enabled for first boot"; exit 1; }
+    || { echo "reinstall left the chat enabled for first boot"; exit 1; }
   grep -q "^Chat__Url=" /etc/cielo/cielo.env \
-    && { echo "--no-chat left the panel advertising a chat that is gone"; exit 1; } || true
+    && { echo "reinstall left the panel advertising a chat that is gone"; exit 1; } || true
 
-  echo "  offline install OK (image build + restart policy deferred to first boot, --no-chat undoes chat)"
+  # --no-chat is kept as a no-op alias so an older README or a shell history does
+  # not fail. Prove it parses rather than trusting that it does.
+  bash ./install.sh --offline --mode headless --no-chat >/dev/null 2>&1 \
+    || { echo "--no-chat no longer parses"; exit 1; }
+
+  echo "  offline install OK (image build + restart policy deferred to first boot, chat off unless --chat)"
 '
 
 

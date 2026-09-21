@@ -46,6 +46,15 @@ exec podman run --rm --replace --name cielo-chat \
 
 `--network host` is there on purpose — the comment at :553-554 says "so the container reaches a loopback-bound runtime" — and it means the container shares the host's network namespace. Its `127.0.0.1` *is* Kestrel's `127.0.0.1`. `WEBUI_AUTH=False` is also on purpose, and install.sh:466-467 says why: "whoever opens the page the owner". So a third-party web application on a mutable tag (`ghcr.io/open-webui/open-webui:main`, re-pulled on every start), holding the owner's credential, with no login of its own, is a genuine loopback peer to this runtime. Not a forged header — a real TCP peer at `127.0.0.1`.
 
+**Update, 2026-09-21 — the chat is now opt-in (`--chat`), off by default.** That
+removes this particular loopback peer from a default install, and it does not
+change the conclusion below. The argument never depended on the chat existing; the
+chat was the sharpest available proof that a loopback peer can be something the
+runtime does not trust. Rootless session containers still run in the host network
+namespace, `--chat` still exists and boxes still run it, and the reasoning has to
+hold for the machine that turns it on. Read what follows as "a loopback peer may be
+untrusted", which is all `OwnerOnly` ever needed.
+
 Every gate that reads the raw peer admits it:
 
 | Program.cs | Route | What loopback authorises |

@@ -84,8 +84,8 @@ Health check from a second Ubuntu shell while it runs:
 
 ## Optional: the chat UI
 
-`install.sh` installs Open WebUI as a service, but `run.sh` has no systemd, so under
-WSL you start it yourself. It needs podman (see the next section) and your owner
+`install.sh --chat` installs Open WebUI as a service, but `run.sh` has no systemd, so
+under WSL you start it yourself. It needs podman (see the next section) and your owner
 token — the panel's own token, which `.data/secrets/<you>.token` also holds:
 
 ```bash
