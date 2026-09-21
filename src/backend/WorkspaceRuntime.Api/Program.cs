@@ -188,6 +188,17 @@ builder.Services.AddSingleton<ISessionStore>(sp => databaseProvider == "memory"
 builder.Services.AddSingleton<IApiKeyStore>(sp => databaseProvider == "memory"
     ? new InMemoryApiKeyStore()
     : new EfApiKeyStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
+// Added with the stores and the routes; this line was not. Missing it does not
+// break the invite routes alone — minimal APIs infer parameters when the endpoint
+// data source is first built, an unregistered one throws there, and that happens
+// inside EndpointRoutingMiddleware on the FIRST request of any kind. So the whole
+// runtime answered 500 to /api/setup/status: a dead panel, from one missing line.
+//
+// Nothing in 581 tests failed, because the test host composes its own services.
+// This was found by installing the thing.
+builder.Services.AddSingleton<IInviteStore>(sp => databaseProvider == "memory"
+    ? new InMemoryInviteStore()
+    : new EfInviteStore(sp.GetRequiredService<IDbContextFactory<RuntimeDbContext>>()));
 builder.Services.AddSingleton<ITokenLedger>(sp => databaseProvider == "memory"
     // The memory provider registers no DbContext at all, and the loops ask the
     // ledger about the budget on every step — an unresolvable service there would
@@ -3245,3 +3256,9 @@ public static class ClaimedFiles
         return end > start ? text[start..end] : "";
     }
 }
+
+// Top-level statements compile to an internal Program, which WebApplicationFactory
+// cannot name. This makes the real composition root reachable from the test project
+// so it can be started the way systemd starts it, rather than re-created in a test
+// fixture that registers its own services and therefore cannot notice a missing one.
+public partial class Program;
