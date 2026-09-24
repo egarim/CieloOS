@@ -130,7 +130,18 @@ cp "$ROOT/LICENSE" "$STAGE/LICENSE"
 # the one-liner install.
 cp "$ROOT/distro/scripts/cielo-install-ui.sh" "$STAGE/cielo-install-ui.sh"
 cp "$ROOT/distro/scripts/cielo-first-run.sh" "$STAGE/cielo-first-run.sh"
-chmod +x "$STAGE/install.sh" "$STAGE/run.sh" "$STAGE/cielo-selftest.sh" "$STAGE/cielo-install-ui.sh" "$STAGE/cielo-first-run.sh"
+# The terminal counterpart to that page, for a machine installing on tty1 with no
+# browser yet: install-quiet.sh runs install.sh behind the animation. Frames only,
+# not their generator — src/ is a build tool, not something the target needs.
+cp "$ROOT/distro/install-quiet.sh" "$STAGE/install-quiet.sh"
+cp "$ROOT/distro/scripts/cielo-install-tui.sh" "$STAGE/cielo-install-tui.sh"
+mkdir -p "$STAGE/cielo-install-frames"
+cp "$ROOT/distro/scripts/cielo-install-frames"/*.ans "$STAGE/cielo-install-frames/"
+# The LUNOS splash: day-to-night over the city, held on the night loop.
+cp "$ROOT/distro/scripts/lunos-splash.sh" "$STAGE/lunos-splash.sh"
+mkdir -p "$STAGE/lunos-splash-frames"
+cp "$ROOT/distro/scripts/lunos-splash-frames"/*.ans.gz "$STAGE/lunos-splash-frames/"
+chmod +x "$STAGE/install.sh" "$STAGE/run.sh" "$STAGE/cielo-selftest.sh" "$STAGE/cielo-install-ui.sh" "$STAGE/cielo-first-run.sh" "$STAGE/install-quiet.sh" "$STAGE/cielo-install-tui.sh" "$STAGE/lunos-splash.sh"
 
 TARBALL="$OUT/cielo-$ARCH.tar.gz"
 echo "==> Packing $TARBALL"

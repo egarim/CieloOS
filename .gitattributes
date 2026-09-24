@@ -1,0 +1,10 @@
+# ANSI art frames are escape sequences, not prose. Git detected them as text, so a
+# Windows checkout would rewrite every LF to CRLF and the animation would render as
+# a shredded screen — on a machine where nobody would think to look, because the
+# frames are only ever played on a Linux target.
+*.ans -text
+*.ans.gz binary
+
+# Shell scripts that run on the installed box. A CRLF shebang line is `#!/usr/bin/env bash\r`,
+# which fails with the famously unhelpful "bad interpreter: No such file or directory".
+*.sh text eol=lf

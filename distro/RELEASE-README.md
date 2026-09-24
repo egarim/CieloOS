@@ -11,6 +11,17 @@ tar xzf cielo-linux-x64.tar.gz          # or cielo-linux-arm64.tar.gz on ARM
 sudo ./cielo/install.sh --mode headless   # or: app | kiosk
 ```
 
+Prefer a quiet install? `install-quiet.sh` takes the same options and runs
+`install.sh` behind an animated screen — the apt and podman noise goes to
+`/var/log/cielo-install.log`, and the terminal shows CieloOS assembling itself,
+one box per step. The closing banner (and any failure, with the tail of the log)
+still lands on the real terminal.
+
+```
+sudo ./cielo/install-quiet.sh --mode kiosk
+CIELO_TUI=0 sudo ./cielo/install-quiet.sh --mode kiosk   # plain output instead
+```
+
 | Mode | For | You see the panel via | Binds |
 |------|-----|-----------------------|-------|
 | `app` | your own machine | a local browser at `http://127.0.0.1:5148/` | loopback |
