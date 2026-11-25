@@ -35,12 +35,14 @@ SKIP_IMAGES=0 # --skip-images: do not build the session images (faster install; 
 # shell history of anyone who already installed this, and a hard error there would
 # be a worse answer than a no-op that was already what they asked for.
 NO_CHAT=1   # --chat: install the Open WebUI chat service and link it from the panel
+FRESH_HOST=0 # --fresh-host: refuse existing account or ambiguous/conflicting subids
 OFFLINE=0   # --offline: install into a not-yet-running system (autoinstall in-target/chroot):
             # enable units + linger via files, never start/daemon-reload — first boot activates.
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --mode) MODE="${2:?}"; shift 2 ;;
     --port) PORT="${2:?}"; shift 2 ;;
+    --fresh-host) FRESH_HOST=1; shift ;;
     --ci) CI=1; shift ;;
     --offline) OFFLINE=1; shift ;;
     --skip-images) SKIP_IMAGES=1; shift ;;
@@ -86,6 +88,20 @@ enable_unit() {
 if [[ "$(id -u)" -ne 0 ]]; then echo "Run as root (sudo)." >&2; exit 1; fi
 BUNDLE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 test -x "$BUNDLE/bin/WorkspaceRuntime.Api" || { echo "Run this from the unpacked bundle (bin/WorkspaceRuntime.Api missing)." >&2; exit 1; }
+
+# Opt-in strict guard for existing Ubuntu hosts, before package or account changes.
+if [[ "$FRESH_HOST" -eq 1 ]]; then
+  source "$BUNDLE/install-conflicts.sh"
+  account=""
+  if account=$(getent passwd cielo); then
+    [[ -n "$account" ]] || { echo "Empty account lookup result" >&2; exit 1; }
+  else
+    rc=$?
+    [[ "$rc" -eq 2 ]] || { echo "Account lookup failed ($rc)" >&2; exit 1; }
+    account=""
+  fi
+  fresh_host_guard "$account" /etc/subuid /etc/subgid || exit 1
+fi
 
 # app/kiosk are single-machine → bind loopback; headless → bind all interfaces.
 if [[ "$MODE" == "headless" ]]; then BIND="http://0.0.0.0:$PORT"; else BIND="http://127.0.0.1:$PORT"; fi
