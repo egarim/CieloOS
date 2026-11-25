@@ -2,6 +2,8 @@ name: Host preflight smoke
 on:
   pull_request:
     paths:
+      - 'distro/install.sh'
+      - 'distro/scripts/build-release.sh'
       - 'distro/preflight.sh'
       - 'distro/cpu-flags.sh'
       - 'distro/install-conflicts.sh'
@@ -21,3 +23,5 @@ jobs:
       - run: bash tests/preflight-cpu-fixtures.sh
 
       - run: bash tests/preflight-conflicts.sh
+
+      - run: bash -n distro/install.sh && bash -n distro/scripts/build-release.sh
