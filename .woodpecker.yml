@@ -1,0 +1,17 @@
+steps:
+  - name: backend
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    commands:
+      - bash scripts/ci/test.sh backend
+  - name: frontend
+    image: node:22-bookworm
+    commands:
+      - bash scripts/ci/test.sh frontend
+  - name: preflight
+    image: ubuntu:24.04
+    commands:
+      - bash scripts/ci/test.sh preflight
+when:
+  - event: pull_request
+  - event: push
+    branch: main

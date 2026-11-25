@@ -31,7 +31,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: dotnet test
-        run: dotnet test WorkspaceRuntime.slnx --nologo -v minimal
+        run: bash scripts/ci/test.sh backend
 
   frontend:
     name: Frontend build and tests
@@ -45,29 +45,5 @@ jobs:
           cache: npm
           cache-dependency-path: src/frontend/package-lock.json
 
-      - name: npm ci
-        working-directory: src/frontend
-        run: npm ci --no-audit --no-fund
-
-      # Build before test: a type error or a missing entry is a failure the test
-      # suite would not notice, because the tests import modules rather than
-      # building the app.
-      - name: npm run build
-        working-directory: src/frontend
-        run: npm run build
-
-      - name: npm test
-        working-directory: src/frontend
-        run: npm test
-
-      # Both entries must be emitted. The vitest guard checks the config resolves
-      # them; this checks the build actually produced them, which is a different
-      # claim and the one an install depends on.
-      - name: Both panel entries were emitted
-        working-directory: src/frontend
-        run: |
-          for page in index.html portal.html; do
-            test -f "dist/$page" || { echo "dist/$page was not built" >&2; exit 1; }
-          done
-          ls dist/assets/portal-*.js >/dev/null 2>&1 || { echo "no portal bundle in dist/assets" >&2; exit 1; }
-          ls dist/assets/main-*.js >/dev/null 2>&1 || { echo "no admin panel bundle in dist/assets" >&2; exit 1; }
+      - name: Frontend build and tests
+        run: bash scripts/ci/test.sh frontend
