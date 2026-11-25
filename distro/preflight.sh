@@ -14,10 +14,8 @@ available=$(awk '$1=="MemAvailable:" {print $2}' /proc/meminfo)
 swap=$(awk '$1=="SwapTotal:" {print $2}' /proc/meminfo)
 disk=$(df -Pk / | awk 'NR==2 {print $4}')
 # Require every reported logical CPU to have a flag, not just the first.
-has_flag() {
-  awk -v flag="$1" '/^flags[[:space:]]*:/ {n++; found=0; for(i=2;i<=NF;i++) if($i==flag) found=1; if(found) ok++} END {exit !(n>0 && n==ok)}' /proc/cpuinfo
-}
-flag_value() { if has_flag "$1"; then printf yes; else printf no; fi; }
+source "$(dirname "${BASH_SOURCE[0]}")/cpu-flags.sh"
+flag_value() { if has_flag /proc/cpuinfo "$1"; then printf yes; else printf no; fi; }
 avx=$(flag_value avx); avx2=$(flag_value avx2); fma=$(flag_value fma)
 printf 'os=%s\nversion=%s\narchitecture=%s\n' "$os" "$version" "$arch"
 printf 'ram_kib=%s\navailable_kib=%s\nswap_kib=%s\nroot_free_kib=%s\n' "$mem" "$available" "$swap" "$disk"
