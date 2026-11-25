@@ -12,3 +12,19 @@ subid_status() {
 account_status() {
   if [[ -n "$1" ]]; then echo existing-review; else echo not-found; fi
 }
+
+# Strict fresh-host gate: existing installations and ambiguous allocations require
+# manual review. No writes, and no automatic adoption of accounts.
+fresh_host_guard() {
+  local account="$1" uid_status gid_status
+  if [[ -n "$account" ]]; then
+    echo "Existing cielo account: refusing fresh-host install." >&2
+    return 1
+  fi
+  uid_status=$(subid_status "$2")
+  gid_status=$(subid_status "$3")
+  if [[ "$uid_status" != clear || "$gid_status" != clear ]]; then
+    echo "Subordinate ID allocation requires review: uid=$uid_status gid=$gid_status" >&2
+    return 1
+  fi
+}

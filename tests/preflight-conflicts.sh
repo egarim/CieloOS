@@ -21,3 +21,12 @@ printf 'alice:invalid:65536\n' > "$tmp/subid"; check unknown
 [[ "$(account_status '')" == not-found ]]
 [[ "$(account_status 'cielo:x:998:998::/home/cielo:/bin/bash')" == existing-review ]]
 echo 'Installer conflict fixtures passed'
+
+: > "$tmp/subid"
+: > "$tmp/subgid"
+fresh_host_guard '' "$tmp/subid" "$tmp/subgid"
+if fresh_host_guard 'cielo:x:998:998::/home/cielo:/bin/bash' "$tmp/subid" "$tmp/subgid"; then exit 1; fi
+printf 'alice:100000:65536\n' > "$tmp/subgid"
+if fresh_host_guard '' "$tmp/subid" "$tmp/subgid"; then exit 1; fi
+if fresh_host_guard '' "$tmp/missing" "$tmp/subid"; then exit 1; fi
+echo 'Fresh host guard fixtures passed'

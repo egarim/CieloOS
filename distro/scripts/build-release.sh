@@ -110,6 +110,7 @@ cp -a "$ROOT/distro/models/." "$STAGE/models/"
 
 echo "==> Staging installer + foreground launcher + service unit + self-test"
 cp "$ROOT/distro/install.sh" "$STAGE/install.sh"
+cp "$ROOT/distro/install-conflicts.sh" "$STAGE/install-conflicts.sh"
 cp "$ROOT/distro/run.sh" "$STAGE/run.sh"
 cp "$ROOT/distro/scripts/cielo-selftest.sh" "$STAGE/cielo-selftest.sh"
 cp "$ROOT/distro/services/cielo-runtime.service" "$STAGE/systemd/cielo-runtime.service"
