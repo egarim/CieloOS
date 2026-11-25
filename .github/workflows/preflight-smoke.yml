@@ -4,6 +4,8 @@ on:
     paths:
       - 'distro/preflight.sh'
       - 'distro/cpu-flags.sh'
+      - 'distro/install-conflicts.sh'
+      - 'tests/preflight-conflicts.sh'
       - 'tests/preflight-cpu-fixtures.sh'
       - 'tests/preflight-smoke.sh'
       - '.github/workflows/preflight-smoke.yml'
@@ -17,3 +19,5 @@ jobs:
       - run: bash tests/preflight-smoke.sh
 
       - run: bash tests/preflight-cpu-fixtures.sh
+
+      - run: bash tests/preflight-conflicts.sh
