@@ -35,4 +35,10 @@ fi
 for cmd in podman systemctl curl; do
   if command -v "$cmd" >/dev/null 2>&1; then printf '%s=present\n' "$cmd"; else printf '%s=missing\n' "$cmd"; fi
 done
+source "$(dirname "${BASH_SOURCE[0]}")/install-conflicts.sh"
+account=$(getent passwd cielo || true)
+uid=$(cut -d: -f3 <<<"$account")
+printf 'service_account=%s\n' "$(account_status "$account")"
+printf 'subuid=%s\n' "$(subid_status /etc/subuid "$uid")"
+printf 'subgid=%s\n' "$(subid_status /etc/subgid "$uid")"
 echo 'readiness=inventory-only'
